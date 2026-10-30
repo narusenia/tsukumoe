@@ -4,7 +4,7 @@ Related: REQ-FMT-001 to REQ-FMT-006
 
 License of this document: CC-BY 4.0
 
-Status: the manifest, the containers and the model files are defined (M1-08); the published JSON Schema is the next step of M1-08, and the runtime format is M3.
+Status: the manifest, the containers, the model files and the published JSON Schema are defined (M1-08); the runtime format is M3.
 
 ## 1. Project format (`.tsukumoe`)
 
@@ -24,7 +24,7 @@ sources/             # optional references to original PSD files
 ```
 
 - Encoding: UTF-8 JSON. Object keys are written in a stable order so diffs stay readable.
-- Schema: JSON Schema generated from the Rust types and published under `schema/`.
+- Schema: JSON Schema generated from the Rust types, published under `schema/` (`manifest`, `model`, `physics`, `motion`, `expression`). `cargo test -p tsukumoe-format --test schema` fails when they drift; regenerate with `TSUKUMOE_UPDATE_SCHEMA=1`.
 
 ### 1.1 Manifest
 

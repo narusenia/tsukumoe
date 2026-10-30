@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MotionFile",
+  "description": "`motions/*.json`",
+  "type": "object",
+  "properties": {
+    "curves": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CurveDto"
+      }
+    },
+    "duration": {
+      "type": "number",
+      "format": "float"
+    },
+    "fade_in": {
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "fade_out": {
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "fps": {
+      "type": "number",
+      "format": "float"
+    },
+    "loop": {
+      "type": "boolean",
+      "default": false
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "duration",
+    "fps",
+    "curves"
+  ],
+  "$defs": {
+    "CurveDto": {
+      "type": "object",
+      "properties": {
+        "fade_in": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "fade_out": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SegmentDto"
+          }
+        },
+        "start": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "target": {
+          "$ref": "#/$defs/CurveTargetDto"
+        }
+      },
+      "required": [
+        "target",
+        "start",
+        "segments"
+      ]
+    },
+    "CurveTargetDto": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "parameter"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "part_opacity"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ]
+        }
+      ]
+    },
+    "SegmentDto": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "point": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": {
+              "type": "string",
+              "const": "linear"
+            }
+          },
+          "required": [
+            "type",
+            "point"
+          ]
+        },
+        {
+          "description": "Two control points, then the end point.",
+          "type": "object",
+          "properties": {
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "format": "float"
+                },
+                "maxItems": 2,
+                "minItems": 2
+              },
+              "maxItems": 3,
+              "minItems": 3
+            },
+            "type": {
+              "type": "string",
+              "const": "bezier"
+            }
+          },
+          "required": [
+            "type",
+            "points"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "point": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": {
+              "type": "string",
+              "const": "stepped"
+            }
+          },
+          "required": [
+            "type",
+            "point"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "point": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": {
+              "type": "string",
+              "const": "inverse_stepped"
+            }
+          },
+          "required": [
+            "type",
+            "point"
+          ]
+        }
+      ]
+    }
+  }
+}
