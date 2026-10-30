@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! Parameter drivers. The expression is stored as source text; it is parsed
-//! and compiled in M1-04.
+//! and compiled by `Model::compile` (see `expr`).
 
 use crate::elements::ParameterId;
 

@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 
+use crate::elements::ParameterId;
+use crate::expr::{self, ExprError, Op};
 use crate::keyform::BindingId;
 use crate::model::Model;
 use crate::rig::{BlendTarget, DeformerRef, GlueNode, RotationKeyform};
@@ -18,6 +20,26 @@ use crate::validate::ModelError;
 pub enum CompileError {
     /// Only a consistent model compiles.
     Invalid(Vec<ModelError>),
+    Expression {
+        driver: String,
+        error: ExprError,
+    },
+    /// Two drivers write the same parameter.
+    DuplicateDriverOutput {
+        driver: String,
+    },
+    /// The drivers read each other's outputs in a loop.
+    DriverCycle {
+        driver: String,
+    },
+}
+
+/// A driver's instructions in `CompiledModel::ops`, and the parameter it writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DriverDef {
+    pub output: usize,
+    pub start: usize,
+    pub len: usize,
 }
 
 /// The deformer an element hangs from, as an index.
@@ -133,6 +155,10 @@ pub struct CompiledModel {
     /// Total corner scratch a frame needs.
     pub corner_capacity: usize,
 
+    /// Run in this order: a driver comes after the drivers whose outputs it reads.
+    pub drivers: Vec<DriverDef>,
+    pub ops: Vec<Op>,
+
     /// Parents come before children.
     pub part_parents: Vec<Option<usize>>,
     pub part_opacity: Vec<f32>,
@@ -181,8 +207,8 @@ fn flatten(points: &[[f32; 2]], out: &mut Vec<f32>) {
 }
 
 impl Model {
-    /// Flattens the model for evaluation. Drivers, bones and physics are not
-    /// part of the compiled model yet.
+    /// Flattens the model for evaluation. Bones and physics are not part of
+    /// the compiled model yet.
     pub fn compile(&self) -> Result<CompiledModel, CompileError> {
         let errors = self.validate();
         if !errors.is_empty() {
@@ -201,6 +227,8 @@ impl Model {
                 repeat: p.repeat,
             });
         }
+
+        compile_drivers(self, &param_index, &mut c)?;
 
         let mut binding_index: HashMap<BindingId, usize> = HashMap::new();
         for (i, (id, binding)) in self.bindings.iter().enumerate() {
@@ -412,6 +440,73 @@ impl Model {
 
         Ok(c)
     }
+}
+
+/// Compiles every driver's expression and orders the drivers so each runs
+/// after the drivers that write the parameters it reads.
+fn compile_drivers(
+    model: &Model,
+    param_index: &HashMap<ParameterId, usize>,
+    c: &mut CompiledModel,
+) -> Result<(), CompileError> {
+    let by_name: HashMap<&str, usize> = c
+        .parameter_names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.as_str(), i))
+        .collect();
+
+    let mut defs = Vec::new();
+    let mut names = Vec::new();
+    let mut writer: HashMap<usize, usize> = HashMap::new();
+    for (_, name, driver) in model.drivers.iter() {
+        let output = param_index[&driver.output];
+        if writer.insert(output, defs.len()).is_some() {
+            return Err(CompileError::DuplicateDriverOutput {
+                driver: name.to_owned(),
+            });
+        }
+        let start = c.ops.len();
+        expr::compile(&driver.expression, |n| by_name.get(n).copied(), &mut c.ops).map_err(
+            |error| CompileError::Expression {
+                driver: name.to_owned(),
+                error,
+            },
+        )?;
+        defs.push(DriverDef {
+            output,
+            start,
+            len: c.ops.len() - start,
+        });
+        names.push(name);
+    }
+
+    // shortcut: quadratic ordering, fine for the tens of drivers a rig has;
+    // upgrade to Kahn's algorithm if models grow to thousands.
+    let mut done = vec![false; defs.len()];
+    while c.drivers.len() < defs.len() {
+        let before = c.drivers.len();
+        for (i, def) in defs.iter().enumerate() {
+            let ready = !done[i]
+                && c.ops[def.start..def.start + def.len]
+                    .iter()
+                    .all(|op| match op {
+                        Op::Param(p) => writer.get(p).is_none_or(|&w| done[w]),
+                        _ => true,
+                    });
+            if ready {
+                done[i] = true;
+                c.drivers.push(*def);
+            }
+        }
+        if c.drivers.len() == before {
+            let stuck = done.iter().position(|d| !d).expect("a driver is left");
+            return Err(CompileError::DriverCycle {
+                driver: names[stuck].to_owned(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn attrs(opacity: f32, draw_order: f32, multiply: [f32; 3], screen: [f32; 3]) -> MeshAttrs {

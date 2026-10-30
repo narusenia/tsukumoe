@@ -5,6 +5,7 @@
 
 use crate::compiled::{BindingDef, CompiledModel, KeyformRef, MeshAttrs, ParamDef, ParentRef};
 use crate::elements::Point;
+use crate::expr;
 use crate::rig::RotationKeyform;
 
 /// Maps a rotation deformer's local point to world space:
@@ -122,6 +123,10 @@ impl Frame {
             positions,
             attrs,
         } = self;
+
+        for d in &model.drivers {
+            values[d.output] = expr::eval(&model.ops[d.start..d.start + d.len], values);
+        }
 
         for (i, p) in model.parameters.iter().enumerate() {
             clamped[i] = p.apply(values[i]);
@@ -487,6 +492,8 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+    use crate::compiled::CompileError;
+    use crate::driver::Driver;
     use crate::elements::{Parameter, ParameterId, Part, PartId};
     use crate::keyform::{Axis, Binding, BindingId, KeyformGrid};
     use crate::model::Model;
@@ -908,6 +915,118 @@ mod tests {
         m.blend_shapes.insert("S", shape).unwrap();
         assert!(m.validate().is_empty());
         m
+    }
+
+    fn driver(m: &mut Model, name: &str, output: &str, expression: &str) {
+        let output = m.parameters.find(output).unwrap();
+        let driver = Driver {
+            output,
+            expression: expression.into(),
+        };
+        m.drivers.insert(name, driver).unwrap();
+    }
+
+    /// `Out` (keys 0 and 1) moves a vertex from x = 0 to x = 10.
+    fn driven_model() -> Model {
+        let (mut m, part) = new_model();
+        param(&mut m, "In");
+        let out = m
+            .parameters
+            .insert("Out", Parameter::new(0.0, 1.0, 0.0))
+            .unwrap();
+        let b = binding(&mut m, &[(out, &[0.0, 1.0])]);
+        let mut skin = mesh(part, &[[0.0, 0.0]]);
+        skin.keyforms = Some(KeyformGrid::new(
+            b,
+            vec![kf(&[[0.0, 0.0]]), kf(&[[10.0, 0.0]])],
+        ));
+        m.meshes.insert("Skin", skin).unwrap();
+        m
+    }
+
+    #[test]
+    fn driver_output_feeds_keyform_interpolation() {
+        let mut m = driven_model();
+        driver(&mut m, "D", "Out", "In / 2");
+        let (c, f) = run(&m, &[("In", 1.0)]);
+        near(f.mesh_positions(&c, 0), &[5.0, 0.0]);
+        // The caller's own value for a driven parameter is overwritten.
+        let (c, f) = run(&m, &[("In", 1.0), ("Out", 1.0)]);
+        near(f.mesh_positions(&c, 0), &[5.0, 0.0]);
+        // A driven value outside the parameter's range is clamped afterwards.
+        let (c, f) = run(&m, &[("In", 100.0)]);
+        near(f.mesh_positions(&c, 0), &[10.0, 0.0]);
+    }
+
+    #[test]
+    fn drivers_run_after_the_drivers_they_read() {
+        // Inserted in the opposite order of their dependency.
+        let mut m = driven_model();
+        m.parameters
+            .insert("Mid", Parameter::new(-10.0, 10.0, 0.0))
+            .unwrap();
+        driver(&mut m, "A", "Out", "Mid * 0.5");
+        driver(&mut m, "B", "Mid", "In + 1");
+        let (c, f) = run(&m, &[("In", 0.5)]);
+        near(f.mesh_positions(&c, 0), &[7.5, 0.0]);
+        let order: Vec<_> = c
+            .drivers
+            .iter()
+            .map(|d| c.parameter_names[d.output].as_str())
+            .collect();
+        assert_eq!(order, ["Mid", "Out"]);
+    }
+
+    #[test]
+    fn driver_compile_errors() {
+        let mut m = driven_model();
+        driver(&mut m, "Bad", "Out", "In +");
+        assert!(matches!(
+            m.compile(),
+            Err(CompileError::Expression { driver, .. }) if driver == "Bad"
+        ));
+
+        let mut m = driven_model();
+        driver(&mut m, "Bad", "Out", "Nope");
+        assert!(matches!(
+            m.compile(),
+            Err(CompileError::Expression { error, .. })
+                if error.kind == expr::ExprErrorKind::UnknownName("Nope".into())
+        ));
+
+        let mut m = driven_model();
+        driver(&mut m, "One", "Out", "1");
+        driver(&mut m, "Two", "Out", "2");
+        assert!(matches!(
+            m.compile(),
+            Err(CompileError::DuplicateDriverOutput { driver }) if driver == "Two"
+        ));
+
+        let mut m = driven_model();
+        driver(&mut m, "Self", "Out", "Out + 1");
+        assert!(matches!(m.compile(), Err(CompileError::DriverCycle { .. })));
+
+        let mut m = driven_model();
+        driver(&mut m, "A", "Out", "In");
+        driver(&mut m, "B", "In", "Out");
+        assert!(matches!(m.compile(), Err(CompileError::DriverCycle { .. })));
+    }
+
+    #[test]
+    fn steady_state_evaluation_with_drivers_allocates_nothing() {
+        let mut m = rich_model();
+        driver(&mut m, "D", "Q", "clamp(P * 2, -1, 1) + sin(P * 90)");
+        let c = m.compile().unwrap();
+        let mut frame = Frame::new(&c);
+        frame.evaluate(&c);
+
+        let before = ALLOCS.with(Cell::get);
+        for i in 0..100 {
+            frame.set_parameter(0, i as f32 * 0.02 - 1.0);
+            frame.evaluate(&c);
+        }
+        assert_eq!(ALLOCS.with(Cell::get) - before, 0);
+        assert!(frame.positions().iter().all(|v| v.is_finite()));
     }
 
     #[test]
