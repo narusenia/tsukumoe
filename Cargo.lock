@@ -6178,7 +6178,9 @@ dependencies = [
  "tsukumoe-core",
  "tsukumoe-format",
  "tsukumoe-gpu",
+ "tsukumoe-ui",
  "wgpu",
+ "wgpui",
 ]
 
 [[package]]
