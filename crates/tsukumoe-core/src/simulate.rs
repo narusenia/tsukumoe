@@ -57,12 +57,12 @@ pub(crate) fn advance(model: &CompiledModel, state: &mut State, values: &mut [f3
     for (g, def) in model.physics.iter().enumerate() {
         let (t, a) = inputs(model, def, values);
         state.target[g] = [t[0], t[1], a];
-        let range = def.particle_start * 2..(def.particle_start + def.particle_count) * 2;
-        let ps =
-            &model.physics_particles[def.particle_start..def.particle_start + def.particle_count];
+        let (pstart, pcount) = (def.particle_start as usize, def.particle_count as usize);
+        let range = pstart * 2..(pstart + pcount) * 2;
+        let ps = &model.physics_particles[pstart..pstart + pcount];
         let (pos, vel) = (&mut state.pos[range.clone()], &mut state.vel[range]);
         let started = std::mem::replace(&mut state.started[g], true);
-        match def.kind {
+        match def.kind() {
             PhysicsKind::Pendulum { .. } => pendulum(ps, pos, vel, t, a, started, steps),
             PhysicsKind::Chain { gravity, wind } => {
                 chain(ps, pos, vel, t, a, [gravity, wind], started, steps)
@@ -71,19 +71,21 @@ pub(crate) fn advance(model: &CompiledModel, state: &mut State, values: &mut [f3
     }
 
     // Outputs restart from the default, so inputs above saw last frame's values.
-    for o in &model.physics_outputs {
-        values[o.parameter] = model.parameters[o.parameter].default;
+    for o in model.physics_outputs.iter() {
+        values[o.parameter as usize] = model.parameters[o.parameter as usize].default;
     }
     for (g, def) in model.physics.iter().enumerate() {
-        let outputs = &model.physics_outputs[def.output_start..def.output_start + def.output_count];
+        let (ostart, ocount) = (def.output_start as usize, def.output_count as usize);
+        let outputs = &model.physics_outputs[ostart..ostart + ocount];
         for o in outputs {
-            let at = (def.particle_start + o.particle) * 2;
-            let (parent, rest_dir) = parent_and_rest(model, def, state, g, o.particle);
+            let particle = o.particle as usize;
+            let at = (def.particle_start as usize + particle) * 2;
+            let (parent, rest_dir) = parent_and_rest(model, def, state, g, particle);
             let rel = [state.pos[at] - parent[0], state.pos[at + 1] - parent[1]];
-            let base = match o.channel {
+            let base = match o.channel() {
                 Channel::X => rel[0],
                 Channel::Y => rel[1],
-                Channel::Angle => match def.kind {
+                Channel::Angle => match def.kind() {
                     PhysicsKind::Pendulum { .. } => rel[0].atan2(-rel[1]).to_degrees(),
                     PhysicsKind::Chain { .. } => {
                         let cross = rest_dir[0] * rel[1] - rest_dir[1] * rel[0];
@@ -92,8 +94,8 @@ pub(crate) fn advance(model: &CompiledModel, state: &mut State, values: &mut [f3
                     }
                 },
             };
-            let sign = if o.reflect { -1.0 } else { 1.0 };
-            values[o.parameter] += base * o.scale * sign * o.weight / 100.0;
+            let sign = if o.reflect != 0 { -1.0 } else { 1.0 };
+            values[o.parameter as usize] += base * o.scale * sign * o.weight / 100.0;
         }
     }
 }
@@ -107,8 +109,8 @@ fn parent_and_rest(
     k: usize,
 ) -> (Point, Point) {
     let [tx, ty, a] = state.target[group];
-    let base = def.particle_start;
-    match def.kind {
+    let base = def.particle_start as usize;
+    match def.kind() {
         PhysicsKind::Pendulum { .. } if k == 0 => (model.physics_particles[base].rest, [0.0, -1.0]),
         PhysicsKind::Chain { gravity, .. } if k == 0 => ([tx, ty], rest_direction(gravity, a)),
         PhysicsKind::Pendulum { .. } => (
@@ -153,10 +155,11 @@ fn normalize(v: f32, from: [f32; 3], to: [f32; 3]) -> f32 {
 fn inputs(model: &CompiledModel, def: &PhysicsDef, values: &[f32]) -> (Point, f32) {
     let mut t = [0.0; 2];
     let mut a = 0.0;
-    let ios = &model.physics_inputs[def.input_start..def.input_start + def.input_count];
+    let (istart, icount) = (def.input_start as usize, def.input_count as usize);
+    let ios = &model.physics_inputs[istart..istart + icount];
     for io in ios {
-        let p = &model.parameters[io.parameter];
-        let to = match (def.kind, io.channel) {
+        let p = &model.parameters[io.parameter as usize];
+        let to = match (def.kind(), io.channel()) {
             (PhysicsKind::Pendulum { angle, .. }, Channel::Angle) => {
                 [angle.min, angle.default, angle.max]
             }
@@ -168,10 +171,10 @@ fn inputs(model: &CompiledModel, def: &PhysicsDef, values: &[f32]) -> (Point, f3
             }
             (PhysicsKind::Chain { .. }, _) => [-1.0, 0.0, 1.0],
         };
-        let v = p.apply(values[io.parameter]);
-        let sign = if io.reflect { -1.0 } else { 1.0 };
+        let v = p.apply(values[io.parameter as usize]);
+        let sign = if io.reflect != 0 { -1.0 } else { 1.0 };
         let n = normalize(v, [p.min, p.default, p.max], to) * io.weight / 100.0 * sign;
-        match io.channel {
+        match io.channel() {
             Channel::X => t[0] += n,
             Channel::Y => t[1] += n,
             Channel::Angle => a += n,

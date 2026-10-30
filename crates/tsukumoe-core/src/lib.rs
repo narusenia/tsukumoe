@@ -17,6 +17,7 @@ pub mod eval;
 pub mod expr;
 pub mod history;
 pub mod keyform;
+pub mod layout;
 pub mod model;
 pub mod physics;
 pub mod playback;

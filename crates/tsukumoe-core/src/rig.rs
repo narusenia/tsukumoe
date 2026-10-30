@@ -25,6 +25,21 @@ pub enum BlendMode {
     Multiply,
 }
 
+impl BlendMode {
+    pub fn to_u32(self) -> u32 {
+        self as u32
+    }
+
+    pub fn from_u32(v: u32) -> Option<Self> {
+        Some(match v {
+            0 => Self::Normal,
+            1 => Self::Additive,
+            2 => Self::Multiply,
+            _ => return None,
+        })
+    }
+}
+
 /// The deformer an element hangs from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeformerRef {
@@ -147,7 +162,8 @@ pub struct RotationDeformer {
 }
 
 /// A weighted vertex pair joining two meshes.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
 pub struct GlueNode {
     pub index_a: u32,
     pub index_b: u32,
@@ -164,7 +180,8 @@ pub struct Glue {
     pub keyforms: Option<KeyformGrid<f32>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
 pub struct BoneTransform {
     pub translation: Point,
     pub rotation_degrees: f32,

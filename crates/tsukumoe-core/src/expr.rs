@@ -27,8 +27,76 @@ pub enum Op {
     Cos,
 }
 
+/// An instruction in the runtime format: a kind and a fixed-width value
+/// (the bits of the `f32` for `Const`, the index for `Param`, else 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub struct OpRaw {
+    pub kind: u32,
+    pub value: u32,
+}
+
+impl From<Op> for OpRaw {
+    fn from(op: Op) -> Self {
+        let (kind, value) = match op {
+            Op::Const(c) => (0, c.to_bits()),
+            Op::Param(i) => (1, i as u32),
+            Op::Add => (2, 0),
+            Op::Sub => (3, 0),
+            Op::Mul => (4, 0),
+            Op::Div => (5, 0),
+            Op::Neg => (6, 0),
+            Op::Abs => (7, 0),
+            Op::Min => (8, 0),
+            Op::Max => (9, 0),
+            Op::Clamp => (10, 0),
+            Op::Lerp => (11, 0),
+            Op::Sin => (12, 0),
+            Op::Cos => (13, 0),
+        };
+        Self { kind, value }
+    }
+}
+
+impl From<OpRaw> for Op {
+    /// An unknown kind becomes `Const(0)`; [`Op::from_raw`] tells them apart.
+    fn from(raw: OpRaw) -> Self {
+        Op::from_raw(raw).unwrap_or(Op::Const(0.0))
+    }
+}
+
 impl Op {
-    fn stack_delta(self) -> i32 {
+    pub fn from_raw(raw: OpRaw) -> Option<Self> {
+        Some(match raw.kind {
+            0 => Op::Const(f32::from_bits(raw.value)),
+            1 => Op::Param(raw.value as usize),
+            2 => Op::Add,
+            3 => Op::Sub,
+            4 => Op::Mul,
+            5 => Op::Div,
+            6 => Op::Neg,
+            7 => Op::Abs,
+            8 => Op::Min,
+            9 => Op::Max,
+            10 => Op::Clamp,
+            11 => Op::Lerp,
+            12 => Op::Sin,
+            13 => Op::Cos,
+            _ => return None,
+        })
+    }
+
+    /// Values the instruction takes off the stack.
+    pub(crate) fn pops(self) -> i32 {
+        match self {
+            Op::Const(_) | Op::Param(_) => 0,
+            Op::Neg | Op::Abs | Op::Sin | Op::Cos => 1,
+            Op::Add | Op::Sub | Op::Mul | Op::Div | Op::Min | Op::Max => 2,
+            Op::Clamp | Op::Lerp => 3,
+        }
+    }
+
+    pub(crate) fn stack_delta(self) -> i32 {
         match self {
             Op::Const(_) | Op::Param(_) => 1,
             Op::Neg | Op::Abs | Op::Sin | Op::Cos => 0,
@@ -110,10 +178,11 @@ pub fn compile(
 }
 
 /// Runs a compiled expression. A result that is not finite becomes 0.
-pub fn eval(ops: &[Op], values: &[f32]) -> f32 {
+pub fn eval<O: Copy + Into<Op>>(ops: &[O], values: &[f32]) -> f32 {
     let mut st = [0.0f32; MAX_STACK];
     let mut sp = 0;
-    for &op in ops {
+    for &raw in ops {
+        let op: Op = raw.into();
         match op {
             Op::Const(c) => {
                 st[sp] = c;

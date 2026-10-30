@@ -3416,6 +3416,7 @@ dependencies = [
 name = "tsukumoe-core"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "criterion",
  "serde",
  "serde_json",
