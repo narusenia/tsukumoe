@@ -61,6 +61,7 @@ All are UTF-8 JSON in the order of the field definitions in the Rust types (`tsu
 | `physics.json` | `pendulums`, `chains` |
 | `motions/NNNNNN-name.json` | one motion; the real name is the `name` field inside |
 | `expressions/NNNNNN-name.json` | one expression, same naming |
+| `textures/*.png` | texture `i` of a mesh is the `i`-th PNG under `textures/` in path order; straight alpha |
 
 - Elements refer to each other by **persistent name**, never by an internal index. The one exception is a keyform grid's `binding`: the position in `bindings`, because bindings are shared and unnamed.
 - Files under `motions/` and `expressions/` are numbered in the order of the model's table so the order survives; the name part is the real name with every byte outside `A-Z a-z 0-9 - _` written as `%XX`. A reader takes the name from inside the file.
