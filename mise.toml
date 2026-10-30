@@ -28,7 +28,7 @@ description = "Check tsukumoe-core and tsukumoe-runtime build for wasm32"
 run = "cargo build -p tsukumoe-core -p tsukumoe-runtime --target wasm32-unknown-unknown"
 
 [tasks.deps]
-description = "Crate dependency rules (UI-free crates, tsukumoe-core purity, tsukumoe-runtime scope)"
+description = "Crate dependency rules (UI-free crates, tsukumoe-core purity, tsukumoe-runtime and tsukumoe-ffi scope, unsafe only in tsukumoe-ffi)"
 run = "bash scripts/check-deps.sh"
 
 [tasks.check]
