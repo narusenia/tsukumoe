@@ -13,6 +13,7 @@ egui_extras.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tsukumoe-i18n.workspace = true
 
 [dev-dependencies]
 eframe.workspace = true

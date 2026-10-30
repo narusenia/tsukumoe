@@ -7,10 +7,11 @@
 use egui::{self, Color32, ScrollArea, Ui};
 
 use crate::{
-    Density, Icon, Mode, NamedTheme, Theme, Toasts, Tone, Variant, badge, builtin_themes, button,
-    checkbox, color_picker, dialog, hint, icon, icon_button, icon_text_button, label, list,
-    menu_item, number, panel, progress, radio, section_header, select, selectable_row, set_density,
-    set_mode, set_theme, slider, switch, tabs, text_input, tip,
+    Arg, Density, Icon, Language, Mode, NamedTheme, Theme, Toasts, Tone, Variant, badge,
+    builtin_themes, button, checkbox, color_picker, dialog, hint, icon, icon_button,
+    icon_text_button, label, list, menu_item, number, panel, progress, radio, section_header,
+    select, selectable_row, set_density, set_language, set_mode, set_theme, slider, switch, tabs,
+    text_input, tip, tr_args,
 };
 
 /// A group of components in the gallery.
@@ -182,7 +183,21 @@ impl Showcase {
                         set_density(ctx, density);
                     }
                 }
+                ui.separator();
+                for language in Language::ALL {
+                    let variant = if crate::language(ctx) == language {
+                        Variant::Primary
+                    } else {
+                        Variant::Secondary
+                    };
+                    if button(ui, language.native_name(), variant).clicked() {
+                        set_language(ctx, language);
+                    }
+                }
             });
+            // A translated message with a plural argument, to see both languages.
+            let count = [("count", Arg::from(3usize))];
+            hint(ui, tr_args(ctx, "host-parameters", &count));
         });
     }
 

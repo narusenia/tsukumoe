@@ -6,6 +6,7 @@ use std::time::Duration;
 use egui::{Align2, Area, Context, Frame, Id, Margin, Order, Response, RichText, Stroke, Ui, vec2};
 
 use crate::icons::Icon;
+use crate::lang::tr;
 use crate::theme::Theme;
 
 use super::button::{Variant, icon_button};
@@ -104,7 +105,9 @@ pub fn dialog<R>(
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).heading().color(t.colors.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_button(ui, Icon::Close, "Close", Variant::Ghost).clicked() {
+                    if icon_button(ui, Icon::Close, &tr(ctx, "dialog-close"), Variant::Ghost)
+                        .clicked()
+                    {
                         close = true;
                     }
                 });
