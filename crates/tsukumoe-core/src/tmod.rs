@@ -590,3 +590,6 @@ impl<'a> Tmod<'a> {
         self.texture_data.get(start..start + r.len as usize)
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests;

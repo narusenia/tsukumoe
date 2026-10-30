@@ -731,6 +731,7 @@ mod tests {
             f.set_parameter(c.parameter_index(name).unwrap(), value);
         }
         f.evaluate(&c);
+        crate::tmod::tests::assert_roundtrip(&c);
         (c, f)
     }
 
