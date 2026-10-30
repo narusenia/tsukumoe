@@ -132,6 +132,28 @@ impl<T> Arena<T> {
         Some(value)
     }
 
+    /// Puts `value` back at exactly `id` (index and generation), returning
+    /// what was there. For undo: history is last-in first-out, so the slot is
+    /// empty or already holds the element being replaced.
+    pub(crate) fn restore(&mut self, id: Id<T>, value: T) -> Option<T> {
+        let index = id.index as usize;
+        while self.slots.len() <= index {
+            self.free.push(self.slots.len() as u32);
+            self.slots.push(Slot {
+                generation: 0,
+                value: None,
+            });
+        }
+        let slot = &mut self.slots[index];
+        let old = slot.value.replace(value);
+        slot.generation = id.generation;
+        if old.is_none() {
+            self.len += 1;
+            self.free.retain(|&i| i != id.index);
+        }
+        old
+    }
+
     pub fn contains(&self, id: Id<T>) -> bool {
         self.get(id).is_some()
     }
@@ -157,9 +179,52 @@ impl<T> Arena<T> {
     }
 }
 
+/// Equal when the live elements and their ids match; free slots and the
+/// generations of empty slots do not count.
+impl<T: PartialEq> PartialEq for Arena<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.len == other.len && self.iter().eq(other.iter())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restore_brings_back_the_same_id() {
+        let mut arena = Arena::new();
+        let a = arena.insert(1);
+        arena.remove(a);
+        assert_eq!(arena.restore(a, 1), None);
+        assert_eq!(arena.get(a), Some(&1));
+        assert_eq!(arena.len(), 1);
+        let b = arena.insert(2);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn restore_after_the_slot_was_reused_and_freed() {
+        let mut arena = Arena::new();
+        let a = arena.insert(1);
+        arena.remove(a);
+        let b = arena.insert(2);
+        arena.remove(b);
+        arena.restore(a, 1);
+        assert_eq!(arena.get(a), Some(&1));
+        assert_eq!(arena.get(b), None);
+    }
+
+    #[test]
+    fn equality_ignores_removal_history() {
+        let mut left = Arena::new();
+        let mut right = Arena::new();
+        left.insert(1);
+        right.insert(1);
+        let tmp = right.insert(2);
+        right.remove(tmp);
+        assert!(left == right);
+    }
 
     #[test]
     fn insert_and_get() {
