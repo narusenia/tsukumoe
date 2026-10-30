@@ -13,6 +13,8 @@
 - 中身はデザイントークン（色・余白・角丸・文字サイズ、ライト / ダーク）と、それを使うスタイル付きコンポーネント。`wgpui-base` の部品を包み、見た目はトークンから決める
 - M1 で作るのは Slider・Button・Label・Panel・Switch。エディタ用（Dock・Tree・Table など）は M5-02 で足す
 - `tsukumoe-ui` の example `gallery` に、各部品の状態（通常・hover・disabled、ライト・ダーク）を並べる。目視確認の場とし、CI は example のビルドまで
+- テーマは `Theme`（色 10 種 + 寸法 `Metrics`）。既定は高密度（文字 12px・コントロール高 24px・余白 4px 刻み・影なし、境界線と面の明度差で階層を出す）
+- `set_mode`（ライト / ダーク / システム）で切り替え、`wgpui-base` の外観も同期する。`Theme::from_json` で JSON を読む（`{"appearance": "dark"|"light", "colors": {"accent": "#rrggbb"}}`、省いた色は組み込みテーマで補う、未知のキーは拒否）。ホットリロードは作らない
 - `tsukumoe-host` と `tsukumoe-app` は `tsukumoe-ui` を使い、`wgpui-base` を直接使わない
 
 ## 結果
