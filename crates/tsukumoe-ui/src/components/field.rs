@@ -13,6 +13,8 @@ use crate::theme::Theme;
 pub fn slider(ui: &mut Ui, value: &mut f32, range: RangeInclusive<f32>, name: &str) -> Response {
     ui.scope(|ui| {
         ui.spacing_mut().slider_width = ui.available_width().max(40.0);
+        // The thumb radius is a fraction of this height, so a short row gives a slim thumb.
+        ui.spacing_mut().interact_size.y = 14.0;
         ui.add(
             egui::Slider::new(value, range)
                 .show_value(false)
@@ -48,7 +50,6 @@ pub fn text_input(ui: &mut Ui, text: &mut String, name: &str, hint: &str) -> Res
     let t = Theme::get(ui.ctx());
     let mut frame = Frame::new()
         .fill(t.colors.control)
-        .stroke(Stroke::new(1.0, t.colors.border_strong))
         .corner_radius(t.metrics.radius)
         .inner_margin(Margin::symmetric(t.metrics.gap as i8 + 2, 0))
         .begin(ui);
@@ -63,12 +64,13 @@ pub fn text_input(ui: &mut Ui, text: &mut String, name: &str, hint: &str) -> Res
         1.0,
         if response.has_focus() {
             t.colors.accent
-        } else if response.hovered() {
-            Theme::mix(t.colors.border_strong, t.colors.text, 0.25)
         } else {
-            t.colors.border_strong
+            Color32::TRANSPARENT
         },
     );
+    if response.hovered() && !response.has_focus() {
+        frame.frame.fill = t.colors.control_hover;
+    }
     frame.end(ui);
     response.accessible_name(name)
 }

@@ -63,7 +63,7 @@ impl Toasts {
                     let color = toast.tone.color(&t);
                     Frame::new()
                         .fill(t.colors.surface_raised)
-                        .stroke(Stroke::new(1.0, t.colors.border_strong))
+                        .stroke(Stroke::new(1.0, t.colors.border))
                         .corner_radius(t.metrics.radius)
                         .inner_margin(Margin::symmetric(t.metrics.pad as i8, 6))
                         .show(ui, |ui| {
@@ -93,7 +93,7 @@ pub fn dialog<R>(
     let t = Theme::get(ctx);
     let frame = Frame::new()
         .fill(t.colors.surface_raised)
-        .stroke(Stroke::new(1.0, t.colors.border_strong))
+        .stroke(Stroke::new(1.0, t.colors.border))
         .corner_radius(t.metrics.radius + 2.0)
         .inner_margin(Margin::same(t.metrics.pad as i8 + 4));
     let mut close = false;

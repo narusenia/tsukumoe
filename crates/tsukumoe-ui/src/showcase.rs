@@ -7,10 +7,10 @@
 use egui::{self, Color32, ScrollArea, Ui};
 
 use crate::{
-    Density, Icon, Mode, Theme, Toasts, Tone, Variant, badge, button, checkbox, color_picker,
-    dialog, hint, icon, icon_button, icon_text_button, label, list, menu_item, number, panel,
-    progress, radio, section_header, select, selectable_row, set_density, set_mode, slider, switch,
-    tabs, text_input, tip,
+    Density, Icon, Mode, NamedTheme, Theme, Toasts, Tone, Variant, badge, builtin_themes, button,
+    checkbox, color_picker, dialog, hint, icon, icon_button, icon_text_button, label, list,
+    menu_item, number, panel, progress, radio, section_header, select, selectable_row, set_density,
+    set_mode, set_theme, slider, switch, tabs, text_input, tip,
 };
 
 /// A group of components in the gallery.
@@ -44,6 +44,9 @@ enum Size {
 }
 
 pub struct Showcase {
+    themes: Vec<NamedTheme>,
+    /// The named theme in use; `None` while a mode's own theme is.
+    named: Option<usize>,
     mode: Mode,
     density: Density,
     on: bool,
@@ -85,6 +88,8 @@ impl Default for Showcase {
 impl Showcase {
     pub fn new() -> Self {
         Self {
+            themes: builtin_themes(),
+            named: None,
             mode: Mode::Dark,
             density: Density::Compact,
             on: true,
@@ -141,14 +146,26 @@ impl Showcase {
                     (Mode::Dark, "Dark"),
                     (Mode::System, "System"),
                 ] {
-                    let variant = if self.mode == mode {
+                    let variant = if self.named.is_none() && self.mode == mode {
                         Variant::Primary
                     } else {
                         Variant::Secondary
                     };
                     if button(ui, name, variant).clicked() {
                         self.mode = mode;
+                        self.named = None;
                         set_mode(ctx, mode);
+                    }
+                }
+                for (i, named) in self.themes.iter().enumerate() {
+                    let variant = if self.named == Some(i) {
+                        Variant::Primary
+                    } else {
+                        Variant::Secondary
+                    };
+                    if button(ui, &named.name, variant).clicked() {
+                        self.named = Some(i);
+                        set_theme(ctx, named.theme.with_density(self.density));
                     }
                 }
                 ui.separator();

@@ -83,10 +83,10 @@ color_tokens! {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Density {
-    /// The default: 12pt text, 24pt controls.
+    /// The default: 12pt text, 22pt controls.
     #[default]
     Compact,
-    /// 13pt text, 28pt controls.
+    /// 13pt text, 26pt controls.
     Regular,
 }
 
@@ -106,18 +106,18 @@ impl Metrics {
         match density {
             Density::Compact => Self {
                 text: 12.0,
-                control: 24.0,
+                control: 22.0,
                 gap: 4.0,
                 pad: 8.0,
-                radius: 4.0,
+                radius: 3.0,
                 icon: 14.0,
             },
             Density::Regular => Self {
                 text: 13.0,
-                control: 28.0,
+                control: 26.0,
                 gap: 6.0,
                 pad: 10.0,
-                radius: 5.0,
+                radius: 4.0,
                 icon: 16.0,
             },
         }
@@ -171,19 +171,19 @@ impl Theme {
             density: Density::Compact,
             metrics: Metrics::new(Density::Compact),
             colors: Colors {
-                background: rgb(0x111111),
-                surface: rgb(0x181818),
-                surface_raised: rgb(0x202020),
-                border: rgb(0x2c2c2c),
-                border_strong: rgb(0x404040),
-                text: rgb(0xdcdcdc),
-                text_muted: rgb(0x8e8e8e),
-                accent: rgb(0x5b7cfa),
+                background: rgb(0x0e0e0e),
+                surface: rgb(0x151515),
+                surface_raised: rgb(0x1c1c1c),
+                border: rgb(0x242424),
+                border_strong: rgb(0x343434),
+                text: rgb(0xe8e8e8),
+                text_muted: rgb(0x888888),
+                accent: rgb(0x6c7ae0),
                 accent_text: rgb(0xffffff),
-                control: rgb(0x242424),
-                control_hover: rgb(0x2e2e2e),
-                control_active: rgb(0x393939),
-                disabled: rgb(0x4e4e4e),
+                control: rgb(0x1d1d1d),
+                control_hover: rgb(0x262626),
+                control_active: rgb(0x303030),
+                disabled: rgb(0x4a4a4a),
                 error: rgb(0xf0616d),
                 warning: rgb(0xe5a946),
                 success: rgb(0x4cc38a),
@@ -197,18 +197,18 @@ impl Theme {
             density: Density::Compact,
             metrics: Metrics::new(Density::Compact),
             colors: Colors {
-                background: rgb(0xf2f2f2),
+                background: rgb(0xfafafa),
                 surface: rgb(0xffffff),
                 surface_raised: rgb(0xffffff),
-                border: rgb(0xdddddd),
-                border_strong: rgb(0xc2c2c2),
-                text: rgb(0x1c1c1c),
-                text_muted: rgb(0x666666),
-                accent: rgb(0x3b5bdb),
+                border: rgb(0xebebeb),
+                border_strong: rgb(0xd6d6d6),
+                text: rgb(0x1a1a1a),
+                text_muted: rgb(0x6b6b6b),
+                accent: rgb(0x4f5bd5),
                 accent_text: rgb(0xffffff),
-                control: rgb(0xededed),
-                control_hover: rgb(0xe2e2e2),
-                control_active: rgb(0xd6d6d6),
+                control: rgb(0xf1f1f1),
+                control_hover: rgb(0xe8e8e8),
+                control_active: rgb(0xdddddd),
                 disabled: rgb(0xb0b0b0),
                 error: rgb(0xd6303f),
                 warning: rgb(0xb7791f),
@@ -271,7 +271,8 @@ impl Theme {
         visuals.window_shadow = Shadow::NONE;
         visuals.popup_shadow = Shadow::NONE;
         visuals.selection.bg_fill = c.accent;
-        visuals.selection.stroke = Stroke::new(1.0, c.accent);
+        // The stroke colors the text of a selected row, which sits on the accent fill.
+        visuals.selection.stroke = Stroke::new(1.0, c.accent_text);
         visuals.hyperlink_color = c.accent;
         visuals.warn_fg_color = c.warning;
         visuals.error_fg_color = c.error;
@@ -295,7 +296,6 @@ impl Theme {
         }
         // The slider rail and checkbox frames use this fill; buttons use the weak one.
         w.inactive.bg_fill = c.control_hover;
-        w.hovered.bg_stroke = Stroke::new(1.0, c.border_strong);
         for state in [
             &mut w.noninteractive,
             &mut w.inactive,
@@ -312,7 +312,7 @@ impl Theme {
         style.spacing.item_spacing = Vec2::splat(m.gap);
         style.spacing.button_padding = Vec2::new(m.pad, 2.0);
         style.spacing.interact_size.y = m.control;
-        style.spacing.slider_rail_height = 3.0;
+        style.spacing.slider_rail_height = 2.0;
         style.spacing.icon_width = m.icon;
         style.spacing.menu_margin = egui::Margin::same(4);
         style.spacing.tooltip_width = 280.0;
@@ -374,19 +374,50 @@ pub fn set_density(ctx: &Context, density: Density) {
     set_theme(ctx, Theme::get(ctx).with_density(density));
 }
 
-/// What to remember between runs: the mode and the density.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+/// A theme with the name it is listed under.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NamedTheme {
+    pub name: String,
+    pub theme: Theme,
+}
+
+impl NamedTheme {
+    /// Reads a theme file (see [`ThemeFile`]) and lists it under `name`.
+    pub fn from_json(name: &str, json: &str) -> Result<Self, String> {
+        Ok(Self {
+            name: name.to_owned(),
+            theme: Theme::from_json(json).map_err(|e| format!("{name}: {e}"))?,
+        })
+    }
+}
+
+/// The themes that ship with the library, beside the plain dark and light ones.
+pub fn builtin_themes() -> Vec<NamedTheme> {
+    [
+        ("Figma Dark", include_str!("../themes/figma-dark.json")),
+        ("Figma Light", include_str!("../themes/figma-light.json")),
+    ]
+    .into_iter()
+    .map(|(name, json)| NamedTheme::from_json(name, json).expect("built-in theme is valid"))
+    .collect()
+}
+
+/// What to remember between runs: the mode, the density and, when one is
+/// chosen, a named theme (which then takes the place of the mode's theme).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Preferences {
     #[serde(default)]
     pub mode: Mode,
     #[serde(default)]
     pub density: Density,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 impl Preferences {
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self).expect("preferences serialize")
+        serde_json::to_string_pretty(self).expect("preferences serialize")
     }
 
     /// Reads saved preferences; anything unreadable gives the defaults, since
@@ -395,10 +426,20 @@ impl Preferences {
         serde_json::from_str(json).unwrap_or_default()
     }
 
-    /// Installs the saved mode and density.
-    pub fn apply(&self, ctx: &Context) {
-        set_density(ctx, self.density);
-        set_mode(ctx, self.mode);
+    /// Installs the saved theme: the named one from `themes` if it is still
+    /// there, else the mode's. The density here wins over a theme file's own.
+    pub fn apply(&self, ctx: &Context, themes: &[NamedTheme]) {
+        let named = self
+            .theme
+            .as_ref()
+            .and_then(|name| themes.iter().find(|t| &t.name == name));
+        match named {
+            Some(t) => set_theme(ctx, t.theme.with_density(self.density)),
+            None => {
+                set_density(ctx, self.density);
+                set_mode(ctx, self.mode);
+            }
+        }
     }
 }
 
@@ -461,6 +502,7 @@ mod tests {
         let p = Preferences {
             mode: Mode::System,
             density: Density::Regular,
+            theme: Some("Figma Dark".into()),
         };
         assert_eq!(Preferences::from_json(&p.to_json()), p);
         assert_eq!(Preferences::from_json("not json"), Preferences::default());
@@ -471,5 +513,29 @@ mod tests {
     fn mix_blends_two_colors() {
         let m = Theme::mix(Color32::BLACK, Color32::WHITE, 0.5);
         assert_eq!(m, Color32::from_rgb(128, 128, 128));
+    }
+
+    #[test]
+    fn builtin_themes_load_and_a_named_theme_replaces_the_mode() {
+        let themes = builtin_themes();
+        assert_eq!(themes.len(), 2);
+        let ctx = Context::default();
+        let prefs = Preferences {
+            theme: Some("Figma Light".into()),
+            density: Density::Regular,
+            ..Default::default()
+        };
+        prefs.apply(&ctx, &themes);
+        let t = Theme::get(&ctx);
+        assert!(!t.dark);
+        assert_eq!(t.colors.accent, rgb(0x0d99ff));
+        assert_eq!(t.density, Density::Regular);
+        // A name that no longer exists falls back to the mode.
+        Preferences {
+            theme: Some("gone".into()),
+            ..Default::default()
+        }
+        .apply(&ctx, &themes);
+        assert_eq!(Theme::get(&ctx).colors, Theme::dark().colors);
     }
 }

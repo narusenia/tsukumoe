@@ -22,8 +22,8 @@ pub use font::{has_cjk_font, install_cjk_font};
 pub use icons::{Icon, icon};
 pub use keymap::{Keymap, KeymapFile, parse_shortcut};
 pub use theme::{
-    ColorOverrides, Colors, Density, Metrics, Mode, Preferences, Theme, ThemeFile, set_density,
-    set_mode, set_theme,
+    ColorOverrides, Colors, Density, Metrics, Mode, NamedTheme, Preferences, Theme, ThemeFile,
+    builtin_themes, set_density, set_mode, set_theme,
 };
 
 /// Prepares egui for the library: image loaders for icons, a CJK font, and the
