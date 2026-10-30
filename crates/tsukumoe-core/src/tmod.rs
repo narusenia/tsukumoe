@@ -14,6 +14,9 @@ use bytemuck::Pod;
 use crate::compiled::{CompiledModel, StrRef};
 use crate::layout::LayoutError;
 
+pub mod playback;
+pub use playback::PlaybackData;
+
 #[cfg(target_endian = "big")]
 compile_error!("the .tmod format is little-endian and is read in place; big-endian is unsupported");
 
@@ -79,6 +82,18 @@ pub mod id {
     pub const TEXTURE_TABLE: u32 = 0x80;
     /// Optional: PNG files, back to back.
     pub const TEXTURE_DATA: u32 = 0x81;
+    /// Optional playback data, written when a file has motions, expressions
+    /// or a pose; all ten sections appear together (see `tmod::playback`).
+    pub const PLAYBACK_STRINGS: u32 = 0x90;
+    pub const MOTIONS: u32 = 0x91;
+    pub const MOTION_CURVES: u32 = 0x92;
+    pub const MOTION_SEGMENTS: u32 = 0x93;
+    pub const EXPRESSIONS: u32 = 0x94;
+    pub const EXPRESSION_PARAMS: u32 = 0x95;
+    pub const POSE: u32 = 0x96;
+    pub const POSE_GROUPS: u32 = 0x97;
+    pub const POSE_ENTRIES: u32 = 0x98;
+    pub const POSE_LINKS: u32 = 0x99;
 }
 
 /// The name of a section ID in this version, for tools that print the table.
@@ -129,6 +144,16 @@ pub fn section_name(section: u32) -> Option<&'static str> {
         BLEND_REFS => "blend_refs",
         TEXTURE_TABLE => "texture_table",
         TEXTURE_DATA => "texture_data",
+        PLAYBACK_STRINGS => "playback_strings",
+        MOTIONS => "motions",
+        MOTION_CURVES => "motion_curves",
+        MOTION_SEGMENTS => "motion_segments",
+        EXPRESSIONS => "expressions",
+        EXPRESSION_PARAMS => "expression_params",
+        POSE => "pose",
+        POSE_GROUPS => "pose_groups",
+        POSE_ENTRIES => "pose_entries",
+        POSE_LINKS => "pose_links",
         _ => return None,
     })
 }
@@ -284,7 +309,18 @@ fn put<'a, T: Pod>(out: &mut Vec<Section<'a>>, id: u32, items: &'a [T]) -> Resul
 /// Writes `model` as a `.tmod` file, with optional embedded PNG textures.
 /// The same input gives the same bytes.
 pub fn write(model: &CompiledModel<'_>, textures: &[&[u8]]) -> Result<Vec<u8>, Error> {
+    write_with(model, &PlaybackData::default(), textures)
+}
+
+/// [`write`] with motions, expressions and a pose. Playback data that is
+/// empty leaves the file without the playback sections.
+pub fn write_with(
+    model: &CompiledModel<'_>,
+    playback: &PlaybackData<'_>,
+    textures: &[&[u8]],
+) -> Result<Vec<u8>, Error> {
     model.check()?;
+    playback.check(model.parameters.len(), model.part_opacity.len())?;
     let mut s: Vec<Section> = Vec::new();
     s.push(Section {
         id: id::META,
@@ -361,6 +397,65 @@ pub fn write(model: &CompiledModel<'_>, textures: &[&[u8]]) -> Result<Vec<u8>, E
         });
     }
 
+    if !playback.is_empty() {
+        // Optional: a reader that predates these sections skips them.
+        let p = playback;
+        let mut optional = |id, count: usize, data: &[u8]| -> Result<(), Error> {
+            s.push(Section {
+                id,
+                flags: 0,
+                count: u32::try_from(count).map_err(|_| Error::Section {
+                    id,
+                    reason: "too many elements",
+                })?,
+                data: Cow::Owned(data.to_vec()),
+            });
+            Ok(())
+        };
+        optional(id::PLAYBACK_STRINGS, p.strings.len(), &p.strings)?;
+        optional(
+            id::MOTIONS,
+            p.motions.len(),
+            bytemuck::cast_slice(&p.motions),
+        )?;
+        optional(
+            id::MOTION_CURVES,
+            p.curves.len(),
+            bytemuck::cast_slice(&p.curves),
+        )?;
+        optional(
+            id::MOTION_SEGMENTS,
+            p.segments.len(),
+            bytemuck::cast_slice(&p.segments),
+        )?;
+        optional(
+            id::EXPRESSIONS,
+            p.expressions.len(),
+            bytemuck::cast_slice(&p.expressions),
+        )?;
+        optional(
+            id::EXPRESSION_PARAMS,
+            p.expression_params.len(),
+            bytemuck::cast_slice(&p.expression_params),
+        )?;
+        optional(id::POSE, p.pose.len(), bytemuck::cast_slice(&p.pose))?;
+        optional(
+            id::POSE_GROUPS,
+            p.pose_groups.len(),
+            bytemuck::cast_slice(&p.pose_groups),
+        )?;
+        optional(
+            id::POSE_ENTRIES,
+            p.pose_entries.len(),
+            bytemuck::cast_slice(&p.pose_entries),
+        )?;
+        optional(
+            id::POSE_LINKS,
+            p.pose_links.len(),
+            bytemuck::cast_slice(&p.pose_links),
+        )?;
+    }
+
     Ok(assemble(&s))
 }
 
@@ -417,6 +512,8 @@ pub struct Tmod<'a> {
     /// The section table, unknown sections included.
     pub sections: Vec<SectionInfo>,
     pub model: CompiledModel<'a>,
+    /// Motions, expressions and the pose; empty when the file has none.
+    pub playback: PlaybackData<'a>,
     texture_table: &'a [StrRef],
     texture_data: &'a [u8],
 }
@@ -504,6 +601,7 @@ impl<'a> Tmod<'a> {
                 || (id::STRINGS..=id::BLEND_REFS).contains(&id)
                 || id == id::TEXTURE_TABLE
                 || id == id::TEXTURE_DATA
+                || (id::PLAYBACK_STRINGS..=id::POSE_LINKS).contains(&id)
         };
         for e in &entries {
             if !known(e.id) && e.flags & SECTION_REQUIRED != 0 {
@@ -634,6 +732,25 @@ impl<'a> Tmod<'a> {
                 (None, Some(_)) => return Err(Error::MissingSection(id::TEXTURE_TABLE)),
             };
 
+        let playback = if (id::PLAYBACK_STRINGS..=id::POSE_LINKS).all(|s| find(s).is_none()) {
+            PlaybackData::default()
+        } else {
+            let data = PlaybackData {
+                strings: arr!(id::PLAYBACK_STRINGS),
+                motions: arr!(id::MOTIONS),
+                curves: arr!(id::MOTION_CURVES),
+                segments: arr!(id::MOTION_SEGMENTS),
+                expressions: arr!(id::EXPRESSIONS),
+                expression_params: arr!(id::EXPRESSION_PARAMS),
+                pose: arr!(id::POSE),
+                pose_groups: arr!(id::POSE_GROUPS),
+                pose_entries: arr!(id::POSE_ENTRIES),
+                pose_links: arr!(id::POSE_LINKS),
+            };
+            data.check(model.parameters.len(), model.part_opacity.len())?;
+            data
+        };
+
         let sections = entries
             .iter()
             .map(|e| SectionInfo {
@@ -649,6 +766,7 @@ impl<'a> Tmod<'a> {
             minor,
             sections,
             model,
+            playback,
             texture_table,
             texture_data,
         })

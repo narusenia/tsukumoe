@@ -11,6 +11,10 @@ use crate::eval::Frame;
 use crate::expr::OpRaw;
 use crate::keyform::{Axis, Binding, KeyformGrid};
 use crate::model::Model;
+use crate::playback::{
+    Curve, CurveTarget, Expression, ExpressionBlend, ExpressionParameter, Motion, Pose, PoseEntry,
+    Segment,
+};
 use crate::rig::{
     ArtMesh, BlendShape, BlendTarget, Bone, BoneTransform, DeformerRef, Glue, GlueNode,
     MeshKeyform, RotationDeformer, RotationKeyform, VertexInfluences, WarpDeformer, WarpKeyform,
@@ -245,6 +249,114 @@ fn rich_bytes() -> Vec<u8> {
     write(&c, &[&png, &png2]).unwrap()
 }
 
+/// The rich model with two motions, two expressions and a pose.
+pub(crate) fn playback_model() -> Model {
+    let mut m = rich_model();
+    let part = m.parts.find("Part").unwrap();
+    let other = m
+        .parts
+        .insert("Other", crate::elements::Part::default())
+        .unwrap();
+    let (p, q) = (
+        m.parameters.find("P").unwrap(),
+        m.parameters.find("Q").unwrap(),
+    );
+    let curve = |target, segments: Vec<Segment>| Curve {
+        target,
+        start: [0.0, 0.0],
+        segments,
+        fade_in: None,
+        fade_out: None,
+    };
+    let mut sway = curve(
+        CurveTarget::Parameter(p),
+        vec![
+            Segment::Linear([0.5, 1.0]),
+            Segment::Bezier([[0.6, 1.0], [0.8, 0.0], [1.0, 0.0]]),
+            Segment::Stepped([1.5, 0.5]),
+            Segment::InverseStepped([2.0, -0.5]),
+        ],
+    );
+    sway.fade_in = Some(0.25);
+    m.motions
+        .insert(
+            "Sway",
+            Motion {
+                duration: 2.0,
+                fps: 30.0,
+                looped: true,
+                fade_in: 0.5,
+                fade_out: 0.5,
+                curves: vec![sway, curve(CurveTarget::PartOpacity(other), vec![])],
+            },
+        )
+        .unwrap();
+    m.motions
+        .insert(
+            "Still",
+            Motion {
+                duration: 0.0,
+                fps: 30.0,
+                looped: false,
+                fade_in: 0.0,
+                fade_out: 0.0,
+                curves: vec![],
+            },
+        )
+        .unwrap();
+    let param = |parameter, blend, value| ExpressionParameter {
+        parameter,
+        blend,
+        value,
+    };
+    m.expressions
+        .insert(
+            "Smile",
+            Expression {
+                fade_in: 0.2,
+                fade_out: 0.3,
+                parameters: vec![
+                    param(q, ExpressionBlend::Add, 0.5),
+                    param(p, ExpressionBlend::Multiply, 0.8),
+                    param(q, ExpressionBlend::Overwrite, -1.0),
+                ],
+            },
+        )
+        .unwrap();
+    m.expressions
+        .insert(
+            "Empty",
+            Expression {
+                fade_in: 0.0,
+                fade_out: 0.0,
+                parameters: vec![],
+            },
+        )
+        .unwrap();
+    m.pose = Some(Pose {
+        fade_in: 0.5,
+        groups: vec![vec![
+            PoseEntry {
+                part,
+                linked: vec![other],
+            },
+            PoseEntry {
+                part: other,
+                linked: vec![],
+            },
+        ]],
+    });
+    assert!(m.validate().is_empty());
+    m
+}
+
+fn playback_bytes() -> Vec<u8> {
+    let m = playback_model();
+    let c = m.compile().unwrap();
+    let p = PlaybackData::from_model(&m).unwrap();
+    write_with(&c, &p, &[]).unwrap()
+}
+
 /// Parses and, when that passes, evaluates and reads the draw list: a loaded
 /// file must never panic anywhere.
 fn exercise(bytes: &[u8]) -> Result<(), Error> {
@@ -264,6 +376,23 @@ fn exercise(bytes: &[u8]) -> Result<(), Error> {
     }
     for i in 0..t.texture_count() {
         t.texture(i).unwrap();
+    }
+    let p = &t.playback;
+    for (i, m) in p.motions.iter().enumerate() {
+        let _ = p.motion_name(i);
+        for c in p.motion_curves(m) {
+            let _ = p.curve_segments(c).len();
+        }
+    }
+    for (i, e) in p.expressions.iter().enumerate() {
+        let _ = (p.expression_name(i), p.expression_params_of(e));
+    }
+    for pose in p.pose.iter() {
+        for g in p.pose_groups_of(pose) {
+            for e in p.group_entries(g) {
+                let _ = (c.part_opacity[e.part as usize], p.entry_links(e));
+            }
+        }
     }
     Ok(())
 }
@@ -542,111 +671,115 @@ fn an_invalid_model_is_not_written() {
 
 #[test]
 fn every_truncation_is_an_error() {
-    let b = rich_bytes();
-    for n in 0..b.len() {
-        assert!(parse(&b[..n]).is_err(), "prefix of {n} bytes");
+    for b in [rich_bytes(), playback_bytes()] {
+        for n in 0..b.len() {
+            assert!(parse(&b[..n]).is_err(), "prefix of {n} bytes");
+        }
     }
 }
 
 #[test]
 fn single_byte_changes_never_panic() {
-    let b = rich_bytes();
-    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
-    // The header and the table, exhaustively with a few values.
-    let head = HEADER_LEN + ENTRY_LEN * le_u32(&b, 16) as usize;
-    for at in 0..head {
-        for v in [0x00, 0x01, 0x7F, 0x80, 0xFF, b[at] ^ 0x01] {
-            no_panic(&patch(&b, at, &[v]), || format!("byte {at} = {v:#x}"));
+    for b in [rich_bytes(), playback_bytes()] {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        // The header and the table, exhaustively with a few values.
+        let head = HEADER_LEN + ENTRY_LEN * le_u32(&b, 16) as usize;
+        for at in 0..head {
+            for v in [0x00, 0x01, 0x7F, 0x80, 0xFF, b[at] ^ 0x01] {
+                no_panic(&patch(&b, at, &[v]), || format!("byte {at} = {v:#x}"));
+            }
         }
+        // Everywhere else, at random. Some changes land on data that stays valid,
+        // so the evaluation path runs too.
+        let mut accepted = 0;
+        for _ in 0..20_000 {
+            let at = rng.next() as usize % b.len();
+            let v = rng.next() as u8;
+            accepted += usize::from(no_panic(&patch(&b, at, &[v]), || {
+                format!("byte {at} = {v:#x}")
+            }));
+        }
+        assert!(accepted > 1_000 && accepted < 20_000, "{accepted} accepted");
     }
-    // Everywhere else, at random. Some changes land on data that stays valid,
-    // so the evaluation path runs too.
-    let mut accepted = 0;
-    for _ in 0..20_000 {
-        let at = rng.next() as usize % b.len();
-        let v = rng.next() as u8;
-        accepted += usize::from(no_panic(&patch(&b, at, &[v]), || {
-            format!("byte {at} = {v:#x}")
-        }));
-    }
-    assert!(accepted > 1_000 && accepted < 20_000, "{accepted} accepted");
 }
 
 #[test]
 fn boundary_words_never_panic() {
-    let b = rich_bytes();
-    let special = [
-        0u32,
-        1,
-        2,
-        3,
-        15,
-        16,
-        17,
-        0x7FFF_FFFF,
-        0x8000_0000,
-        0xFFFF_FFFE,
-        0xFFFF_FFFF,
-        f32::NAN.to_bits(),
-        f32::INFINITY.to_bits(),
-        (-1.0f32).to_bits(),
-        1e30f32.to_bits(),
-        b.len() as u32,
-    ];
-    for at in (0..b.len() - 3).step_by(4) {
-        for v in special {
-            no_panic(&patch(&b, at, &v.to_le_bytes()), || {
-                format!("word {at} = {v:#x}")
-            });
-        }
-    }
-    // 64-bit fields of the table: offsets and lengths.
-    for i in 0..le_u32(&b, 16) as usize {
-        let at = HEADER_LEN + i * ENTRY_LEN;
-        for field in [8, 16] {
-            for v in [
-                0u64,
-                1,
-                16,
-                u64::MAX,
-                u64::MAX - 15,
-                b.len() as u64,
-                1 << 32,
-            ] {
-                no_panic(&patch(&b, at + field, &v.to_le_bytes()), || {
-                    format!("entry {i} field {field} = {v:#x}")
+    for b in [rich_bytes(), playback_bytes()] {
+        let special = [
+            0u32,
+            1,
+            2,
+            3,
+            15,
+            16,
+            17,
+            0x7FFF_FFFF,
+            0x8000_0000,
+            0xFFFF_FFFE,
+            0xFFFF_FFFF,
+            f32::NAN.to_bits(),
+            f32::INFINITY.to_bits(),
+            (-1.0f32).to_bits(),
+            1e30f32.to_bits(),
+            b.len() as u32,
+        ];
+        for at in (0..b.len() - 3).step_by(4) {
+            for v in special {
+                no_panic(&patch(&b, at, &v.to_le_bytes()), || {
+                    format!("word {at} = {v:#x}")
                 });
             }
         }
-    }
-    for v in [0u64, 1, u64::MAX, b.len() as u64 + 16] {
-        no_panic(&patch(&b, 24, &v.to_le_bytes()), || format!("length = {v}"));
+        // 64-bit fields of the table: offsets and lengths.
+        for i in 0..le_u32(&b, 16) as usize {
+            let at = HEADER_LEN + i * ENTRY_LEN;
+            for field in [8, 16] {
+                for v in [
+                    0u64,
+                    1,
+                    16,
+                    u64::MAX,
+                    u64::MAX - 15,
+                    b.len() as u64,
+                    1 << 32,
+                ] {
+                    no_panic(&patch(&b, at + field, &v.to_le_bytes()), || {
+                        format!("entry {i} field {field} = {v:#x}")
+                    });
+                }
+            }
+        }
+        for v in [0u64, 1, u64::MAX, b.len() as u64 + 16] {
+            no_panic(&patch(&b, 24, &v.to_le_bytes()), || format!("length = {v}"));
+        }
     }
 }
 
 #[test]
 fn random_garbage_and_shuffled_pieces_never_panic() {
-    let b = rich_bytes();
-    let mut rng = Rng(42);
-    for _ in 0..2_000 {
-        // Copy a random run of the file over another place.
-        let (len, from, to) = (
-            1 + rng.next() as usize % 64,
-            rng.next() as usize % b.len(),
-            rng.next() as usize % b.len(),
-        );
-        let len = len.min(b.len() - from).min(b.len() - to);
-        let run = b[from..from + len].to_vec();
-        no_panic(&patch(&b, to, &run), || {
-            format!("copy {len} bytes {from} -> {to}")
-        });
-    }
-    for n in [0, 1, 31, 32, 33, 100, 4096] {
-        let junk: Vec<u8> = (0..n).map(|_| rng.next() as u8).collect();
-        no_panic(&junk, || format!("{n} random bytes"));
-        no_panic(&[&MAGIC[..], &junk].concat(), || {
-            format!("TMOD + {n} random bytes")
-        });
+    for b in [rich_bytes(), playback_bytes()] {
+        let mut rng = Rng(42);
+        for _ in 0..2_000 {
+            // Copy a random run of the file over another place.
+            let (len, from, to) = (
+                1 + rng.next() as usize % 64,
+                rng.next() as usize % b.len(),
+                rng.next() as usize % b.len(),
+            );
+            let len = len.min(b.len() - from).min(b.len() - to);
+            let run = b[from..from + len].to_vec();
+            no_panic(&patch(&b, to, &run), || {
+                format!("copy {len} bytes {from} -> {to}")
+            });
+        }
+        for n in [0, 1, 31, 32, 33, 100, 4096] {
+            let junk: Vec<u8> = (0..n).map(|_| rng.next() as u8).collect();
+            no_panic(&junk, || format!("{n} random bytes"));
+            no_panic(&[&MAGIC[..], &junk].concat(), || {
+                format!("TMOD + {n} random bytes")
+            });
+        }
     }
 }
 
@@ -659,4 +792,112 @@ fn a_model_with_a_hand_edited_index_is_rejected() {
     let mut c = rich_model().compile().unwrap();
     c.deformer_order.to_mut().reverse();
     assert!(c.check().is_err());
+}
+
+#[test]
+fn a_file_without_playback_data_has_none_and_one_with_it_round_trips() {
+    let plain = rich_bytes();
+    let buf = AlignedBuf::from_bytes(&plain);
+    let t = Tmod::parse(&buf).unwrap();
+    assert!(t.playback.is_empty());
+    assert!(t.sections.iter().all(|s| s.id < id::PLAYBACK_STRINGS));
+
+    let m = playback_model();
+    let bytes = playback_bytes();
+    assert_eq!(bytes, playback_bytes());
+    let buf = AlignedBuf::from_bytes(&bytes);
+    let t = Tmod::parse(&buf).unwrap();
+    assert_eq!(t.playback, PlaybackData::from_model(&m).unwrap());
+    assert_eq!(t.playback.motion_index("Sway"), Some(0));
+    assert_eq!(t.playback.motion_name(1), "Still");
+    assert_eq!(t.playback.expression_index("Smile"), Some(0));
+    assert_eq!(t.playback.pose.len(), 1);
+    // The playback sections are optional and the evaluation data is unchanged.
+    for s in t.sections.iter().filter(|s| s.id >= id::PLAYBACK_STRINGS) {
+        assert!(!s.required, "{:#x}", s.id);
+    }
+    assert_eq!(t.sections.len(), 52);
+    let c = m.compile().unwrap();
+    assert!(matches!(t.playback.motions, Cow::Borrowed(_)));
+    let (lo, hi) = (buf.as_ptr() as usize, buf.as_ptr() as usize + buf.len());
+    let p = t.playback.curves.as_ptr() as usize;
+    assert!(p >= lo && p < hi);
+    assert_roundtrip(&c);
+}
+
+#[test]
+fn the_playback_layouts_match_the_specification() {
+    use super::playback::*;
+    use std::mem::size_of;
+    assert_eq!(size_of::<MotionDef>(), 36);
+    assert_eq!(size_of::<CurveDef>(), 36);
+    assert_eq!(size_of::<SegmentDef>(), 28);
+    assert_eq!(size_of::<ExpressionDef>(), 24);
+    assert_eq!(size_of::<ExpressionParamDef>(), 12);
+    assert_eq!(size_of::<PoseDef>(), 12);
+    assert_eq!(size_of::<PoseGroupDef>(), 8);
+    assert_eq!(size_of::<PoseEntryDef>(), 12);
+}
+
+#[test]
+fn a_loader_that_predates_the_playback_sections_still_reads_the_file() {
+    // Simulated by renaming them to IDs nobody knows: they are skipped.
+    let b = playback_bytes();
+    let n = le_u32(&b, 16) as usize;
+    let mut b = b;
+    for i in 0..n {
+        let at = HEADER_LEN + i * ENTRY_LEN;
+        let sec = le_u32(&b, at);
+        if sec >= id::PLAYBACK_STRINGS {
+            b = patch(&b, at, &(sec + 0x1000).to_le_bytes());
+        }
+    }
+    let buf = AlignedBuf::from_bytes(&b);
+    let t = Tmod::parse(&buf).unwrap();
+    assert!(t.playback.is_empty());
+}
+
+#[test]
+fn partial_or_inconsistent_playback_data_is_rejected() {
+    let b = playback_bytes();
+    let n = le_u32(&b, 16) as usize;
+    let entry = |sec: u32| {
+        (0..n)
+            .map(|i| HEADER_LEN + i * ENTRY_LEN)
+            .find(|&at| le_u32(&b, at) == sec)
+            .unwrap()
+    };
+    // One of the ten missing.
+    let missing = patch(&b, entry(id::POSE_LINKS), &0x7777u32.to_le_bytes());
+    assert_eq!(parse(&missing), Err(Error::MissingSection(id::POSE_LINKS)));
+    // A curve that targets a parameter past the end.
+    let buf = AlignedBuf::from_bytes(&b);
+    let at = le_u64(&buf, entry(id::MOTION_CURVES) + 8) as usize;
+    let bad = patch(&b, at + 4, &999u32.to_le_bytes());
+    assert!(matches!(parse(&bad), Err(Error::Layout(_))));
+    // A segment whose time runs backwards.
+    let at = le_u64(&buf, entry(id::MOTION_SEGMENTS) + 8) as usize;
+    let bad = patch(&b, at + 4, &(-1.0f32).to_le_bytes());
+    assert!(matches!(parse(&bad), Err(Error::Layout(_))));
+    // An expression blend that is not known.
+    let at = le_u64(&buf, entry(id::EXPRESSION_PARAMS) + 8) as usize;
+    let bad = patch(&b, at + 4, &9u32.to_le_bytes());
+    assert!(matches!(parse(&bad), Err(Error::Layout(_))));
+}
+
+#[test]
+fn bad_playback_data_is_not_written() {
+    let m = playback_model();
+    let c = m.compile().unwrap();
+    let mut p = PlaybackData::from_model(&m).unwrap();
+    p.segments.to_mut()[0].end_value = f32::NAN;
+    assert!(matches!(write_with(&c, &p, &[]), Err(Error::Layout(_))));
+    let mut p = PlaybackData::from_model(&m).unwrap();
+    p.expression_params.to_mut()[0].parameter = 77;
+    assert!(matches!(write_with(&c, &p, &[]), Err(Error::Layout(_))));
+    // The editing model refuses a curve that runs backwards.
+    let mut m = playback_model();
+    let id = m.motions.find("Sway").unwrap();
+    m.motions.get_mut(id).unwrap().curves[0].segments[0] = Segment::Linear([-1.0, 0.0]);
+    assert!(PlaybackData::from_model(&m).is_err());
 }
