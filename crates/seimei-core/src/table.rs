@@ -59,6 +59,19 @@ impl<T> Table<T> {
         Ok(id)
     }
 
+    /// Writes an element at exactly `id` under `name`, replacing whatever is
+    /// there. Used to restore history; `name` must not belong to another id.
+    pub(crate) fn put(&mut self, id: Id<T>, name: &str, value: T) {
+        let entry = Entry {
+            name: name.to_owned(),
+            value,
+        };
+        if let Some(old) = self.arena.restore(id.cast(), entry) {
+            self.names.remove(&old.name);
+        }
+        self.names.insert(name.to_owned(), id);
+    }
+
     pub fn get(&self, id: Id<T>) -> Option<&T> {
         self.arena.get(id.cast()).map(|entry| &entry.value)
     }
@@ -100,9 +113,28 @@ impl<T> Table<T> {
     }
 }
 
+impl<T: PartialEq> PartialEq for Table<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len() && self.iter().eq(other.iter())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn put_restores_id_and_name() {
+        let mut table = Table::new();
+        let id = table.insert("a", 1).unwrap();
+        table.remove(id);
+        table.put(id, "a", 1);
+        assert_eq!(table.find("a"), Some(id));
+        assert_eq!(table.get(id), Some(&1));
+        table.put(id, "a", 5);
+        assert_eq!(table.get(id), Some(&5));
+        assert_eq!(table.len(), 1);
+    }
 
     #[test]
     fn find_by_persistent_name() {

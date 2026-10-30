@@ -9,12 +9,14 @@
 use crate::arena::Arena;
 use crate::driver::Driver;
 use crate::elements::{Parameter, Part};
+use crate::history::History;
 use crate::keyform::Binding;
 use crate::physics::PhysicsRig;
 use crate::playback::{Expression, Motion, Pose};
 use crate::rig::{ArtMesh, BlendShape, Bone, Glue, RotationDeformer, WarpDeformer};
 use crate::table::Table;
 
+/// Equality ignores the history: two models are equal when their contents are.
 #[derive(Default)]
 pub struct Model {
     pub(crate) parameters: Table<Parameter>,
@@ -31,6 +33,7 @@ pub struct Model {
     pub(crate) bindings: Arena<Binding>,
     pub(crate) pose: Option<Pose>,
     pub(crate) physics: PhysicsRig,
+    pub(crate) history: History,
 }
 
 impl Model {
@@ -92,5 +95,28 @@ impl Model {
 
     pub fn physics(&self) -> &PhysicsRig {
         &self.physics
+    }
+
+    pub fn history(&self) -> &History {
+        &self.history
+    }
+}
+
+impl PartialEq for Model {
+    fn eq(&self, other: &Self) -> bool {
+        self.parameters == other.parameters
+            && self.parts == other.parts
+            && self.meshes == other.meshes
+            && self.warps == other.warps
+            && self.rotations == other.rotations
+            && self.glues == other.glues
+            && self.bones == other.bones
+            && self.blend_shapes == other.blend_shapes
+            && self.drivers == other.drivers
+            && self.motions == other.motions
+            && self.expressions == other.expressions
+            && self.bindings == other.bindings
+            && self.pose == other.pose
+            && self.physics == other.physics
     }
 }
