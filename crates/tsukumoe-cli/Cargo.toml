@@ -11,11 +11,23 @@ repository.workspace = true
 name = "tsukumoe"
 path = "src/main.rs"
 
+[lib]
+name = "tsukumoe_cli"
+path = "src/lib.rs"
+
 [dependencies]
 tsukumoe-core.workspace = true
 tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "reference"
+harness = false
 
 [lints]
 workspace = true

@@ -1568,6 +1568,8 @@ dependencies = [
 name = "tsukumoe-cli"
 version = "0.1.0"
 dependencies = [
+ "criterion",
+ "serde",
  "serde_json",
  "tsukumoe-core",
  "tsukumoe-format",
