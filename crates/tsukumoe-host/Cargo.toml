@@ -13,7 +13,7 @@ tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true
 tsukumoe-ui.workspace = true
 wgpu.workspace = true
-wgpui.workspace = true
+eframe.workspace = true
 
 [[bin]]
 name = "tsukumoe-host"

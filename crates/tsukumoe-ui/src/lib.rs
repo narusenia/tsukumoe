@@ -1,21 +1,14 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Tsukumoe's UI layer: design tokens and styled components built on the
-//! unstyled behavior of `wgpui-base` (ADR-0025, ADR-0026). Every look comes
-//! from the [`Theme`]; the `gallery` example shows each component's states.
+//! Tsukumoe's UI layer on egui (ADR-0027): design tokens, a theme that can be
+//! switched and loaded from JSON, and a few components that read it. The
+//! `gallery` example shows every component in every state.
 
-mod button;
-mod label;
-mod panel;
-mod slider;
-mod switch;
+mod components;
+mod font;
 mod theme;
 
-pub use button::{Variant, button};
-pub use label::{hint, label};
-pub use panel::panel;
-pub use slider::{slider, slider_state};
-pub use switch::switch;
+pub use components::{Variant, button, hint, label, panel, slider, switch};
+pub use font::install_cjk_font;
 pub use theme::{Colors, Metrics, Mode, Theme, init, set_mode, set_theme};
-pub use wgpui_base::slider::{SliderEvent, SliderState, SliderValue};

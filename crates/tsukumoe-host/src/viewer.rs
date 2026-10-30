@@ -126,6 +126,21 @@ impl Scene {
         }
     }
 
+    /// Moves the first two parameters by fractions of their ranges: `dx` the
+    /// first, `dy` the second. Returns whether either moved.
+    pub fn drive(&mut self, dx: f32, dy: f32) -> bool {
+        let mut moved = false;
+        for (index, fraction) in [(0, dx), (1, dy)] {
+            let Some(p) = self.params.get(index) else {
+                continue;
+            };
+            let before = self.values[index];
+            self.set_parameter(index, before + fraction * (p.max - p.min));
+            moved |= self.values[index] != before;
+        }
+        moved
+    }
+
     /// The bounding box of the default pose.
     pub fn bounds(&self) -> [f32; 4] {
         self.bounds
@@ -211,6 +226,18 @@ mod tests {
         assert_eq!((scene.value(0), scene.value(1)), (30.0, 0.25));
         scene.reset();
         assert_eq!((scene.value(0), scene.value(1)), (0.0, 1.0));
+    }
+
+    #[test]
+    fn drive_moves_the_first_two_parameters_by_fractions_of_their_ranges() {
+        let mut scene = Scene::new(&fixture()).unwrap();
+        // ParamAngle is -30..30 from 0; ParamEyeOpen is 0..1 from 1.
+        assert!(scene.drive(0.25, -0.25));
+        assert_eq!((scene.value(0), scene.value(1)), (15.0, 0.75));
+        assert!(scene.drive(10.0, 0.0), "clamped at the maximum");
+        assert_eq!(scene.value(0), 30.0);
+        assert!(!scene.drive(1.0, 0.0), "already at the maximum");
+        assert!(!scene.drive(0.0, 0.0));
     }
 
     #[test]
