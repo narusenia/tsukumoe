@@ -7,8 +7,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Vec2};
-use tsukumoe_ui::{Theme, Variant, button, hint, label, panel, slider};
+use tsukumoe_ui::{
+    Density, Mode, NamedTheme, Preferences, Theme, Variant, button, hint, label, panel, select,
+    slider,
+};
 
+use crate::settings;
 use crate::viewer::{Viewer, open_project};
 
 /// Pointer travel, in points, that moves a parameter across its whole range.
@@ -33,11 +37,72 @@ struct Host {
     /// Draw until this time.
     active_until: Instant,
     error: Option<String>,
+    prefs: Preferences,
+    themes: Vec<NamedTheme>,
+    /// Where preferences are saved; `None` when the environment has no home.
+    config: Option<PathBuf>,
 }
 
 impl Host {
     fn wake(&mut self) {
         self.active_until = Instant::now() + SETTLE;
+    }
+
+    /// The theme and density selectors; a change applies at once and is saved.
+    fn appearance(&mut self, ui: &mut egui::Ui) {
+        let modes = [
+            ("mode:dark", "Dark"),
+            ("mode:light", "Light"),
+            ("mode:system", "System"),
+        ];
+        let mut options: Vec<(String, &str)> = modes
+            .iter()
+            .map(|(key, name)| ((*key).to_owned(), *name))
+            .collect();
+        options.extend(
+            self.themes
+                .iter()
+                .map(|t| (format!("theme:{}", t.name), t.name.as_str())),
+        );
+        let named = self
+            .prefs
+            .theme
+            .as_ref()
+            .filter(|name| self.themes.iter().any(|t| &t.name == *name));
+        let mut choice = match (named, self.prefs.mode) {
+            (Some(name), _) => format!("theme:{name}"),
+            (None, Mode::Dark) => "mode:dark".to_owned(),
+            (None, Mode::Light) => "mode:light".to_owned(),
+            (None, Mode::System) => "mode:system".to_owned(),
+        };
+        let mut density = self.prefs.density;
+        let (theme_changed, density_changed) = ui
+            .horizontal(|ui| {
+                let theme = select(ui, "theme", "Theme", &mut choice, &options).changed();
+                let densities = [(Density::Compact, "Compact"), (Density::Regular, "Regular")];
+                let density = select(ui, "density", "Density", &mut density, &densities).changed();
+                (theme, density)
+            })
+            .inner;
+        if theme_changed {
+            match choice.split_once(':') {
+                Some(("theme", name)) => self.prefs.theme = Some(name.to_owned()),
+                Some((_, "light")) => (self.prefs.theme, self.prefs.mode) = (None, Mode::Light),
+                Some((_, "system")) => (self.prefs.theme, self.prefs.mode) = (None, Mode::System),
+                _ => (self.prefs.theme, self.prefs.mode) = (None, Mode::Dark),
+            }
+        }
+        if density_changed {
+            self.prefs.density = density;
+        }
+        if theme_changed || density_changed {
+            self.prefs.apply(ui.ctx(), &self.themes);
+            if let Some(dir) = &self.config
+                && let Err(e) = settings::write_preferences(dir, &self.prefs)
+            {
+                self.error = Some(e);
+            }
+        }
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
@@ -61,6 +126,7 @@ impl Host {
                 ui,
                 "Hold Space and move the mouse over the model: the first two parameters",
             );
+            self.appearance(ui);
             if let Some(e) = &self.error {
                 hint(ui, e.clone());
             }
@@ -213,6 +279,16 @@ pub fn run(path: PathBuf) -> Result<(), String> {
         options,
         Box::new(move |cc| {
             tsukumoe_ui::init(&cc.egui_ctx);
+            let config = settings::config_dir();
+            let (themes, theme_errors) = config.as_deref().map_or_else(
+                || (tsukumoe_ui::builtin_themes(), Vec::new()),
+                settings::load_themes,
+            );
+            let prefs = config
+                .as_deref()
+                .map(settings::read_preferences)
+                .unwrap_or_default();
+            prefs.apply(&cc.egui_ctx, &themes);
             let rs = cc
                 .wgpu_render_state
                 .as_ref()
@@ -224,7 +300,10 @@ pub fn run(path: PathBuf) -> Result<(), String> {
                 target: None,
                 last_frame: Instant::now(),
                 active_until: Instant::now() + SETTLE,
-                error: None,
+                error: (!theme_errors.is_empty()).then(|| theme_errors.join("\n")),
+                prefs,
+                themes,
+                config,
             }))
         }),
     )
