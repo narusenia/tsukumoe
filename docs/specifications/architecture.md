@@ -37,6 +37,7 @@ tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsuk
 | `tsukumoe-tracking` | 入力アダプタ・標準パラメータマッピング | なし | M4 |
 | `tsukumoe-ai` | 推論プロバイダ抽象・リップシンク・リグ支援 | なし | M4 / M6 |
 | `tsukumoe-cli` | 変換・レンダ・検証・MCP サーバ | なし | M1〜 |
+| `tsukumoe-i18n` | UI の翻訳（Fluent）・言語の検出とフォールバック | なし | M1 |
 | `tsukumoe-ui` | デザイントークン・テーマ・UI 部品（egui の上）、gallery | あり | M1 |
 | `tsukumoe-host` | 透過ウィンドウ・Spout2 / Syphon・仮想カメラ | あり | M1（ビューア）→ M4 |
 | `tsukumoe-app` | エディタ | あり | M5 |

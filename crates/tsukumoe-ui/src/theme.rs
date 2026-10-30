@@ -1,6 +1,7 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use crate::lang::set_language;
 use egui::epaint::Shadow;
 use egui::{
     Color32, Context, CornerRadius, FontFamily, FontId, Id, Stroke, TextStyle, ThemePreference,
@@ -8,6 +9,7 @@ use egui::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tsukumoe_i18n::Language;
 
 /// A `#rrggbb` color in a theme file.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -413,6 +415,9 @@ pub struct Preferences {
     pub density: Density,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    /// `None` follows the OS language.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<Language>,
 }
 
 impl Preferences {
@@ -429,6 +434,7 @@ impl Preferences {
     /// Installs the saved theme: the named one from `themes` if it is still
     /// there, else the mode's. The density here wins over a theme file's own.
     pub fn apply(&self, ctx: &Context, themes: &[NamedTheme]) {
+        set_language(ctx, self.language.unwrap_or_else(Language::detect));
         let named = self
             .theme
             .as_ref()
@@ -503,6 +509,7 @@ mod tests {
             mode: Mode::System,
             density: Density::Regular,
             theme: Some("Figma Dark".into()),
+            language: Some(Language::Ja),
         };
         assert_eq!(Preferences::from_json(&p.to_json()), p);
         assert_eq!(Preferences::from_json("not json"), Preferences::default());

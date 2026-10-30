@@ -116,3 +116,31 @@ fn the_built_in_named_themes() {
     }
     results.unwrap();
 }
+
+#[test]
+fn the_theme_section_in_both_languages() {
+    let mut results = SnapshotResults::new();
+    for language in [tsukumoe_ui::Language::En, tsukumoe_ui::Language::Ja] {
+        let mut showcase = Showcase::new();
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(560.0, 200.0))
+            .wgpu()
+            .build_ui(move |ui| {
+                let ctx = ui.ctx().clone();
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_mode(&ctx, Mode::Dark);
+                tsukumoe_ui::set_language(&ctx, language);
+                let t = Theme::get(&ctx);
+                egui::Frame::NONE
+                    .fill(t.colors.background)
+                    .inner_margin(t.metrics.pad)
+                    .show(ui, |ui| showcase.show(ui, Section::Theme));
+            });
+        harness.fit_contents();
+        harness.run();
+        harness.fit_contents();
+        harness.snapshot(format!("theme_{}", language.code()));
+        results.extend_harness(&mut harness);
+    }
+    results.unwrap();
+}

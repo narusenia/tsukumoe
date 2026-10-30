@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Vec2};
 use tsukumoe_ui::{
-    Density, Mode, NamedTheme, Preferences, Theme, Variant, button, hint, label, panel, select,
-    slider,
+    Arg, Density, Language, Mode, NamedTheme, Preferences, Theme, Variant, button, hint, label,
+    panel, select, slider, tr, tr_args,
 };
 
 use crate::settings;
@@ -48,16 +48,19 @@ impl Host {
         self.active_until = Instant::now() + SETTLE;
     }
 
-    /// The theme and density selectors; a change applies at once and is saved.
+    /// The theme, density and language selectors; a change applies at once and
+    /// is saved.
     fn appearance(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let text = |key: &str| tr(&ctx, key);
         let modes = [
-            ("mode:dark", "Dark"),
-            ("mode:light", "Light"),
-            ("mode:system", "System"),
+            ("mode:dark", text("theme-dark")),
+            ("mode:light", text("theme-light")),
+            ("mode:system", text("theme-system")),
         ];
         let mut options: Vec<(String, &str)> = modes
             .iter()
-            .map(|(key, name)| ((*key).to_owned(), *name))
+            .map(|(key, name)| ((*key).to_owned(), name.as_str()))
             .collect();
         options.extend(
             self.themes
@@ -75,13 +78,35 @@ impl Host {
             (None, Mode::Light) => "mode:light".to_owned(),
             (None, Mode::System) => "mode:system".to_owned(),
         };
+        let densities = [
+            (Density::Compact, text("density-compact")),
+            (Density::Regular, text("density-regular")),
+        ];
+        let density_options: Vec<(Density, &str)> =
+            densities.iter().map(|(d, n)| (*d, n.as_str())).collect();
+        let auto = text("language-auto");
+        let mut language_options = vec![(None, auto.as_str())];
+        language_options.extend(Language::ALL.map(|l| (Some(l), l.native_name())));
         let mut density = self.prefs.density;
-        let (theme_changed, density_changed) = ui
-            .horizontal(|ui| {
-                let theme = select(ui, "theme", "Theme", &mut choice, &options).changed();
-                let densities = [(Density::Compact, "Compact"), (Density::Regular, "Regular")];
-                let density = select(ui, "density", "Density", &mut density, &densities).changed();
-                (theme, density)
+        let mut language = self.prefs.language;
+        let (theme_changed, density_changed, language_changed) = ui
+            .horizontal_wrapped(|ui| {
+                let theme = select(ui, "theme", &text("host-theme"), &mut choice, &options);
+                let dens = select(
+                    ui,
+                    "density",
+                    &text("host-density"),
+                    &mut density,
+                    &density_options,
+                );
+                let lang = select(
+                    ui,
+                    "language",
+                    &text("host-language"),
+                    &mut language,
+                    &language_options,
+                );
+                (theme.changed(), dens.changed(), lang.changed())
             })
             .inner;
         if theme_changed {
@@ -95,8 +120,11 @@ impl Host {
         if density_changed {
             self.prefs.density = density;
         }
-        if theme_changed || density_changed {
-            self.prefs.apply(ui.ctx(), &self.themes);
+        if language_changed {
+            self.prefs.language = language;
+        }
+        if theme_changed || density_changed || language_changed {
+            self.prefs.apply(&ctx, &self.themes);
             if let Some(dir) = &self.config
                 && let Err(e) = settings::write_preferences(dir, &self.prefs)
             {
@@ -112,20 +140,18 @@ impl Host {
             ui.horizontal(|ui| {
                 label(ui, self.name.clone());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if button(ui, "Reset", Variant::Secondary).clicked() {
+                    if button(ui, &tr(ui.ctx(), "host-reset"), Variant::Secondary).clicked() {
                         self.viewer.scene.reset();
                         self.wake();
                     }
                 });
             });
+            let count = self.viewer.scene.parameters().len();
             hint(
                 ui,
-                format!("{} parameters", self.viewer.scene.parameters().len()),
+                tr_args(ui.ctx(), "host-parameters", &[("count", Arg::from(count))]),
             );
-            hint(
-                ui,
-                "Hold Space and move the mouse over the model: the first two parameters",
-            );
+            hint(ui, tr(ui.ctx(), "host-hint-drive"));
             self.appearance(ui);
             if let Some(e) = &self.error {
                 hint(ui, e.clone());
