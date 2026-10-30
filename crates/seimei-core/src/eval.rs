@@ -55,6 +55,16 @@ pub struct Frame {
     scratch: Vec<f32>,
     positions: Vec<f32>,
     attrs: Vec<MeshAttrs>,
+    // The previous frame, for the draw list's change flags.
+    prev_positions: Vec<f32>,
+    prev_attrs: Vec<MeshAttrs>,
+    /// Mesh indices in drawing order (see `draw.rs`) and the previous frame's.
+    pub(crate) order: Vec<u32>,
+    prev_order: Vec<u32>,
+    evaluated: bool,
+    pub(crate) order_changed: bool,
+    pub(crate) geometry_changed: Vec<bool>,
+    pub(crate) style_changed: Vec<bool>,
 }
 
 impl Frame {
@@ -80,6 +90,15 @@ impl Frame {
             scratch: vec![0.0; max_points],
             positions: vec![0.0; model.mesh_base_positions.len()],
             attrs: vec![[0.0; 8]; model.meshes.len()],
+            // NaN never equals itself, so the first frame is all changed.
+            prev_positions: vec![f32::NAN; model.mesh_base_positions.len()],
+            prev_attrs: vec![[f32::NAN; 8]; model.meshes.len()],
+            order: (0..model.meshes.len() as u32).collect(),
+            prev_order: (0..model.meshes.len() as u32).collect(),
+            evaluated: false,
+            order_changed: true,
+            geometry_changed: vec![true; model.meshes.len()],
+            style_changed: vec![true; model.meshes.len()],
         }
     }
 
@@ -122,7 +141,18 @@ impl Frame {
             scratch,
             positions,
             attrs,
+            prev_positions,
+            prev_attrs,
+            order,
+            prev_order,
+            evaluated,
+            order_changed,
+            geometry_changed,
+            style_changed,
         } = self;
+
+        std::mem::swap(positions, prev_positions);
+        std::mem::swap(attrs, prev_attrs);
 
         for d in &model.drivers {
             values[d.output] = expr::eval(&model.ops[d.start..d.start + d.len], values);
@@ -300,6 +330,22 @@ impl Frame {
                 }
             }
         }
+
+        for (i, def) in model.meshes.iter().enumerate() {
+            let range = def.vertex_start * 2..(def.vertex_start + def.vertex_count) * 2;
+            geometry_changed[i] = positions[range.clone()] != prev_positions[range];
+            style_changed[i] = attrs[i] != prev_attrs[i];
+        }
+
+        // Draw order ascending, ties by mesh index. Sorting in place keeps the
+        // frame allocation-free; the old order is the starting point.
+        std::mem::swap(order, prev_order);
+        order.sort_unstable_by(|&a, &b| {
+            let (a, b) = (a as usize, b as usize);
+            attrs[a][1].total_cmp(&attrs[b][1]).then(a.cmp(&b))
+        });
+        *order_changed = !*evaluated || order != prev_order;
+        *evaluated = true;
     }
 }
 

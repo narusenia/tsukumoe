@@ -13,7 +13,7 @@ use crate::elements::ParameterId;
 use crate::expr::{self, ExprError, Op};
 use crate::keyform::BindingId;
 use crate::model::Model;
-use crate::rig::{BlendTarget, DeformerRef, GlueNode, RotationKeyform};
+use crate::rig::{BlendMode, BlendTarget, DeformerRef, GlueNode, RotationKeyform};
 use crate::validate::ModelError;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +96,16 @@ pub struct MeshDef {
     /// Float offset of keyform 0's positions in `mesh_kf_positions`.
     pub kf_positions: usize,
     pub blends: Vec<usize>,
+    /// First index in `mesh_indices`. Indices are local to the mesh.
+    pub index_start: usize,
+    pub index_count: usize,
+    pub texture: u32,
+    pub blend_mode: BlendMode,
+    /// Meshes clipping this one: `mesh_masks[mask_start..mask_start + mask_count]`.
+    pub mask_start: usize,
+    pub mask_count: usize,
+    pub mask_inverted: bool,
+    pub double_sided: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -166,6 +176,11 @@ pub struct CompiledModel {
     pub mesh_names: Vec<String>,
     pub meshes: Vec<MeshDef>,
     pub mesh_base_positions: Vec<f32>,
+    /// `u, v` interleaved, one pair per vertex of `mesh_base_positions`.
+    pub mesh_uvs: Vec<f32>,
+    pub mesh_indices: Vec<u32>,
+    /// Mesh indices.
+    pub mesh_masks: Vec<u32>,
     pub mesh_kf_positions: Vec<f32>,
     pub mesh_kf_attrs: Vec<MeshAttrs>,
 
@@ -305,6 +320,12 @@ impl Model {
         for (_, name, mesh) in self.meshes.iter() {
             let vertex_start = c.mesh_base_positions.len() / 2;
             flatten(&mesh.positions, &mut c.mesh_base_positions);
+            flatten(&mesh.uvs, &mut c.mesh_uvs);
+            let index_start = c.mesh_indices.len();
+            c.mesh_indices.extend(&mesh.indices);
+            let mask_start = c.mesh_masks.len();
+            c.mesh_masks
+                .extend(mesh.masks.iter().map(|m| mesh_index[m] as u32));
             let base_attrs = attrs(
                 mesh.opacity,
                 mesh.draw_order,
@@ -335,6 +356,14 @@ impl Model {
                 keyforms,
                 kf_positions,
                 blends: Vec::new(),
+                index_start,
+                index_count: mesh.indices.len(),
+                texture: mesh.texture,
+                blend_mode: mesh.blend_mode,
+                mask_start,
+                mask_count: mesh.masks.len(),
+                mask_inverted: mesh.mask_inverted,
+                double_sided: mesh.double_sided,
             });
         }
 

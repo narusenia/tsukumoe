@@ -9,6 +9,7 @@
 pub mod arena;
 pub mod command;
 pub mod compiled;
+pub mod draw;
 pub mod driver;
 pub mod elements;
 pub mod eval;
