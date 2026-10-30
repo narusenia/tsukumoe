@@ -26,6 +26,8 @@ pollster = "0.4"
 png = "0.18"
 criterion = { version = "0.7", default-features = false }
 egui = "0.37"
+egui_extras = { version = "0.37", default-features = false, features = ["svg"] }
+egui_kittest = { version = "0.37", features = ["snapshot", "wgpu"] }
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }
 jsonschema = { version = "0.33", default-features = false }
 

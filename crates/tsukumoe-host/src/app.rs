@@ -79,7 +79,7 @@ impl Host {
                             let width = (ui.available_width() - READOUT_WIDTH).max(40.0);
                             let changed = ui
                                 .allocate_ui(Vec2::new(width, t.metrics.control), |ui| {
-                                    slider(ui, &mut value, p.min..=p.max).changed()
+                                    slider(ui, &mut value, p.min..=p.max, &p.name).changed()
                                 })
                                 .inner;
                             hint(ui, format!("{value:.2}"));

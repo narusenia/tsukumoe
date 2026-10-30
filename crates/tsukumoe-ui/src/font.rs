@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use egui::{Context, FontData, FontDefinitions, FontFamily};
+use egui::{Context, FontData, FontDefinitions, FontFamily, Id};
 
 /// System fonts with Japanese glyphs, tried in order.
 const CANDIDATES: &[&str] = &[
@@ -31,5 +31,12 @@ pub fn install_cjk_font(ctx: &Context) -> bool {
         fonts.families.entry(family).or_default().push("cjk".into());
     }
     ctx.set_fonts(fonts);
+    ctx.data_mut(|d| d.insert_temp(Id::NULL.with("tsukumoe-ui-cjk"), true));
     true
+}
+
+/// Whether [`install_cjk_font`] found a font on this context.
+pub fn has_cjk_font(ctx: &Context) -> bool {
+    ctx.data(|d| d.get_temp(Id::NULL.with("tsukumoe-ui-cjk")))
+        .unwrap_or(false)
 }
