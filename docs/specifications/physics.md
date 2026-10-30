@@ -2,7 +2,7 @@
 
 関連: REQ-CORE-005 / ADR-0022
 
-状態: M1-06 の実装に合わせた Seimei 自身の定義。**Cubism（physics3）と一致するかは M2 で検証する**。定数（`GRAVITY_UNIT` など）は M2 の比較で調整しうる。
+状態: M1-06 の実装に合わせた Tsukumoe 自身の定義。**Cubism（physics3）と一致するかは M2 で検証する**。定数（`GRAVITY_UNIT` など）は M2 の比較で調整しうる。
 
 ## 時間
 

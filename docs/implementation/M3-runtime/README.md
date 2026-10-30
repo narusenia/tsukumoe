@@ -5,9 +5,9 @@
 | ID | 単位 | REQ | 規模 | 依存 | 状態 |
 |---|---|---|---|---|---|
 | M3-01 | ランタイム形式（ゼロコピー）・仕様書・ファズテスト | FMT-004〜006 | L | M1-03 | 未着手 |
-| M3-02 | `seimei-runtime`（モーション・表情・自動動作） | RT-001 | M | M3-01 | 未着手 |
-| M3-03 | `seimei-ffi`（C ABI・cbindgen・C サンプル） | RT-002 | M | M3-02 | 未着手 |
-| M3-04 | `seimei-wasm` と npm パッケージ（WebGPU / WebGL2） | RT-003 | M | M3-02 | 未着手 |
+| M3-02 | `tsukumoe-runtime`（モーション・表情・自動動作） | RT-001 | M | M3-01 | 未着手 |
+| M3-03 | `tsukumoe-ffi`（C ABI・cbindgen・C サンプル） | RT-002 | M | M3-02 | 未着手 |
+| M3-04 | `tsukumoe-wasm` と npm パッケージ（WebGPU / WebGL2） | RT-003 | M | M3-02 | 未着手 |
 | M3-05 | Unity パッケージ（別 repo） | RT-004 | L | M3-03 | 未着手 |
 | M3-06 | 環境間の出力一致テスト | RT-007 | M | M3-04, M3-05 | 未着手 |
 | M3-07 | 性能目標の達成と Cubism SDK 比較（手元） | PERF-002〜007 | L | M3-01 | 未着手 |

@@ -1,6 +1,6 @@
 # COMPAT 要件定義（互換性）
 
-対象クレート: `seimei-compat`
+対象クレート: `tsukumoe-compat`
 
 ## REQ-COMPAT-001: moc3 読み込みの法務ゲート
 
@@ -79,7 +79,7 @@ moc3 の読み込みをクリーンルームで実装する。
 
 ### 説明
 
-`model3.json` / `motion3.json` / `exp3.json` / `physics3.json` / `pose3.json` を読み込み、Seimei のモーション・表情・物理・ポーズに変換する。`cdi3.json`（表示名）・`userdata3.json` も読む。
+`model3.json` / `motion3.json` / `exp3.json` / `physics3.json` / `pose3.json` を読み込み、Tsukumoe のモーション・表情・物理・ポーズに変換する。`cdi3.json`（表示名）・`userdata3.json` も読む。
 
 ### 受入条件
 
@@ -100,7 +100,7 @@ moc3 の読み込みをクリーンルームで実装する。
 
 ### 説明
 
-Live2D モデルを Seimei で表示した結果が Cubism と同等であることを、画像差分テストで検証する。
+Live2D モデルを Tsukumoe で表示した結果が Cubism と同等であることを、画像差分テストで検証する。
 
 ### 受入条件
 
@@ -128,7 +128,7 @@ Inochi2D の `.inp`（パズル）と `.inx`（エディタ）を読み書きす
 
 ### 受入条件
 
-- [ ] Inochi2D → Seimei → Inochi2D の往復で、表現できる要素が失われない
+- [ ] Inochi2D → Tsukumoe → Inochi2D の往復で、表現できる要素が失われない
 - [ ] 表現できない要素は書き出し時に警告する
 
 ### 依存要件

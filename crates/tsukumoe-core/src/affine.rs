@@ -1,4 +1,4 @@
-// Copyright 2026 Seimei Contributors
+// Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! 2D affine transforms. Rotation is counter-clockwise, in degrees where a

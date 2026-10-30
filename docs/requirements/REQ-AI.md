@@ -1,6 +1,6 @@
 # AI 要件定義（AI ネイティブ機能）
 
-対象クレート: `seimei-ai` / `seimei-cli`
+対象クレート: `tsukumoe-ai` / `tsukumoe-cli`
 
 ## REQ-AI-001: 全編集操作のエージェント公開（MCP / CLI）
 

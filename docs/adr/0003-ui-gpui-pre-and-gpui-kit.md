@@ -6,7 +6,7 @@
 ## 背景
 
 Ravel は gpui-ce（コミュニティフォーク）と、それに合わせた gpui-kit の fork に立っている。gpui-ce が生まれた理由は「Zed の gpui が公開されていない」ことだったが、現在は Zed 本体のスナップショットが `gpui-pre` としてほぼ毎日公開されている。gpui-kit 0.6 も上流では `gpui-pre` を前提にしている（Ravel `docs/implementation/gpui-kit-migration-plan.md`）。
-Seimei は新規なので、移行コストがない。
+Tsukumoe は新規なので、移行コストがない。
 
 ## 決定
 

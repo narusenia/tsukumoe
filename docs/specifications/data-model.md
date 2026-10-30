@@ -2,7 +2,7 @@
 
 関連: REQ-CORE-002〜005, REQ-CORE-009, REQ-COMPAT-004, REQ-COMPAT-006
 
-状態: M1-01 で `seimei-core` に型を実装済み（`crates/seimei-core/src/{elements,rig,keyform,physics,playback,driver}.rs`）。評価の意味づけは M1-03 以降で詰める。
+状態: M1-01 で `tsukumoe-core` に型を実装済み（`crates/tsukumoe-core/src/{elements,rig,keyform,physics,playback,driver}.rs`）。評価の意味づけは M1-03 以降で詰める。
 
 ID は内部が世代付きインデックス、外部参照は永続 ID（種類ごとに一意の文字列）。更新は `Model::apply` 経由（ADR-0018）。
 
@@ -25,7 +25,7 @@ ID は内部が世代付きインデックス、外部参照は永続 ID（種�
 
 ## Cubism 機能との対応
 
-| Cubism | Seimei | 備考 |
+| Cubism | Tsukumoe | 備考 |
 |---|---|---|
 | ArtMesh | ArtMesh | |
 | Warp Deformer | WarpDeformer | |
@@ -39,7 +39,7 @@ ID は内部が世代付きインデックス、外部参照は永続 ID（種�
 | Part / Part 不透明度 | Part | |
 | physics3 | PhysicsRig（振り子） | |
 | motion3 / exp3 / pose3 | Motion / Expression / Pose | |
-| — | Bone / Driver / 物理チェーン | Seimei 独自。互換モードでは無効 |
+| — | Bone / Driver / 物理チェーン | Tsukumoe 独自。互換モードでは無効 |
 
 ## スキニングとデフォーマの適用順
 

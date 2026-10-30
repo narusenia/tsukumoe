@@ -2,7 +2,7 @@
 
 Related: REQ-CORE-006, REQ-CORE-008 / `rendering.md`
 
-Status: implemented in M1-07 (`seimei-core::draw`). Rendering rules (masks, blending, tolerance) are in `rendering.md` and are decided with the reference renderer in M1-09.
+Status: implemented in M1-07 (`tsukumoe-core::draw`). Rendering rules (masks, blending, tolerance) are in `rendering.md` and are decided with the reference renderer in M1-09.
 
 The draw list is the last output of a frame and the only input a renderer needs. It is a view onto the compiled model and the evaluated frame: reading it copies nothing.
 

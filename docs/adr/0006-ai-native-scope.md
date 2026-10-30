@@ -17,4 +17,4 @@
 
 ## 結果
 
-- すべての編集が `seimei-core` のコマンド経由になる（REQ-CORE-007）
+- すべての編集が `tsukumoe-core` のコマンド経由になる（REQ-CORE-007）

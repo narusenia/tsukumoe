@@ -1,4 +1,4 @@
-# Seimei
+# Tsukumoe
 
 > English: [`README.md`](README.md)
 

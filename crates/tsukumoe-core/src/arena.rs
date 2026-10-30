@@ -1,4 +1,4 @@
-// Copyright 2026 Seimei Contributors
+// Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! Generational arena and typed ids (ADR-0018).

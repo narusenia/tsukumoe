@@ -1,6 +1,6 @@
 # UI 要件定義（UI 基盤）
 
-対象クレート: `seimei-app` / `seimei-host`
+対象クレート: `tsukumoe-app` / `tsukumoe-host`
 
 ## REQ-UI-001: gpui-pre と gpui-kit を fork せず採用
 
@@ -59,7 +59,7 @@ UI は Zed の gpui のスナップショット公開である `gpui-pre` と、
 
 ### 説明
 
-`seimei-core` / `-format` / `-gpu` / `-compat` / `-runtime` / `-ffi` / `-wasm` / `-tracking` / `-ai` / `-cli` は GPUI に依存しない。GPUI の更新がランタイムに波及しないようにする。
+`tsukumoe-core` / `-format` / `-gpu` / `-compat` / `-runtime` / `-ffi` / `-wasm` / `-tracking` / `-ai` / `-cli` は GPUI に依存しない。GPUI の更新がランタイムに波及しないようにする。
 
 ### 受入条件
 
@@ -79,7 +79,7 @@ UI は Zed の gpui のスナップショット公開である `gpui-pre` と、
 
 ### 説明
 
-ウィジェットは `gpui-base`（スタイルを持たない振る舞い層）の上に自前で作り、見た目を Seimei のテーマで統一する。初めは `seimei-app` の中に置き、必要になったら `seimei-ui` / `-widgets` / `-dock` に分ける。
+ウィジェットは `gpui-base`（スタイルを持たない振る舞い層）の上に自前で作り、見た目を Tsukumoe のテーマで統一する。初めは `tsukumoe-app` の中に置き、必要になったら `tsukumoe-ui` / `-widgets` / `-dock` に分ける。
 
 ### 受入条件
 

@@ -18,5 +18,5 @@
 ## 結果
 
 - アーキテクチャ図で、物理をドライバとキーフォーム補間の間に移す
-- 内部の運動方程式は Seimei 自身の定義として `docs/specifications/physics.md` に書く。Cubism（physics3）と一致するかは M2 で検証する
+- 内部の運動方程式は Tsukumoe 自身の定義として `docs/specifications/physics.md` に書く。Cubism（physics3）と一致するかは M2 で検証する
 - 1 フレーム内の複数刻みでは入力を一定として扱う（入力の補間はしない）

@@ -1,4 +1,4 @@
-# Contributing to Seimei
+# Contributing to Tsukumoe
 
 > 日本語版: [`CONTRIBUTING_ja.md`](CONTRIBUTING_ja.md)
 
