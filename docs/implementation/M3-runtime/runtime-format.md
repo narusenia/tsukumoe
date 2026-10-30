@@ -36,7 +36,7 @@
 ## 範囲
 
 - `tsukumoe-core`: 要素型の POD 化、`CompiledModel<'a>` への変更、`tmod` の書き出し・検証つき読み込み、`AlignedBuf`
-- `tsukumoe-format` / `tsukumoe-cli`: プロジェクトからの書き出し（`tsukumoe-cli export` に `.tmod` を足す）、`inspect` で `.tmod` の要約を出す
+- `tsukumoe-format` / `tsukumoe-cli`: プロジェクトからの書き出し（`tsukumoe-cli convert` の出力に `.tmod` を足す。拡張子で判定）、`inspect` で `.tmod` の要約を出す
 - 仕様書 §2 の完成（ヘッダ・セクション ID・各要素のバイトレイアウト・上限）
 - 範囲外: モーション・表情・自動動作（M3-02）、C ABI（M3-03）、WASM（M3-04）、圧縮、署名
 
