@@ -25,8 +25,8 @@ bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 png = "0.18"
 criterion = { version = "0.7", default-features = false }
-wgpui = "0.3.6"
-wgpui-base = "0.6.1"
+egui = "0.37"
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }
 jsonschema = { version = "0.33", default-features = false }
 
 [workspace.lints.rust]

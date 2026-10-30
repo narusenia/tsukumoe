@@ -1,6 +1,6 @@
 [package]
 name = "tsukumoe-ui"
-description = "Tsukumoe design tokens and UI components on wgpui-base"
+description = "Tsukumoe design tokens, theme and UI components on egui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,10 +8,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-wgpui.workspace = true
-wgpui-base.workspace = true
+egui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+eframe.workspace = true
 
 [lints]
 workspace = true

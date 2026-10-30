@@ -5,14 +5,14 @@
 ## 概要
 
 Tsukumoe は「GPU も UI も知らない評価コア」を中心に置き、その出力（描画リスト）を各環境のレンダラが描く。
-エディタとホストだけが GPUI に依存する。
+エディタとホストだけが UI フレームワーク（egui）に依存する。
 
 ```
-             tsukumoe-app (editor)     tsukumoe-host (streaming)        [GPUI]
+             tsukumoe-app (editor)     tsukumoe-host (streaming)        [UI]
                     │                       │
                     └───── tsukumoe-ui ─────┘
                     │                       │
-   ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  GPUI 境界
+   ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  UI 境界
                     ▼                       ▼
 tsukumoe-cli ──► tsukumoe-ai     tsukumoe-tracking
     │              │               │
@@ -25,7 +25,7 @@ tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsuk
 
 ## クレート
 
-| クレート | 役割 | GPUI | 追加する M |
+| クレート | 役割 | UI | 追加する M |
 |---|---|---|---|
 | `tsukumoe-core` | データモデル・評価パイプライン・物理・パラメータ式・編集コマンド / undo | なし | M1 |
 | `tsukumoe-format` | JSON プロジェクト形式・ランタイムバイナリ形式・JSON Schema 生成 | なし | M1 / M3 |
@@ -37,14 +37,14 @@ tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsuk
 | `tsukumoe-tracking` | 入力アダプタ・標準パラメータマッピング | なし | M4 |
 | `tsukumoe-ai` | 推論プロバイダ抽象・リップシンク・リグ支援 | なし | M4 / M6 |
 | `tsukumoe-cli` | 変換・レンダ・検証・MCP サーバ | なし | M1〜 |
-| `tsukumoe-ui` | デザイントークンと UI 部品（`wgpui-base` の上）、gallery | あり | M1 |
+| `tsukumoe-ui` | デザイントークン・テーマ・UI 部品（egui の上）、gallery | あり | M1 |
 | `tsukumoe-host` | 透過ウィンドウ・Spout2 / Syphon・仮想カメラ | あり | M1（ビューア）→ M4 |
 | `tsukumoe-app` | エディタ | あり | M5 |
 
 ## 依存規則
 
 - 下位のクレートは上位のクレートに依存しない。`tsukumoe-core` は workspace 内のどのクレートにも依存しない
-- GPUI 境界より下のクレートは `gpui` / `wgpui` 系に依存しない（CI で `cargo tree` 検査）
+- UI 境界より下のクレートは egui 系（`egui` / `eframe` / `egui-wgpu` / `epaint` など）に依存しない（CI で `cargo tree` 検査）
 - `tsukumoe-core` は `wgpu` にも依存しない。`wasm32-unknown-unknown` でビルドできる状態を保つ
 - `tsukumoe-runtime` は編集機能（コマンド・undo）を含まない。core の評価部分を feature で切り出して使う
 - moc3 関連コードは `tsukumoe-compat` の `moc3` feature に閉じる（REQ-COMPAT-003）
@@ -64,9 +64,8 @@ params ─► drivers ─► physics ─► keyform interp ─► skinning ─�
 
 ## GPU と UI
 
-- UI: `wgpui` + `wgpui-base`（[ADR-0025](../adr/0025-ui-wgpui.md)）。部品は `tsukumoe-ui` に自前で作る（[ADR-0026](../adr/0026-ui-crate.md)）
-- `wgpui` / `wgpui-base` は同時に更新する
-- `wgpu` は `wgpui` と同じ版（30）。ビューポートは `WgpuSurface` の device を受け取り `tsukumoe-gpu` で描く
+- UI: egui（eframe + egui-wgpu、[ADR-0027](../adr/0027-ui-egui.md)）。デザイントークン・テーマ・部品は `tsukumoe-ui` に置く
+- `wgpu` は egui-wgpu と同じ版（30）。ビューポートは egui-wgpu の device で `tsukumoe-gpu` が描く（`Renderer::render_to_view`）
 - Unity は `tsukumoe-ffi` で評価し、Unity のシェーダで描く。描画規則は `rendering.md`
 
 ## 拡張点

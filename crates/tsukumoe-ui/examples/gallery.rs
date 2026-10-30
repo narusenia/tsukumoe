@@ -3,130 +3,100 @@
 
 //! Every component in every state, with a switch for the theme mode.
 
-use tsukumoe_ui::{
-    Mode, Theme, Variant, button, hint, label, panel, set_mode, slider, slider_state, switch,
-};
-use wgpui::{
-    App, AppContext, Application, Context, Div, Entity, IntoElement, ParentElement, Render, Styled,
-    TitlebarOptions, Window, WindowOptions, div,
-};
-use wgpui_base::slider::SliderState;
+use eframe::egui;
+use tsukumoe_ui::{Mode, Theme, Variant, button, hint, label, panel, set_mode, slider, switch};
 
 struct Gallery {
     mode: Mode,
     switch_on: bool,
-    value: Entity<SliderState>,
-    disabled_value: Entity<SliderState>,
+    value: f32,
+    disabled_value: f32,
 }
 
-impl Gallery {
-    fn new(cx: &mut Context<Self>) -> Self {
-        let value = slider_state(0.0, 1.0, 0.01, 0.3, cx);
-        let disabled_value = slider_state(0.0, 1.0, 0.01, 0.6, cx);
-        // Redraw the readout while the slider moves.
-        cx.observe(&value, |_, _, cx| cx.notify()).detach();
-        Self {
-            mode: Mode::Dark,
-            switch_on: true,
-            value,
-            disabled_value,
-        }
-    }
-}
-
-fn section(title: &str, cx: &App) -> Div {
-    panel(cx).child(hint(title.to_string(), cx))
-}
-
-fn row() -> Div {
-    div().flex().items_center().gap_2()
-}
-
-impl Render for Gallery {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = Theme::get(cx);
-        let this = cx.entity();
-        let mode_button = |mode: Mode, name: &'static str| {
-            let this = this.clone();
-            let variant = if self.mode == mode {
-                Variant::Primary
-            } else {
-                Variant::Secondary
-            };
-            button(name, name, variant, cx).on_click(move |_, window, cx| {
-                this.update(cx, |g, _| g.mode = mode);
-                set_mode(mode, cx);
-                window.refresh();
-            })
-        };
-        let switch_this = this.clone();
-        let readout = format!("{:.2}", self.value.read(cx).value().start());
-
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .gap(t.metrics.pad)
-            .p(t.metrics.pad)
-            .bg(t.colors.background)
-            .child(
-                section("Theme", cx).child(
-                    row()
-                        .child(mode_button(Mode::Light, "Light"))
-                        .child(mode_button(Mode::Dark, "Dark"))
-                        .child(mode_button(Mode::System, "System")),
-                ),
-            )
-            .child(
-                section("Button", cx).child(
-                    row()
-                        .child(button("primary", "Primary", Variant::Primary, cx))
-                        .child(button("secondary", "Secondary", Variant::Secondary, cx))
-                        .child(
-                            button("disabled", "Disabled", Variant::Secondary, cx).disabled(true),
-                        ),
-                ),
-            )
-            .child(
-                section("Switch", cx).child(
-                    row()
-                        .child(
-                            switch("on", self.switch_on, false, "Visible", cx).on_change(
-                                move |next, _, window, cx| {
-                                    switch_this.update(cx, |g, _| g.switch_on = next);
-                                    window.refresh();
-                                },
-                            ),
-                        )
-                        .child(label(if self.switch_on { "On" } else { "Off" }, cx))
-                        .child(switch("disabled", true, true, "Disabled", cx)),
-                ),
-            )
-            .child(
-                section("Slider", cx)
-                    .child(
-                        row()
-                            .child(div().flex_1().child(slider(&self.value, false, cx)))
-                            .child(div().w_10().child(label(readout, cx))),
-                    )
-                    .child(slider(&self.disabled_value, true, cx)),
-            )
-    }
-}
-
-fn main() {
-    Application::new().run(|cx: &mut App| {
-        tsukumoe_ui::init(cx);
-        cx.open_window(
-            WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Tsukumoe UI gallery".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            |_, cx| cx.new(Gallery::new),
-        )
-        .expect("open window");
+fn section(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
+    panel(ui, |ui| {
+        ui.set_width(ui.available_width());
+        hint(ui, title);
+        add(ui);
     });
+}
+
+impl eframe::App for Gallery {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        let t = Theme::get(&ctx);
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::NONE
+                    .fill(t.colors.background)
+                    .inner_margin(t.metrics.pad),
+            )
+            .show(ui, |ui| {
+                section(ui, "Theme", |ui| {
+                    ui.horizontal(|ui| {
+                        for (mode, name) in [
+                            (Mode::Light, "Light"),
+                            (Mode::Dark, "Dark"),
+                            (Mode::System, "System"),
+                        ] {
+                            let variant = if self.mode == mode {
+                                Variant::Primary
+                            } else {
+                                Variant::Secondary
+                            };
+                            if button(ui, name, variant).clicked() {
+                                self.mode = mode;
+                                set_mode(&ctx, mode);
+                            }
+                        }
+                    });
+                });
+                section(ui, "Button", |ui| {
+                    ui.horizontal(|ui| {
+                        button(ui, "Primary", Variant::Primary);
+                        button(ui, "Secondary", Variant::Secondary);
+                        ui.add_enabled_ui(false, |ui| button(ui, "Disabled", Variant::Secondary));
+                    });
+                });
+                section(ui, "Switch", |ui| {
+                    ui.horizontal(|ui| {
+                        switch(ui, &mut self.switch_on);
+                        label(ui, if self.switch_on { "On" } else { "Off" });
+                        ui.add_enabled_ui(false, |ui| switch(ui, &mut true));
+                    });
+                });
+                section(ui, "Slider", |ui| {
+                    ui.horizontal(|ui| {
+                        slider(ui, &mut self.value, 0.0..=1.0);
+                    });
+                    label(ui, format!("{:.2}", self.value));
+                    ui.add_enabled_ui(false, |ui| slider(ui, &mut self.disabled_value, 0.0..=1.0));
+                });
+                section(ui, "Text", |ui| {
+                    label(ui, "ParamAngleX / 角度X / 日本語の表示");
+                    hint(ui, "A secondary line");
+                });
+            });
+    }
+}
+
+fn main() -> eframe::Result {
+    eframe::run_native(
+        "Tsukumoe UI gallery",
+        eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_title("Tsukumoe UI gallery")
+                .with_inner_size([520.0, 520.0]),
+            ..Default::default()
+        },
+        Box::new(|cc| {
+            tsukumoe_ui::init(&cc.egui_ctx);
+            Ok(Box::new(Gallery {
+                mode: Mode::Dark,
+                switch_on: true,
+                value: 0.3,
+                disabled_value: 0.6,
+            }))
+        }),
+    )
 }
