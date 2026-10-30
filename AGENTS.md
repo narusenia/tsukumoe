@@ -12,7 +12,7 @@ Tsukumoe is an open 2D rigging and animation platform, an alternative to Live2D 
 
 ## Rules
 
-- **Crate dependencies** follow `docs/specifications/architecture.md`. Crates below the GPUI boundary must not depend on `gpui*`; `tsukumoe-core` must not depend on `wgpu` and must build for `wasm32-unknown-unknown`.
+- **Crate dependencies** follow `docs/specifications/architecture.md`. Crates below the UI boundary must not depend on `egui*` / `eframe`; `tsukumoe-core` must not depend on `wgpu` and must build for `wasm32-unknown-unknown`.
 - **moc3 clean room** (ADR-0016): do not read, search for, fetch or quote any existing third-party moc3 parser, its code or its documentation, and do not analyze Cubism SDK / Core binaries or other people's models. Only models the maintainer exported from Cubism Editor may be analyzed. Record every format finding with its source.
 - **License header**: every `.rs` file starts with these two lines, followed by a blank line:
   ```rust

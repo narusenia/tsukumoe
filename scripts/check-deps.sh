@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Dependency rules from docs/specifications/architecture.md:
-#  - crates below the GPUI boundary must not depend on gpui*
+#  - crates below the UI boundary must not depend on egui*
 #  - tsukumoe-core must not depend on wgpu
 set -euo pipefail
 
@@ -8,8 +8,8 @@ tree() { cargo tree -p "$1" --edges normal,build --prefix none; }
 
 fail=0
 for crate in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | grep -vE '^tsukumoe-(host|app|ui)$'); do
-  if tree "$crate" | grep -E '^w?gpui'; then
-    echo "error: $crate must not depend on gpui*" >&2
+  if tree "$crate" | grep -E '^(egui|eframe|epaint|ecolor|emath)'; then
+    echo "error: $crate must not depend on egui*" >&2
     fail=1
   fi
 done
