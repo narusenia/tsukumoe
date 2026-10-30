@@ -4,7 +4,7 @@ Related: REQ-FMT-001 to REQ-FMT-006
 
 License of this document: CC-BY 4.0
 
-Status: the manifest, the containers, the model files and the published JSON Schema are defined (M1-08); the runtime format `.tmod` 1.0 is defined (M3-01); motions and expressions in it are M3-02.
+Status: the manifest, the containers, the model files and the published JSON Schema are defined (M1-08); the runtime format `.tmod` 1.0 is defined (M3-01); its optional playback sections (motions, expressions, pose) are defined too (M3-02).
 
 ## 1. Project format (`.tsukumoe`)
 
@@ -162,8 +162,20 @@ The distribution format. Designed for zero-copy loading: after validation, the e
 | `0x2A` | `blend_refs` | `u32` | 4 | blend indices, grouped per mesh and per warp |
 | `0x80` | `texture_table` | `StrRef` | 8 | optional: one per embedded texture, into `texture_data` |
 | `0x81` | `texture_data` | `u8` | 1 | optional: the PNG files back to back (straight alpha) |
+| `0x90` | `playback_strings` | `u8` | 1 | optional playback: UTF-8 text that motion and expression names point into |
+| `0x91` | `motions` | `MotionDef` | 36 | optional playback: one per motion |
+| `0x92` | `motion_curves` | `CurveDef` | 36 | optional playback: curves of all motions |
+| `0x93` | `motion_segments` | `SegmentDef` | 28 | optional playback: segments of all curves |
+| `0x94` | `expressions` | `ExpressionDef` | 24 | optional playback: one per expression |
+| `0x95` | `expression_params` | `ExpressionParamDef` | 12 | optional playback: parameter entries of all expressions |
+| `0x96` | `pose` | `PoseDef` | 12 | optional playback: zero or one element |
+| `0x97` | `pose_groups` | `PoseGroupDef` | 8 | optional playback: groups of the pose |
+| `0x98` | `pose_entries` | `PoseEntryDef` | 12 | optional playback: entries of all groups |
+| `0x99` | `pose_links` | `u32` | 4 | optional playback: part indices linked to an entry |
 
-IDs from `0x2B` to `0x7F` are reserved for later minor versions (M3-02 adds motions and expressions as optional sections); `0x80` and up are optional content. The texture sections are written together or not at all; texture `i` of a mesh (`texture` field) is entry `i` of the table, in the order of `textures/*.png` in the project.
+IDs from `0x2A` up to `0x7F` other than those listed are reserved for later minor versions; `0x80` and up are optional content. The texture sections are written together or not at all; texture `i` of a mesh (`texture` field) is entry `i` of the table, in the order of `textures/*.png` in the project.
+
+The playback sections `0x90` to `0x99` are optional, not marked required (a reader that predates them skips them, REQ-FMT-005), and written together or not at all. A writer omits all ten for a model with no motion, expression or pose, so such a file is the same as one written before they existed. A reader that knows them reads either form. All ten are written in ascending ID order after the texture sections. Names are in `playback_strings`, not in `strings`, so the evaluation data does not change.
 
 ### 2.4 Elements
 
@@ -226,6 +238,17 @@ Attributes (`base_attrs`, `mesh_kf_attrs`): opacity, draw order, multiply color 
 
 **`BlendDef`** (24): `target_kind` (0: 0 mesh, 1 warp), `target` (4, index), `parameter` (8), `key_start` (12), `key_count` (16), `delta_start` (20, float offset in `blend_deltas`; `2 * vertex_count` or `2 * point_count` floats). Keys and weights are `blend_keys` / `blend_weights` from `key_start`, `key_count` entries each; keys are strictly ascending and finite. The blend shapes of a mesh or warp are `blend_refs[blend_start .. blend_start + blend_count]`; each entry is a blend index whose target is that mesh or warp.
 
+**Playback sections.** Parameters and parts are indices into `parameters` and `part_opacity` (the same part order). `start` / `count` pairs address the section named in the field's description.
+
+- **`MotionDef`** (36): `name` (0, `StrRef` into `playback_strings`), `duration` (8, f32, seconds), `fps` (12, f32, informational: curves are sampled by time), `looped` (16, flag), `fade_in` (20, f32, seconds), `fade_out` (24, f32), `curve_start` (28), `curve_count` (32). Curves: `motion_curves[curve_start .. curve_start + curve_count]`.
+- **`CurveDef`** (36): `target_kind` (0: 0 parameter, 1 part opacity), `target` (4, index), `flags` (8: bit 0 `fade_in` overrides the motion's, bit 1 `fade_out` does), `fade_in` (12, f32), `fade_out` (16, f32), `start_time` (20, f32), `start_value` (24, f32), `segment_start` (28), `segment_count` (32). A curve starts at `(start_time, start_value)`; each segment continues from the end of the one before.
+- **`SegmentDef`** (28): `kind` (0: 0 linear, 1 Bezier, 2 stepped, 3 inverse stepped), `end_time` (4), `end_value` (8), `c1_time` (12), `c1_value` (16), `c2_time` (20), `c2_value` (24), all f32. The control points are used by Bezier only and are 0 otherwise. Times never decrease along a curve; a Bezier's control times satisfy `previous end <= c1_time <= c2_time <= end_time`, so its time axis is monotonic.
+- **Sampling** at time `t`, so that every implementation gives the same values: before `start_time`, or with no segment, the value is `start_value`; the segment used is the first whose `end_time > t`, and after the last segment the value is its `end_value`. Linear interpolates between the previous end and this end. Bezier solves the cubic time axis `x(s)` (control times, `s` in 0 to 1) for `x(s) = t` and returns the cubic value axis at that `s`. Stepped holds the previous end value; inverse stepped is the new end value from the segment's start. A looping motion samples at `t mod duration` (at 0 when `duration` is 0).
+- **`ExpressionDef`** (24): `name` (0, `StrRef`), `fade_in` (8, f32), `fade_out` (12, f32), `param_start` (16), `param_count` (20). **`ExpressionParamDef`** (12): `parameter` (0), `blend` (4: 0 add, 1 multiply, 2 overwrite), `value` (8, f32). At weight `w` (0 to 1) a value `v` becomes `v + value * w` (add), `v * (1 + (value - 1) * w)` (multiply) or `v * (1 - w) + value * w` (overwrite).
+- **`PoseDef`** (12): `fade_in` (0, f32), `group_start` (4), `group_count` (8). **`PoseGroupDef`** (8): `entry_start` (0), `entry_count` (4). **`PoseEntryDef`** (12): `part` (0), `link_start` (4), `link_count` (8); links are `pose_links[link_start .. link_start + link_count]`, parts that take the entry's opacity. Parts in one group are mutually exclusive.
+
+How a player blends fades, layers and priorities is not part of the format.
+
 ### 2.5 What a loader must check
 
 A loader checks the following before it exposes the data, and rejects the file with an error otherwise. It never trusts a length, offset or index it has not checked, and a failed check never panics or reads outside the buffer.
@@ -238,6 +261,7 @@ A loader checks the following before it exposes the data, and rejects the file w
 6. Bindings: key lists strictly ascending; `keyform_count`, `max_corners` and `corner_start` agree with the axes; `corner_capacity` equals their sum.
 7. Drivers: the instruction rules of `Op` above.
 8. Textures (when present): both sections present, every entry inside `texture_data` and starting with the PNG signature.
+9. Playback sections (when any is present): all ten present; every `start + count` inside its array; names inside `playback_strings` and UTF-8; every target, parameter and part index inside its array; enumerations (`target_kind`, curve flags, segment kind, blend) known; flags 0 or 1; every `f32` finite, and fade times, `duration` and `fps` not negative; segment times never decreasing and Bezier control times between the ends; at most one `pose` element.
 
 Limits: at most 256 sections; at most 16 axes per binding; `corner_capacity` at most 2^20; arrays of fewer than 2^32 - 1 elements; instruction stack of 16.
 

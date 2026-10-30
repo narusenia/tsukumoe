@@ -3410,6 +3410,7 @@ dependencies = [
  "tsukumoe-core",
  "tsukumoe-format",
  "tsukumoe-gpu",
+ "tsukumoe-runtime",
 ]
 
 [[package]]
@@ -3467,6 +3468,13 @@ dependencies = [
  "serde",
  "sys-locale",
  "unic-langid",
+]
+
+[[package]]
+name = "tsukumoe-runtime"
+version = "0.1.0"
+dependencies = [
+ "tsukumoe-core",
 ]
 
 [[package]]

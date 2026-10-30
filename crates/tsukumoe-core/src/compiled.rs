@@ -591,6 +591,54 @@ pub struct CompiledModel<'a> {
 }
 
 impl CompiledModel<'_> {
+    /// Copies every borrowed array, so the result outlives the buffer.
+    pub fn into_owned(self) -> CompiledModel<'static> {
+        CompiledModel {
+            corner_capacity: self.corner_capacity,
+            strings: Cow::Owned(self.strings.into_owned()),
+            parameter_names: Cow::Owned(self.parameter_names.into_owned()),
+            parameters: Cow::Owned(self.parameters.into_owned()),
+            bindings: Cow::Owned(self.bindings.into_owned()),
+            axes: Cow::Owned(self.axes.into_owned()),
+            axis_keys: Cow::Owned(self.axis_keys.into_owned()),
+            drivers: Cow::Owned(self.drivers.into_owned()),
+            ops: Cow::Owned(self.ops.into_owned()),
+            part_parents: Cow::Owned(self.part_parents.into_owned()),
+            part_opacity: Cow::Owned(self.part_opacity.into_owned()),
+            mesh_names: Cow::Owned(self.mesh_names.into_owned()),
+            meshes: Cow::Owned(self.meshes.into_owned()),
+            mesh_base_positions: Cow::Owned(self.mesh_base_positions.into_owned()),
+            mesh_uvs: Cow::Owned(self.mesh_uvs.into_owned()),
+            mesh_indices: Cow::Owned(self.mesh_indices.into_owned()),
+            mesh_masks: Cow::Owned(self.mesh_masks.into_owned()),
+            mesh_kf_positions: Cow::Owned(self.mesh_kf_positions.into_owned()),
+            mesh_kf_attrs: Cow::Owned(self.mesh_kf_attrs.into_owned()),
+            warps: Cow::Owned(self.warps.into_owned()),
+            warp_base_points: Cow::Owned(self.warp_base_points.into_owned()),
+            warp_kf_points: Cow::Owned(self.warp_kf_points.into_owned()),
+            warp_kf_opacity: Cow::Owned(self.warp_kf_opacity.into_owned()),
+            rotations: Cow::Owned(self.rotations.into_owned()),
+            rotation_kf: Cow::Owned(self.rotation_kf.into_owned()),
+            deformer_order: Cow::Owned(self.deformer_order.into_owned()),
+            bone_names: Cow::Owned(self.bone_names.into_owned()),
+            bones: Cow::Owned(self.bones.into_owned()),
+            bone_kf: Cow::Owned(self.bone_kf.into_owned()),
+            influences: Cow::Owned(self.influences.into_owned()),
+            physics: Cow::Owned(self.physics.into_owned()),
+            physics_inputs: Cow::Owned(self.physics_inputs.into_owned()),
+            physics_outputs: Cow::Owned(self.physics_outputs.into_owned()),
+            physics_particles: Cow::Owned(self.physics_particles.into_owned()),
+            glues: Cow::Owned(self.glues.into_owned()),
+            glue_nodes: Cow::Owned(self.glue_nodes.into_owned()),
+            glue_kf_intensity: Cow::Owned(self.glue_kf_intensity.into_owned()),
+            blends: Cow::Owned(self.blends.into_owned()),
+            blend_keys: Cow::Owned(self.blend_keys.into_owned()),
+            blend_weights: Cow::Owned(self.blend_weights.into_owned()),
+            blend_deltas: Cow::Owned(self.blend_deltas.into_owned()),
+            blend_refs: Cow::Owned(self.blend_refs.into_owned()),
+        }
+    }
+
     /// The text a name reference points at. A reference outside `strings`
     /// or not on a character boundary reads as empty;
     /// [`CompiledModel::check`] rejects those.
@@ -673,6 +721,21 @@ fn push_str(strings: &mut Cow<'_, [u8]>, text: &str) -> StrRef {
 }
 
 impl Model {
+    /// Parts in compiled order: parents first, otherwise in table order.
+    pub(crate) fn part_order(&self) -> Vec<crate::elements::PartId> {
+        let mut part_ids: Vec<_> = self.parts.iter().map(|(id, _, _)| id).collect();
+        let part_depth = |mut id| {
+            let mut depth = 0;
+            while let Some(parent) = self.parts.get(id).and_then(|p| p.parent) {
+                depth += 1;
+                id = parent;
+            }
+            depth
+        };
+        part_ids.sort_by_key(|&id| part_depth(id));
+        part_ids
+    }
+
     /// Flattens the model for evaluation. Physics is compiled too, but
     /// its state lives in the frame.
     pub fn compile(&self) -> Result<CompiledModel<'static>, CompileError> {
@@ -726,17 +789,7 @@ impl Model {
             c.corner_capacity = c.corner_capacity.saturating_add(idx(max_corners));
         }
 
-        // Parts, parents first.
-        let mut part_ids: Vec<_> = self.parts.iter().map(|(id, _, _)| id).collect();
-        let part_depth = |mut id| {
-            let mut depth = 0;
-            while let Some(parent) = self.parts.get(id).and_then(|p| p.parent) {
-                depth += 1;
-                id = parent;
-            }
-            depth
-        };
-        part_ids.sort_by_key(|&id| part_depth(id));
+        let part_ids = self.part_order();
         let part_index: HashMap<_, _> = part_ids
             .iter()
             .enumerate()
