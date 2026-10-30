@@ -1,14 +1,49 @@
 {
+  "$defs": {
+    "Feature": {
+      "description": "An optional capability of the format. A reader that does not know a\n`required` feature must reject the file; one it does not know that is not\n`required` may be ignored.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "required"
+      ],
+      "type": "object"
+    },
+    "Version": {
+      "properties": {
+        "major": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "minor": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Manifest",
-  "type": "object",
   "properties": {
     "features": {
-      "type": "array",
       "default": [],
       "items": {
         "$ref": "#/$defs/Feature"
-      }
+      },
+      "type": "array"
     },
     "format": {
       "description": "Always `tsukumoe-project`.",
@@ -29,41 +64,6 @@
     "format",
     "version"
   ],
-  "$defs": {
-    "Feature": {
-      "description": "An optional capability of the format. A reader that does not know a\n`required` feature must reject the file; one it does not know that is not\n`required` may be ignored.",
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "required": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "name",
-        "required"
-      ]
-    },
-    "Version": {
-      "type": "object",
-      "properties": {
-        "major": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        },
-        "minor": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "major",
-        "minor"
-      ]
-    }
-  }
+  "title": "Manifest",
+  "type": "object"
 }
