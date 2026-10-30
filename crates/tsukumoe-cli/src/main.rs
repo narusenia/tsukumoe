@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use serde_json::json;
 use tsukumoe_cli::generate;
 use tsukumoe_core::eval::Frame;
-use tsukumoe_core::tmod::{self, AlignedBuf, Tmod};
+use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
 use tsukumoe_format::{Project, read_model};
 use tsukumoe_gpu::{Headless, Image, Texture};
 
@@ -120,19 +120,21 @@ fn convert(args: &[String]) -> Result<u8, Fail> {
     Ok(0)
 }
 
-/// The runtime format of a project: the compiled model and its textures
-/// (`textures/*.png`, in path order).
+/// The runtime format of a project: the compiled model, its motions,
+/// expressions and pose, and its textures (`textures/*.png`, in path order).
 fn tmod_bytes(project: &Project) -> Result<Vec<u8>, Fail> {
-    let compiled = read_model(project)?
+    let model = read_model(project)?;
+    let compiled = model
         .compile()
         .map_err(|e| Fail::Failed(format!("{e:?}")))?;
+    let playback = PlaybackData::from_model(&model)?;
     let textures: Vec<&[u8]> = project
         .files
         .iter()
         .filter(|(path, _)| path.starts_with("textures/") && path.ends_with(".png"))
         .map(|(_, bytes)| bytes.as_slice())
         .collect();
-    Ok(tmod::write(&compiled, &textures)?)
+    Ok(tmod::write_with(&compiled, &playback, &textures)?)
 }
 
 /// A `.tmod` path gets the runtime format, a `.zip` or `.tsukumoe` path an
@@ -194,7 +196,8 @@ fn validate(args: &[String]) -> Result<u8, Fail> {
     Ok(code)
 }
 
-/// Summarizes a `.tmod`: version, element counts and the section table.
+/// Summarizes a `.tmod`: version, element counts (motions, expressions and
+/// pose groups included) and the section table.
 fn inspect(args: &[String]) -> Result<u8, Fail> {
     let args = Args::parse(args, &[])?;
     let [input] = args.positional()?;
@@ -232,6 +235,10 @@ fn inspect(args: &[String]) -> Result<u8, Fail> {
             "physics": m.physics.len(),
             "glues": m.glues.len(),
             "blend_shapes": m.blends.len(),
+            "motions": t.playback.motions.len(),
+            "curves": t.playback.curves.len(),
+            "expressions": t.playback.expressions.len(),
+            "pose_groups": t.playback.pose_groups.len(),
             "textures": t.texture_count(),
             "sections": sections,
         })

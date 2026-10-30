@@ -43,6 +43,11 @@ fn quad(x: f32) -> Vec<Point> {
 
 /// Writes the project into `<name>/project` and returns that directory.
 fn project(name: &str) -> PathBuf {
+    project_with(name, false)
+}
+
+/// With `playback`, the project also has two motions, an expression and a pose.
+fn project_with(name: &str, playback: bool) -> PathBuf {
     let mut p = ModelParts::default();
     let part = p.parts.insert("Part", Part::default()).unwrap();
     let param = p
@@ -66,6 +71,60 @@ fn project(name: &str) -> PathBuf {
     };
     mesh.keyforms = Some(KeyformGrid::new(binding, vec![keyform(0.0), keyform(1.0)]));
     p.meshes.insert("Quad", mesh).unwrap();
+    if playback {
+        use tsukumoe_core::playback::{
+            Curve, CurveTarget, Expression, ExpressionBlend, ExpressionParameter, Motion, Pose,
+            PoseEntry, Segment,
+        };
+        let other = p.parts.insert("Other", Part::default()).unwrap();
+        let motion = |target, duration| Motion {
+            duration,
+            fps: 30.0,
+            looped: false,
+            fade_in: 0.1,
+            fade_out: 0.1,
+            curves: vec![Curve {
+                target,
+                start: [0.0, 0.0],
+                segments: vec![Segment::Linear([duration, 1.0])],
+                fade_in: None,
+                fade_out: None,
+            }],
+        };
+        p.motions
+            .insert("Slide", motion(CurveTarget::Parameter(param), 1.0))
+            .unwrap();
+        p.motions
+            .insert("Fade", motion(CurveTarget::PartOpacity(other), 2.0))
+            .unwrap();
+        p.expressions
+            .insert(
+                "Push",
+                Expression {
+                    fade_in: 0.2,
+                    fade_out: 0.2,
+                    parameters: vec![ExpressionParameter {
+                        parameter: param,
+                        blend: ExpressionBlend::Add,
+                        value: 0.5,
+                    }],
+                },
+            )
+            .unwrap();
+        p.pose = Some(Pose {
+            fade_in: 0.5,
+            groups: vec![vec![
+                PoseEntry {
+                    part,
+                    linked: vec![],
+                },
+                PoseEntry {
+                    part: other,
+                    linked: vec![],
+                },
+            ]],
+        });
+    }
     let model = tsukumoe_core::model::Model::from_parts(p).unwrap();
 
     let mut project = Project::new(Manifest::new(Some("test".into())));
@@ -267,6 +326,9 @@ fn convert_writes_a_tmod_that_inspect_summarizes() {
     assert_eq!(v["textures"], 1);
     assert_eq!(v["bytes"], fs::metadata(&out).unwrap().len());
     assert_eq!(v["sections"].as_array().unwrap().len(), 44);
+    assert_eq!(v["motions"], 0);
+    assert_eq!(v["expressions"], 0);
+    assert_eq!(v["pose_groups"], 0);
 
     // Same project, same bytes.
     let again = dir.with_file_name("again.tmod");
@@ -282,6 +344,29 @@ fn convert_writes_a_tmod_that_inspect_summarizes() {
     .unwrap();
     assert_eq!(code(&run(&["inspect", path(&junk)])), 1);
     assert_eq!(code(&run(&["inspect"])), 2);
+}
+
+#[test]
+fn convert_puts_motions_expressions_and_the_pose_into_the_tmod() {
+    use tsukumoe_runtime::{Priority, Runtime};
+
+    let dir = project_with("tmod-playback", true);
+    let out = dir.with_file_name("playback.tmod");
+    assert_eq!(code(&run(&["convert", path(&dir), path(&out)])), 0);
+    let report = run(&["inspect", path(&out)]);
+    assert_eq!(code(&report), 0);
+    let v: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(v["motions"], 2);
+    assert_eq!(v["curves"], 2);
+    assert_eq!(v["expressions"], 1);
+    assert_eq!(v["pose_groups"], 1);
+    assert_eq!(v["sections"].as_array().unwrap().len(), 44 + 10);
+
+    // The runtime plays what `convert` wrote.
+    let mut rt = Runtime::from_bytes(&fs::read(&out).unwrap()).unwrap();
+    assert_eq!(rt.play_motion("Slide", 0, Priority::Normal), Ok(true));
+    rt.update(0.5);
+    assert!((rt.parameter_values()[0] - 0.5).abs() < 1e-5);
 }
 
 /// `docs/specifications/samples/quad.tmod` is the file `convert` makes from

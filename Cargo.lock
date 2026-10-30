@@ -3410,6 +3410,7 @@ dependencies = [
  "tsukumoe-core",
  "tsukumoe-format",
  "tsukumoe-gpu",
+ "tsukumoe-runtime",
 ]
 
 [[package]]
