@@ -1,0 +1,4 @@
+{
+  "name": "blink",
+  "parameters": [{ "parameter": "ParamEyeOpen", "blend": "overwrite", "value": 0.0 }]
+}

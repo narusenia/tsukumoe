@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PhysicsFile",
+  "description": "`physics.json`",
+  "type": "object",
+  "properties": {
+    "chains": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ChainDto"
+      }
+    },
+    "pendulums": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PendulumDto"
+      }
+    }
+  },
+  "$defs": {
+    "ChainDto": {
+      "type": "object",
+      "properties": {
+        "gravity": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PhysicsInputDto"
+          }
+        },
+        "joints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChainJointDto"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PhysicsOutputDto"
+          }
+        },
+        "wind": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        }
+      },
+      "required": [
+        "name",
+        "joints",
+        "gravity",
+        "wind",
+        "inputs",
+        "outputs"
+      ]
+    },
+    "ChainJointDto": {
+      "type": "object",
+      "properties": {
+        "damping": {
+          "type": "number",
+          "format": "float"
+        },
+        "length": {
+          "type": "number",
+          "format": "float"
+        },
+        "stiffness": {
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "length",
+        "stiffness",
+        "damping"
+      ]
+    },
+    "ChannelDto": {
+      "type": "string",
+      "enum": [
+        "x",
+        "y",
+        "angle"
+      ]
+    },
+    "ParticleDto": {
+      "type": "object",
+      "properties": {
+        "acceleration": {
+          "type": "number",
+          "format": "float"
+        },
+        "delay": {
+          "type": "number",
+          "format": "float"
+        },
+        "mobility": {
+          "type": "number",
+          "format": "float"
+        },
+        "position": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "maxItems": 2,
+          "minItems": 2
+        },
+        "radius": {
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "position",
+        "mobility",
+        "delay",
+        "acceleration",
+        "radius"
+      ]
+    },
+    "PendulumDto": {
+      "type": "object",
+      "properties": {
+        "angle_range": {
+          "$ref": "#/$defs/RangeDto"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PhysicsInputDto"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PhysicsOutputDto"
+          }
+        },
+        "particles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ParticleDto"
+          }
+        },
+        "position_range": {
+          "$ref": "#/$defs/RangeDto"
+        }
+      },
+      "required": [
+        "name",
+        "inputs",
+        "outputs",
+        "particles",
+        "position_range",
+        "angle_range"
+      ]
+    },
+    "PhysicsInputDto": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "$ref": "#/$defs/ChannelDto"
+        },
+        "parameter": {
+          "type": "string"
+        },
+        "reflect": {
+          "type": "boolean",
+          "default": false
+        },
+        "weight": {
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "parameter",
+        "channel",
+        "weight"
+      ]
+    },
+    "PhysicsOutputDto": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "$ref": "#/$defs/ChannelDto"
+        },
+        "parameter": {
+          "type": "string"
+        },
+        "particle": {
+          "description": "Index into the group's particles.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "reflect": {
+          "type": "boolean",
+          "default": false
+        },
+        "scale": {
+          "type": "number",
+          "format": "float"
+        },
+        "weight": {
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "parameter",
+        "channel",
+        "particle",
+        "scale",
+        "weight"
+      ]
+    },
+    "RangeDto": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "number",
+          "format": "float"
+        },
+        "max": {
+          "type": "number",
+          "format": "float"
+        },
+        "min": {
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "min",
+        "max",
+        "default"
+      ]
+    }
+  }
+}

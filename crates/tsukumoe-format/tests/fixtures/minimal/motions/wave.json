@@ -1,0 +1,12 @@
+{
+  "name": "wave",
+  "duration": 1.0,
+  "fps": 30.0,
+  "curves": [
+    {
+      "target": { "type": "parameter", "name": "ParamAngle" },
+      "start": [0.0, 0.0],
+      "segments": [{ "type": "linear", "point": [1.0, 30.0] }]
+    }
+  ]
+}

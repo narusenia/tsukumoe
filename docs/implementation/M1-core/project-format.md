@@ -2,7 +2,7 @@
 
 - REQ: REQ-FMT-001, REQ-FMT-002, REQ-FMT-003, REQ-FMT-005
 - 単位: M1-08
-- 状態: 着手中
+- 状態: 完了
 - 依存: M1-01
 - 仕様: [file-formats.md](../../specifications/file-formats.md)
 - クレート: `tsukumoe-format`（`tsukumoe-core` に依存を足さない）
@@ -18,7 +18,7 @@
 |---|---|---|
 | 1 | コンテナ（zip / 展開ディレクトリ）、マニフェスト、バージョンと機能フラグ、入力の防御 | 完了 |
 | 2 | `model.json` ほか: `Model` ↔ JSON の変換とラウンドトリップ | 完了 |
-| 3 | JSON Schema の生成、`schema/` への書き出し、CI の差分検査 | 未着手 |
+| 3 | JSON Schema の生成、`schema/` への書き出し、CI の差分検査 | 完了 |
 
 ## 段階 1 の受入条件
 
@@ -42,3 +42,10 @@
 - 読み込み時の `Id` は、ファイル内の並び順で振り直される。名前（永続 ID）は保たれるが、内部 `Id` は保存前と同じとは限らない
 - 重み・範囲などの数値の妥当性（負・順序）は `Model::validate` が見る範囲まで。追加の検査は段階 3 以降で必要になれば足す
 - `tsukumoe-core` の `Model::from_parts` は、コマンド（`Model::apply`）以外で `Model` を組み立てる唯一の経路
+
+## 段階 3 の受入条件
+
+- [x] `Manifest` / `ModelFile` / `PhysicsFile` / `MotionFile` / `ExpressionFile` の JSON Schema を `schema/*.schema.json` に書き出す
+- [x] 生成結果とファイルの差分をテストが検出する（CI の `cargo test` で動く）。再生成は `TSUKUMOE_UPDATE_SCHEMA=1`
+- [x] 手書きの最小モデル（`tests/fixtures/minimal/`）が読み込める
+- 未実施: スキーマに対するフィクスチャの検証（検証用クレートの追加承認が要る）
