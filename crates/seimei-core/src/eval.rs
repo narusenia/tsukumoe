@@ -10,9 +10,10 @@ use crate::compiled::{
 use crate::elements::Point;
 use crate::expr;
 use crate::rig::{BoneTransform, RotationKeyform};
+use crate::simulate;
 
 impl ParamDef {
-    fn apply(&self, value: f32) -> f32 {
+    pub(crate) fn apply(&self, value: f32) -> f32 {
         if !value.is_finite() {
             return self.default;
         }
@@ -50,6 +51,7 @@ pub struct Frame {
     pub(crate) order: Vec<u32>,
     prev_order: Vec<u32>,
     evaluated: bool,
+    physics: simulate::State,
     pub(crate) order_changed: bool,
     pub(crate) geometry_changed: Vec<bool>,
     pub(crate) style_changed: Vec<bool>,
@@ -86,6 +88,7 @@ impl Frame {
             order: (0..model.meshes.len() as u32).collect(),
             prev_order: (0..model.meshes.len() as u32).collect(),
             evaluated: false,
+            physics: simulate::State::new(model),
             order_changed: true,
             geometry_changed: vec![true; model.meshes.len()],
             style_changed: vec![true; model.meshes.len()],
@@ -115,7 +118,14 @@ impl Frame {
         &self.attrs[mesh]
     }
 
+    /// Evaluates without advancing time: physics holds its pose.
     pub fn evaluate(&mut self, model: &CompiledModel) {
+        self.advance(model, 0.0);
+    }
+
+    /// Evaluates after `dt` seconds. Physics runs in fixed steps and keeps
+    /// the time left over (ADR-0022).
+    pub fn advance(&mut self, model: &CompiledModel, dt: f32) {
         let Frame {
             values,
             clamped,
@@ -138,6 +148,7 @@ impl Frame {
             order,
             prev_order,
             evaluated,
+            physics,
             order_changed,
             geometry_changed,
             style_changed,
@@ -149,6 +160,8 @@ impl Frame {
         for d in &model.drivers {
             values[d.output] = expr::eval(&model.ops[d.start..d.start + d.len], values);
         }
+
+        simulate::advance(model, physics, values, dt);
 
         for (i, p) in model.parameters.iter().enumerate() {
             clamped[i] = p.apply(values[i]);
@@ -1350,6 +1363,19 @@ mod tests {
         for i in 0..100 {
             frame.set_parameter(0, i as f32 * 0.02 - 1.0);
             frame.evaluate(&c);
+        }
+        assert_eq!(ALLOCS.with(Cell::get) - before, 0);
+    }
+
+    #[test]
+    fn steady_state_evaluation_with_physics_allocates_nothing() {
+        let c = crate::simulate::sample_model(0.95).compile().unwrap();
+        let mut frame = Frame::new(&c);
+        frame.evaluate(&c);
+        let before = ALLOCS.with(Cell::get);
+        for i in 0..100 {
+            frame.set_parameter(0, (i % 7) as f32 * 0.3 - 1.0);
+            frame.advance(&c, 0.02);
         }
         assert_eq!(ALLOCS.with(Cell::get) - before, 0);
     }
