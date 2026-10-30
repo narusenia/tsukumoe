@@ -5,6 +5,8 @@
 #  - tsukumoe-runtime depends on tsukumoe-core only (no tsukumoe-format, no
 #    other workspace crate) and uses only its evaluation side, never the
 #    editing model or its commands
+#  - tsukumoe-ffi depends on tsukumoe-runtime and tsukumoe-core only (dev
+#    dependencies such as cbindgen and cc are not looked at)
 set -euo pipefail
 
 tree() { cargo tree -p "$1" --edges normal,build --prefix none; }
@@ -28,6 +30,16 @@ fi
 # types) is off limits to the runtime's sources (its tests may build models).
 if grep -rnE 'tsukumoe_core::(model|command|history|validate|table|arena|rig|keyform|driver|physics|expr)\b|tsukumoe_format' crates/tsukumoe-runtime/src; then
   echo "error: tsukumoe-runtime sources must not use the editing side of tsukumoe-core or tsukumoe-format" >&2
+  fail=1
+fi
+if tree tsukumoe-ffi | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(ffi|runtime|core)( |$)'; then
+  echo "error: tsukumoe-ffi must depend on tsukumoe-runtime and tsukumoe-core only" >&2
+  fail=1
+fi
+# `unsafe` lives in tsukumoe-ffi only. The one exception is the allocation
+# counter in the evaluator's tests (it proves a frame does not allocate).
+if grep -rnE '\bunsafe[[:space:]]+(impl|fn|trait|extern|\{)' crates --include='*.rs' | grep -vE '^crates/tsukumoe-ffi/|^crates/tsukumoe-core/src/eval\.rs:'; then
+  echo "error: unsafe code outside tsukumoe-ffi" >&2
   fail=1
 fi
 exit "$fail"

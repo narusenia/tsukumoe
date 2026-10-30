@@ -1,0 +1,22 @@
+[package]
+name = "tsukumoe-ffi"
+description = "C ABI for the Tsukumoe playback runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+tsukumoe-core.workspace = true
+tsukumoe-runtime.workspace = true
+
+[dev-dependencies]
+cbindgen = { workspace = true }
+cc = { workspace = true }
+
+[lints]
+workspace = true
