@@ -40,5 +40,5 @@ description = "Install lefthook git hooks"
 run = "lefthook install"
 
 [tasks.bench]
-description = "Run the core benchmarks and compare with the ceilings in benches/budget.json"
-run = ["cargo bench -p tsukumoe-core", "bash scripts/check-bench.sh"]
+description = "Run the core benchmarks and compare with the ceilings in scripts/bench-budget.json"
+run = ["cargo bench --workspace", "bash scripts/check-bench.sh"]

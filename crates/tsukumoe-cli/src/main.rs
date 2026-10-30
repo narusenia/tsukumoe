@@ -9,12 +9,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::json;
+use tsukumoe_cli::generate;
 use tsukumoe_core::eval::Frame;
 use tsukumoe_format::{Project, read_model};
 use tsukumoe_gpu::{Headless, Image, Texture};
 
 const USAGE: &str = "usage:
   tsukumoe convert <in> <out>
+  tsukumoe generate <parts.json> <out>
   tsukumoe validate <project>
   tsukumoe render <project> -o <png> [--param NAME=VALUE]... [--size WxH] [--view X0,Y0,X1,Y1]
   tsukumoe diff <a.png> <b.png> [--tolerance N] [-o <png>]";
@@ -112,12 +114,42 @@ fn write(path: &str, bytes: &[u8]) -> Result<(), Fail> {
 fn convert(args: &[String]) -> Result<u8, Fail> {
     let args = Args::parse(args, &[])?;
     let [input, output] = args.positional()?;
-    let project = load(input)?;
+    save(&load(input)?, output)?;
+    Ok(0)
+}
+
+/// A `.zip` or `.tsukumoe` path gets an archive, any other a directory.
+fn save(project: &Project, output: &str) -> Result<(), Fail> {
     if output.ends_with(".zip") || output.ends_with(".tsukumoe") {
-        write(output, &project.write_zip()?)?;
+        write(output, &project.write_zip()?)
     } else {
-        project.write_dir(Path::new(output))?;
+        Ok(project.write_dir(Path::new(output))?)
     }
+}
+
+fn generate(args: &[String]) -> Result<u8, Fail> {
+    let args = Args::parse(args, &[])?;
+    let [table, output] = args.positional()?;
+    let bytes = fs::read(table).map_err(|e| Fail::Failed(format!("{table}: {e}")))?;
+    let table: generate::Table =
+        serde_json::from_slice(&bytes).map_err(|e| Fail::Failed(format!("{table}: {e}")))?;
+    let (project, model) = generate::project(&table).map_err(Fail::Failed)?;
+    save(&project, output)?;
+    let vertices: usize = model
+        .meshes()
+        .iter()
+        .map(|(_, _, m)| m.positions.len())
+        .sum();
+    println!(
+        "{}",
+        json!({
+            "meshes": model.meshes().len(),
+            "vertices": vertices,
+            "parameters": model.parameters().len(),
+            "deformers": model.warps().len() + model.rotations().len(),
+            "physics": model.physics().chains.len() + model.physics().pendulums.len(),
+        })
+    );
     Ok(0)
 }
 
@@ -268,6 +300,7 @@ fn main() -> ExitCode {
     let result = match args.split_first() {
         Some((cmd, rest)) => match cmd.as_str() {
             "convert" => convert(rest),
+            "generate" => generate(rest),
             "validate" => validate(rest),
             "render" => render(rest),
             "diff" => diff(rest),

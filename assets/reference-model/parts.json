@@ -1,0 +1,16 @@
+{
+  "name": "reference",
+  "grid": 15,
+  "groups": [
+    { "name": "Head",      "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "Hair",      "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "Face",      "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "Eyes",      "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "Mouth",     "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "Body",      "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "ArmLeft",   "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "ArmRight",  "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "Skirt",     "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 },
+    { "name": "Accessory", "meshes": 15, "warps": 7, "parameters": 10, "chains": 2 }
+  ]
+}

@@ -202,3 +202,47 @@ fn bad_input_is_an_error_not_a_panic() {
     assert_eq!(code(&run(&["validate", "/does/not/exist"])), 1);
     assert_eq!(code(&run(&["diff", "/does/not/exist", "/nor/this"])), 1);
 }
+
+#[test]
+fn generate_builds_the_reference_model_at_the_required_scale() {
+    let table = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/reference-model/parts.json"
+    );
+    let dir = scratch("generate").join("reference");
+    let out = run(&["generate", table, path(&dir)]);
+    assert_eq!(code(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
+    let size: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    // REQ-PERF-001: ArtMesh 150, 30k vertices, 100 parameters, 80 deformers, 20 physics.
+    assert_eq!(size["meshes"], 150);
+    assert!(size["vertices"].as_u64().unwrap() >= 30_000);
+    assert_eq!(size["parameters"], 100);
+    assert_eq!(size["deformers"], 80);
+    assert_eq!(size["physics"], 20);
+    assert_eq!(code(&run(&["validate", path(&dir)])), 0);
+
+    // Generation is deterministic.
+    let again = dir.with_file_name("again");
+    assert_eq!(code(&run(&["generate", table, path(&again)])), 0);
+    assert_eq!(
+        Project::read_dir(&dir).unwrap(),
+        Project::read_dir(&again).unwrap()
+    );
+}
+
+#[test]
+fn generate_rejects_a_bad_table() {
+    let dir = scratch("generate-bad");
+    let table = dir.join("parts.json");
+    fs::write(&table, br#"{"name":"x","grid":15,"groups":[{"name":"A","meshes":99,"warps":7,"parameters":10,"chains":2}]}"#).unwrap();
+    assert_eq!(
+        code(&run(&["generate", path(&table), path(&dir.join("out"))])),
+        1
+    );
+    fs::write(&table, b"not json").unwrap();
+    assert_eq!(
+        code(&run(&["generate", path(&table), path(&dir.join("out"))])),
+        1
+    );
+    assert_eq!(code(&run(&["generate", path(&table)])), 2);
+}
