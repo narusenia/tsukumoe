@@ -11,6 +11,12 @@ allow = [
   "CC0-1.0",
 ]
 
+# egui bundles fonts under the SIL OFL and the Ubuntu Font Licence. Allowed for
+# that crate only; shipping them needs the licence notices (see ADR-0027).
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
