@@ -49,9 +49,9 @@ seimei-compat ──► seimei-format ──► seimei-core ◄── seimei-run
 ## 評価パイプライン
 
 ```
-params ─► drivers ─► keyform interp ─► deformer hierarchy ─► skinning ─► physics ─► draw list
-         (式)        (多重線形 /         (warp / rotation /    (bones)     (pendulum /
-                      blend shape)        glue)                            chain)
+params ─► drivers ─► keyform interp ─► skinning ─► deformer hierarchy ─► physics ─► draw list
+         (式)        (多重線形 /         (bones)     (warp / rotation /    (pendulum /
+                      blend shape)                    glue)                 chain)
 ```
 
 - 編集用モデル（木構造・名前付き）と評価用モデル（SoA・インデックス参照・事前計算済み）を分ける。編集用 → 評価用は「コンパイル」で、ランタイム形式は評価用モデルをそのまま直列化したもの

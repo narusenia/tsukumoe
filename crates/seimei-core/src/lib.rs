@@ -6,6 +6,7 @@
 //! This crate must not depend on `wgpu` or `gpui*`, and must build for
 //! `wasm32-unknown-unknown` (see `docs/specifications/architecture.md`).
 
+pub mod affine;
 pub mod arena;
 pub mod command;
 pub mod compiled;

@@ -9,11 +9,14 @@
 
 use std::collections::HashMap;
 
+use crate::affine::Affine;
 use crate::elements::ParameterId;
 use crate::expr::{self, ExprError, Op};
 use crate::keyform::BindingId;
 use crate::model::Model;
-use crate::rig::{BlendMode, BlendTarget, DeformerRef, GlueNode, RotationKeyform};
+use crate::rig::{
+    BlendMode, BlendTarget, BoneId, BoneTransform, DeformerRef, GlueNode, RotationKeyform,
+};
 use crate::validate::ModelError;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +34,14 @@ pub enum CompileError {
     /// The drivers read each other's outputs in a loop.
     DriverCycle {
         driver: String,
+    },
+    /// The bone's rest transform cannot be inverted (a scale of 0).
+    DegenerateBone {
+        bone: String,
+    },
+    /// Meshes with different parent deformers share the bone's tree (ADR-0021).
+    BoneSpaceMismatch {
+        bone: String,
     },
 }
 
@@ -85,6 +96,24 @@ pub struct KeyformRef {
 pub type MeshAttrs = [f32; 8];
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BoneDef {
+    pub parent: Option<usize>,
+    pub base: BoneTransform,
+    pub keyforms: Option<KeyformRef>,
+    /// Inverse of the rest transform through the bone hierarchy.
+    pub rest_inverse: Affine,
+}
+
+pub const NO_BONE: u32 = u32::MAX;
+
+/// Up to four bones moving one vertex; unused slots are `NO_BONE` with weight 0.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Influence {
+    pub bones: [u32; 4],
+    pub weights: [f32; 4],
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MeshDef {
     /// First vertex in the shared vertex buffer (a float offset is twice this).
     pub vertex_start: usize,
@@ -106,6 +135,8 @@ pub struct MeshDef {
     pub mask_count: usize,
     pub mask_inverted: bool,
     pub double_sided: bool,
+    /// First entry in `influences`; one per vertex. `None` when no bone moves it.
+    pub influence_start: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -195,6 +226,12 @@ pub struct CompiledModel {
     /// Warps and rotations, parents first.
     pub deformer_order: Vec<ParentRef>,
 
+    /// Parents come before children.
+    pub bone_names: Vec<String>,
+    pub bones: Vec<BoneDef>,
+    pub bone_kf: Vec<BoneTransform>,
+    pub influences: Vec<Influence>,
+
     pub glues: Vec<GlueDef>,
     pub glue_nodes: Vec<GlueNode>,
     pub glue_kf_intensity: Vec<f32>,
@@ -222,8 +259,8 @@ fn flatten(points: &[[f32; 2]], out: &mut Vec<f32>) {
 }
 
 impl Model {
-    /// Flattens the model for evaluation. Bones and physics are not part of
-    /// the compiled model yet.
+    /// Flattens the model for evaluation. Physics is not part of the
+    /// compiled model yet.
     pub fn compile(&self) -> Result<CompiledModel, CompileError> {
         let errors = self.validate();
         if !errors.is_empty() {
@@ -317,6 +354,8 @@ impl Model {
             first,
         };
 
+        let bone_index = compile_bones(self, &binding_index, &mut c)?;
+
         for (_, name, mesh) in self.meshes.iter() {
             let vertex_start = c.mesh_base_positions.len() / 2;
             flatten(&mesh.positions, &mut c.mesh_base_positions);
@@ -346,6 +385,23 @@ impl Model {
                     ));
                 }
             }
+            let influence_start = (!mesh.influences.is_empty()).then(|| {
+                let start = c.influences.len();
+                c.influences.extend(mesh.influences.iter().map(|inf| {
+                    let mut out = Influence {
+                        bones: [NO_BONE; 4],
+                        weights: [0.0; 4],
+                    };
+                    for (slot, bone) in inf.bones.iter().enumerate() {
+                        if let Some(b) = bone {
+                            out.bones[slot] = bone_index[b] as u32;
+                            out.weights[slot] = inf.weights[slot];
+                        }
+                    }
+                    out
+                }));
+                start
+            });
             c.mesh_names.push(name.to_owned());
             c.meshes.push(MeshDef {
                 vertex_start,
@@ -364,6 +420,7 @@ impl Model {
                 mask_count: mesh.masks.len(),
                 mask_inverted: mesh.mask_inverted,
                 double_sided: mesh.double_sided,
+                influence_start,
             });
         }
 
@@ -467,8 +524,91 @@ impl Model {
         order.sort_by_key(|&d| depth(d));
         c.deformer_order = order;
 
+        check_bone_spaces(&c)?;
+
         Ok(c)
     }
+}
+
+/// Bones, parents first, with the inverse of each rest transform.
+fn compile_bones(
+    model: &Model,
+    binding_index: &HashMap<BindingId, usize>,
+    c: &mut CompiledModel,
+) -> Result<HashMap<BoneId, usize>, CompileError> {
+    let depth = |mut id: BoneId| {
+        let mut depth = 0;
+        while let Some(parent) = model.bones.get(id).and_then(|b| b.parent) {
+            depth += 1;
+            id = parent;
+        }
+        depth
+    };
+    let mut ids: Vec<_> = model.bones.iter().map(|(id, _, _)| id).collect();
+    ids.sort_by_key(|&id| depth(id));
+    let index: HashMap<_, _> = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+
+    let mut rest_world: Vec<Affine> = Vec::new();
+    for &id in &ids {
+        let bone = model.bones.get(id).expect("listed bone exists");
+        let name = model.bones.name(id).expect("listed bone exists");
+        let local = Affine::from_bone(&bone.base);
+        let world = match bone.parent {
+            Some(p) => rest_world[index[&p]].then_after(&local),
+            None => local,
+        };
+        let rest_inverse = world
+            .inverse()
+            .ok_or_else(|| CompileError::DegenerateBone {
+                bone: name.to_owned(),
+            })?;
+        rest_world.push(world);
+        let keyforms = bone.keyforms.as_ref().map(|grid| {
+            let k = KeyformRef {
+                binding: binding_index[&grid.binding],
+                first: c.bone_kf.len(),
+            };
+            c.bone_kf.extend(grid.keyforms.iter().copied());
+            k
+        });
+        c.bone_names.push(name.to_owned());
+        c.bones.push(BoneDef {
+            parent: bone.parent.map(|p| index[&p]),
+            base: bone.base,
+            keyforms,
+            rest_inverse,
+        });
+    }
+    Ok(index)
+}
+
+/// Every mesh using a bone tree must hang from the same parent (ADR-0021).
+fn check_bone_spaces(c: &CompiledModel) -> Result<(), CompileError> {
+    let root_of = |mut b: usize| {
+        while let Some(p) = c.bones[b].parent {
+            b = p;
+        }
+        b
+    };
+    let mut space: HashMap<usize, ParentRef> = HashMap::new();
+    for def in &c.meshes {
+        let Some(start) = def.influence_start else {
+            continue;
+        };
+        let used = c.influences[start..start + def.vertex_count]
+            .iter()
+            .flat_map(|inf| inf.bones)
+            .filter(|&b| b != NO_BONE);
+        for b in used {
+            let b = b as usize;
+            if *space.entry(root_of(b)).or_insert(def.parent) != def.parent {
+                return Err(CompileError::BoneSpaceMismatch {
+                    bone: c.bone_names[b].clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Compiles every driver's expression and orders the drivers so each runs
