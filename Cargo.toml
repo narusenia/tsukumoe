@@ -11,5 +11,8 @@ license = "Apache-2.0 OR MIT"
 [workspace.dependencies]
 seimei-core = { path = "crates/seimei-core" }
 
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
