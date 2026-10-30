@@ -6,4 +6,5 @@
 //! texture view. The window and the sliders live in `app`, which only calls it.
 
 pub mod app;
+pub mod settings;
 pub mod viewer;
