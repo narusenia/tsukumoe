@@ -2,7 +2,9 @@
 
 関連: REQ-CORE-002〜005, REQ-CORE-009, REQ-COMPAT-004, REQ-COMPAT-006
 
-状態: 骨子。各要素のフィールド定義は M1 で詰める。
+状態: M1-01 で `seimei-core` に型を実装済み（`crates/seimei-core/src/{elements,rig,keyform,physics,playback,driver}.rs`）。評価の意味づけは M1-03 以降で詰める。
+
+ID は内部が世代付きインデックス、外部参照は永続 ID（種類ごとに一意の文字列）。更新は `Model::apply` 経由（ADR-0018）。
 
 ## 要素
 
@@ -15,7 +17,7 @@
 | RotationDeformer | 原点・角度・拡大率・反転。子を持つ |
 | Glue | 2 つの ArtMesh の頂点を重み付きで結ぶ |
 | Bone | 親子・ローカル変換。ArtMesh の頂点ウェイトから参照される |
-| KeyformGrid | 対象（メッシュ / デフォーマ / ボーン / 描画順 / 不透明度 / 色）ごとの、パラメータ格子上のキーフォーム |
+| KeyformGrid | バインディング（パラメータとキー位置）上の、行優先で密なキーフォーム配列。バインディングは要素間で共有する。メッシュのキーフォームは形・不透明度・描画順・色をまとめて持つ（ADR-0018） |
 | BlendShape | 基本形に加算する差分形。重みはパラメータで駆動する |
 | Driver | パラメータ式。出力パラメータ 1 つと式 |
 | PhysicsRig | 振り子（physics3 互換）と物理チェーン |
