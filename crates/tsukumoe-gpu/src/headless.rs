@@ -180,7 +180,9 @@ impl Headless {
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| Error::Gpu(e.to_string()))?;
-        let mapped = buffer.get_mapped_range(..);
+        let mapped = buffer
+            .get_mapped_range(..)
+            .map_err(|e| Error::Gpu(e.to_string()))?;
         let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
         for y in 0..height as usize {
             let start = y * row as usize;
