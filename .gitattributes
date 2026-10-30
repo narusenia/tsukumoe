@@ -2,3 +2,5 @@ schema/*.json text eol=lf
 crates/tsukumoe-format/tests/fixtures/** text eol=lf
 docs/specifications/samples/*.json text eol=lf
 *.tmod binary
+crates/tsukumoe-ffi/include/*.h text eol=lf
+crates/tsukumoe-ffi/examples/c/* text eol=lf

@@ -205,7 +205,7 @@ fn index(i: u32, len: usize, what: &str) -> Result<usize, Failure> {
     }
 }
 
-fn layer(l: u32) -> Result<usize, Failure> {
+fn check_layer(l: u32) -> Result<usize, Failure> {
     index(l, MAX_LAYERS, "layer")
 }
 
@@ -263,13 +263,13 @@ pub unsafe extern "C" fn tsukumoe_runtime_parameter_count(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_parameter_info(
     runtime: *const TsukumoeRuntime,
-    index_: u32,
+    idx: u32,
     out: *mut TsukumoeParameterInfo,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle(runtime)? };
         let out = unsafe { outp(out, "out")? };
-        let i = index(index_, r.parameter_names.len(), "parameter")?;
+        let i = index(idx, r.parameter_names.len(), "parameter")?;
         let p = &r.rt.model().parameters[i];
         *out = TsukumoeParameterInfo {
             name: r.parameter_names[i].as_ptr(),
@@ -309,12 +309,12 @@ pub unsafe extern "C" fn tsukumoe_runtime_parameter_index(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_set_parameter(
     runtime: *mut TsukumoeRuntime,
-    index_: u32,
+    idx: u32,
     value: f32,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle_mut(runtime)? };
-        let i = index(index_, r.parameter_names.len(), "parameter")?;
+        let i = index(idx, r.parameter_names.len(), "parameter")?;
         r.rt.set_parameter(i, value);
         Ok(())
     })
@@ -323,11 +323,11 @@ pub unsafe extern "C" fn tsukumoe_runtime_set_parameter(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_clear_parameter(
     runtime: *mut TsukumoeRuntime,
-    index_: u32,
+    idx: u32,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle_mut(runtime)? };
-        let i = index(index_, r.parameter_names.len(), "parameter")?;
+        let i = index(idx, r.parameter_names.len(), "parameter")?;
         r.rt.clear_parameter(i);
         Ok(())
     })
@@ -338,13 +338,13 @@ pub unsafe extern "C" fn tsukumoe_runtime_clear_parameter(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_parameter_value(
     runtime: *const TsukumoeRuntime,
-    index_: u32,
+    idx: u32,
     out: *mut f32,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle(runtime)? };
         let out = unsafe { outp(out, "out")? };
-        *out = r.rt.parameter_values()[index(index_, r.parameter_names.len(), "parameter")?];
+        *out = r.rt.parameter_values()[index(idx, r.parameter_names.len(), "parameter")?];
         Ok(())
     })
 }
@@ -365,13 +365,13 @@ pub unsafe extern "C" fn tsukumoe_runtime_motion_count(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_motion_name(
     runtime: *const TsukumoeRuntime,
-    index_: u32,
+    idx: u32,
     out: *mut *const c_char,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle(runtime)? };
         let out = unsafe { outp(out, "out")? };
-        *out = r.motion_names[index(index_, r.motion_names.len(), "motion")?].as_ptr();
+        *out = r.motion_names[index(idx, r.motion_names.len(), "motion")?].as_ptr();
         Ok(())
     })
 }
@@ -392,13 +392,13 @@ pub unsafe extern "C" fn tsukumoe_runtime_expression_count(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_expression_name(
     runtime: *const TsukumoeRuntime,
-    index_: u32,
+    idx: u32,
     out: *mut *const c_char,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle(runtime)? };
         let out = unsafe { outp(out, "out")? };
-        *out = r.expression_names[index(index_, r.expression_names.len(), "expression")?].as_ptr();
+        *out = r.expression_names[index(idx, r.expression_names.len(), "expression")?].as_ptr();
         Ok(())
     })
 }
@@ -410,7 +410,7 @@ pub unsafe extern "C" fn tsukumoe_runtime_expression_name(
 pub unsafe extern "C" fn tsukumoe_runtime_play_motion(
     runtime: *mut TsukumoeRuntime,
     name: *const c_char,
-    layer_: u32,
+    layer: u32,
     priority: i32,
     started: *mut u32,
 ) -> TsukumoeStatus {
@@ -428,8 +428,8 @@ pub unsafe extern "C" fn tsukumoe_runtime_play_motion(
                 ));
             }
         };
-        let layer_ = layer(layer_)?;
-        let ok = r.rt.play_motion(name, layer_, priority)?;
+        let layer = check_layer(layer)?;
+        let ok = r.rt.play_motion(name, layer, priority)?;
         if let Some(s) = unsafe { started.as_mut() } {
             *s = u32::from(ok);
         }
@@ -441,11 +441,11 @@ pub unsafe extern "C" fn tsukumoe_runtime_play_motion(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_stop_motion(
     runtime: *mut TsukumoeRuntime,
-    layer_: u32,
+    layer: u32,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle_mut(runtime)? };
-        r.rt.stop(layer(layer_)?);
+        r.rt.stop(check_layer(layer)?);
         Ok(())
     })
 }
@@ -454,13 +454,13 @@ pub unsafe extern "C" fn tsukumoe_runtime_stop_motion(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_is_motion_playing(
     runtime: *const TsukumoeRuntime,
-    layer_: u32,
+    layer: u32,
     out: *mut u32,
 ) -> TsukumoeStatus {
     guard(|| {
         let r = unsafe { handle(runtime)? };
         let out = unsafe { outp(out, "out")? };
-        *out = u32::from(r.rt.is_playing(layer(layer_)?));
+        *out = u32::from(r.rt.is_playing(check_layer(layer)?));
         Ok(())
     })
 }
@@ -629,7 +629,7 @@ pub unsafe extern "C" fn tsukumoe_runtime_texture_count(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tsukumoe_runtime_texture(
     runtime: *const TsukumoeRuntime,
-    index_: u32,
+    idx: u32,
     out_data: *mut *const u8,
     out_len: *mut u32,
 ) -> TsukumoeStatus {
@@ -637,7 +637,7 @@ pub unsafe extern "C" fn tsukumoe_runtime_texture(
         let r = unsafe { handle(runtime)? };
         let out_data = unsafe { outp(out_data, "out_data")? };
         let out_len = unsafe { outp(out_len, "out_len")? };
-        let t = &r.textures[index(index_, r.textures.len(), "texture")?];
+        let t = &r.textures[index(idx, r.textures.len(), "texture")?];
         *out_data = t.as_ptr();
         *out_len = count(t.len());
         Ok(())
