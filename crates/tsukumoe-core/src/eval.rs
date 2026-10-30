@@ -34,6 +34,7 @@ pub struct Frame {
     corners: Vec<(usize, f32)>,
     corner_counts: Vec<usize>,
     blend_weights: Vec<f32>,
+    part_opacity: Vec<f32>,
     part_world: Vec<f32>,
     warp_local: Vec<f32>,
     warp_world: Vec<f32>,
@@ -72,6 +73,7 @@ impl Frame {
             corners: vec![(0, 0.0); model.corner_capacity as usize],
             corner_counts: vec![0; model.bindings.len()],
             blend_weights: vec![0.0; model.blends.len()],
+            part_opacity: model.part_opacity.to_vec(),
             part_world: vec![1.0; model.part_opacity.len()],
             warp_local: vec![0.0; model.warp_base_points.len()],
             warp_world: vec![0.0; model.warp_base_points.len()],
@@ -104,6 +106,13 @@ impl Frame {
         &mut self.values
     }
 
+    /// Overrides the opacity of a part (before its parents' opacities are
+    /// multiplied in). Until set, a part has the compiled value; the override
+    /// stays until set again.
+    pub fn set_part_opacity(&mut self, index: usize, value: f32) {
+        self.part_opacity[index] = value;
+    }
+
     /// Vertex positions of all meshes in drawing space, `x, y` interleaved.
     pub fn positions(&self) -> &[f32] {
         &self.positions
@@ -134,6 +143,7 @@ impl Frame {
             corners,
             corner_counts,
             blend_weights,
+            part_opacity,
             part_world,
             warp_local,
             warp_world,
@@ -190,7 +200,7 @@ impl Frame {
             } else {
                 part_world[parent as usize]
             };
-            part_world[i] = model.part_opacity[i] * inherited;
+            part_world[i] = part_opacity[i] * inherited;
         }
 
         for (i, bone) in model.bones.iter().enumerate() {
@@ -952,6 +962,23 @@ mod tests {
         m.meshes.insert("Skin", skin).unwrap();
         let (_, f) = run(&m, &[]);
         assert!((f.mesh_attrs(0)[0] - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_part_opacity_override_replaces_the_compiled_value_until_set_again() {
+        let (mut m, part) = new_model();
+        m.parts.get_mut(part).unwrap().opacity = 0.5;
+        m.meshes.insert("Skin", mesh(part, &[[0.0, 0.0]])).unwrap();
+        let (c, mut f) = run(&m, &[]);
+        assert_eq!(f.mesh_attrs(0)[0], 0.5);
+        f.set_part_opacity(0, 0.8);
+        f.evaluate(&c);
+        assert_eq!(f.mesh_attrs(0)[0], 0.8);
+        f.evaluate(&c);
+        assert_eq!(f.mesh_attrs(0)[0], 0.8);
+        f.set_part_opacity(0, 0.5);
+        f.evaluate(&c);
+        assert_eq!(f.mesh_attrs(0)[0], 0.5);
     }
 
     #[test]
