@@ -1,0 +1,21 @@
+[package]
+name = "tsukumoe-i18n"
+description = "Tsukumoe UI translations: Fluent messages, language detection and fallback"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+schemars.workspace = true
+fluent-bundle = "0.16.0"
+unic-langid = "0.9.6"
+sys-locale = "0.3.2"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+fluent-syntax = "0.12.0"

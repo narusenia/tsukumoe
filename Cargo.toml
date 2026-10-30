@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/tsukumoe-core", "crates/tsukumoe-format", "crates/tsukumoe-gpu", "crates/tsukumoe-cli", "crates/tsukumoe-ui", "crates/tsukumoe-host"]
+members = ["crates/tsukumoe-core", "crates/tsukumoe-format", "crates/tsukumoe-gpu", "crates/tsukumoe-cli", "crates/tsukumoe-ui", "crates/tsukumoe-host", "crates/tsukumoe-i18n"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +13,7 @@ repository = "https://github.com/narusenia/tsukumoe"
 tsukumoe-core = { path = "crates/tsukumoe-core", version = "0.1.0" }
 tsukumoe-format = { path = "crates/tsukumoe-format", version = "0.1.0" }
 tsukumoe-gpu = { path = "crates/tsukumoe-gpu", version = "0.1.0" }
+tsukumoe-i18n = { path = "crates/tsukumoe-i18n", version = "0.1.0" }
 tsukumoe-ui = { path = "crates/tsukumoe-ui", version = "0.1.0" }
 tsukumoe-host = { path = "crates/tsukumoe-host", version = "0.1.0" }
 
