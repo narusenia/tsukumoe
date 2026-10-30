@@ -131,8 +131,8 @@ typedef struct TsukumoeDrawBuffers {
   uint32_t index_count;
 } TsukumoeDrawBuffers;
 
-// One mesh to draw. The pointers are valid until the next
-// `tsukumoe_runtime_update`, play / stop / `set_auto` call or
+// One mesh to draw. The pointers are valid until the next call that changes
+// the runtime (update, set / clear parameter, play / stop, `set_auto`) or
 // `tsukumoe_runtime_destroy`, except `name`, which is valid until destroy.
 // A pointer whose count is 0 must not be read.
 typedef struct TsukumoeDrawable {
@@ -249,8 +249,8 @@ TsukumoeStatus tsukumoe_runtime_set_auto(struct TsukumoeRuntime *runtime,
 // more than 10 is cut to 10) and evaluates the frame.
 TsukumoeStatus tsukumoe_runtime_update(struct TsukumoeRuntime *runtime, float dt);
 
-// The whole-model buffers of the last update (valid before the first one too:
-// the model at its default pose).
+// The whole-model buffers of the last update. Before the first update they
+// hold zeros: call `tsukumoe_runtime_update` first.
 TsukumoeStatus tsukumoe_runtime_draw_buffers(const struct TsukumoeRuntime *runtime,
                                              struct TsukumoeDrawBuffers *out);
 

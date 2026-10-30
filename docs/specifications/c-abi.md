@@ -89,7 +89,7 @@ A runtime must be used from one thread at a time. Calls on different runtimes ma
 | `tsukumoe_runtime_play_expression(runtime, name)` / `_stop_expression` | Fades an expression in on top of the active ones / out. `NOT_FOUND` for an unknown name. |
 | `tsukumoe_runtime_set_auto(runtime, config)` | Replaces the automatic motion and restarts its clock. `NOT_FOUND` for an unknown parameter name, `OUT_OF_RANGE` for a bad number or `size`. On an error nothing changes. |
 | `tsukumoe_runtime_update(runtime, dt)` | Advances everything by `dt` seconds (negative and non-finite count as 0; more than 10 is cut to 10) and evaluates the frame, in the order of the `tsukumoe-runtime` crate documentation. |
-| `tsukumoe_runtime_draw_buffers(runtime, out)` | The whole-model buffers of the last update. Valid before the first update too: the model at its default pose. |
+| `tsukumoe_runtime_draw_buffers(runtime, out)` | The whole-model buffers of the last update. Before the first update the buffers hold zeros, so call `tsukumoe_runtime_update` (with `dt` 0 if no time should pass) first. |
 | `tsukumoe_runtime_drawable(runtime, position, out)` | The drawable at `position` of the drawing order (0 is the back); `OUT_OF_RANGE` at or past `drawable_count`. |
 | `tsukumoe_runtime_texture_count(runtime, out)` | Number of embedded textures (`.tmod` section 0x80). |
 | `tsukumoe_runtime_texture(runtime, index, out_data, out_len)` | The PNG bytes of texture `index`, valid until destroy. Decoding is the caller's. |
