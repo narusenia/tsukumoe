@@ -17,5 +17,5 @@
 | M1-11 | [`tsukumoe-host` の芽: パラメータスライダ付きビューア](host-viewer.md)（egui + `tsukumoe-ui`） | TRK-003, UI-001, UI-002 | M | M1-09 | 完了 |
 | M1-12 | [criterion ベンチマークと CI での回帰検知](benchmarks.md) | PERF-002, PERF-009 | S | M1-03 | 完了 |
 | M1-13 | [基準モデルの生成 CLI](reference-model.md)（パーツ表 → Tsukumoe 形式 JSON、ADR-0017） | PERF-001 | M | M1-08, M1-10 | 完了 |
-| M1-14 | [UI ライブラリの作り込み](ui-library.md)（`tsukumoe-ui`: 部品・テーマ・キーマップ・見た目、gallery） | UI-004 | L | M1-11 | 未着手 |
+| M1-14 | [UI ライブラリの作り込み](ui-library.md)（`tsukumoe-ui`: 部品・テーマ・キーマップ・見た目、gallery） | UI-004 | L | M1-11 | 完了 |
 | M1-15 | [多言語対応の基盤（i18n）](i18n.md)（`tsukumoe-i18n`: 日本語・英語、Fluent、言語に合う CJK フォント） | UI-005 | M | M1-11 | 未着手 |

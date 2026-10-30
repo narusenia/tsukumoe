@@ -21,7 +21,7 @@ ADR-0025 で wgpui を採用し、M1-11 で macOS 上のビューアまで作っ
   - デザイントークン（色 10 種 + 寸法）。既定は高密度（文字 12pt・コントロール高 24pt・余白 4pt 刻み・影なし）
   - テーマの切り替え（ライト / ダーク / システム）と JSON の読み込み（`{"appearance": "dark"|"light", "colors": {"accent": "#rrggbb"}}`、省いた色は組み込みで補い、未知のキーは拒否）。egui の `Style` へ反映し、部品はトークンを読む
   - 部品: Button・Switch・Slider・Label・Panel。gallery（example）で全状態を確認する
-  - 日本語表示のため、システムの CJK フォントを探して fallback に加える（`install_cjk_font`）
+  - フォントは欧文を Inter、日本語を Noto Sans CJK JP（かな・約物・漢字に絞った部分集合）で同梱し、バイナリに埋め込む（`install_cjk_font`）。OS のフォントは使わない。システムの CJK フォントを fallback にすると基準線がずれた。どちらも OFL で、`crates/tsukumoe-ui/assets/fonts/` にライセンスを置く
 - `tsukumoe-host` と `tsukumoe-app` は `tsukumoe-ui` を使う。`viewer`（UI 非依存）は変えない
 - ホストは「操作の後の一定時間（物理が落ち着くまで）だけ」再描画し、止まっているときは描かない
 - ランタイム系クレートは egui 系（`egui` / `eframe` / `egui-wgpu` / `epaint` など）に依存しない。CI で検査する
