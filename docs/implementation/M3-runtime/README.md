@@ -4,7 +4,7 @@
 
 | ID | 単位 | REQ | 規模 | 依存 | 状態 |
 |---|---|---|---|---|---|
-| M3-01 | [ランタイム形式（ゼロコピー）・仕様書・ファズテスト](runtime-format.md) | FMT-004〜006 | L | M1-03 | 未着手 |
+| M3-01 | [ランタイム形式（ゼロコピー）・仕様書・ファズテスト](runtime-format.md) | FMT-004〜006 | L | M1-03 | 完了 |
 | M3-02 | `tsukumoe-runtime`（モーション・表情・自動動作） | RT-001 | M | M3-01 | 未着手 |
 | M3-03 | `tsukumoe-ffi`（C ABI・cbindgen・C サンプル） | RT-002 | M | M3-02 | 未着手 |
 | M3-04 | `tsukumoe-wasm` と npm パッケージ（WebGPU / WebGL2） | RT-003 | M | M3-02 | 未着手 |
