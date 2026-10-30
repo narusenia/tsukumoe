@@ -8,9 +8,15 @@
 //! `UPDATE_SNAPSHOTS=1 cargo test -p tsukumoe-ui --test snapshots`, and look
 //! at the images before committing them.
 
-use egui_kittest::{Harness, SnapshotResults};
+use egui_kittest::{Harness, SnapshotOptions, SnapshotResults};
 use tsukumoe_ui::showcase::{Section, Showcase};
 use tsukumoe_ui::{Density, Mode, Theme, set_density, set_mode};
+
+/// Anti-aliasing differs by a few levels between OSes and GPUs; a real change
+/// moves pixels far more than this.
+fn options() -> SnapshotOptions {
+    SnapshotOptions::new().threshold(3.0)
+}
 
 fn name(section: Section) -> String {
     format!("{section:?}").to_lowercase()
@@ -43,7 +49,7 @@ fn snapshot(
     harness.fit_contents();
     harness.run();
     harness.fit_contents();
-    harness.snapshot(format!("{}_{tag}", name(section)));
+    harness.snapshot_options(format!("{}_{tag}", name(section)), &options());
     results.extend_harness(&mut harness);
 }
 
@@ -110,7 +116,7 @@ fn the_built_in_named_themes() {
             harness.run();
             harness.fit_contents();
             let theme_name = named.name.to_lowercase().replace(' ', "_");
-            harness.snapshot(format!("{}_{theme_name}", name(section)));
+            harness.snapshot_options(format!("{}_{theme_name}", name(section)), &options());
             results.extend_harness(&mut harness);
         }
     }
@@ -139,7 +145,7 @@ fn the_theme_section_in_both_languages() {
         harness.fit_contents();
         harness.run();
         harness.fit_contents();
-        harness.snapshot(format!("theme_{}", language.code()));
+        harness.snapshot_options(format!("theme_{}", language.code()), &options());
         results.extend_harness(&mut harness);
     }
     results.unwrap();
