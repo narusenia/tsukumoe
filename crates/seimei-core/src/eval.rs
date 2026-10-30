@@ -3,27 +3,13 @@
 
 //! Frame evaluation. The rules are in `docs/specifications/evaluation.md`.
 
-use crate::compiled::{BindingDef, CompiledModel, KeyformRef, MeshAttrs, ParamDef, ParentRef};
+use crate::affine::Affine;
+use crate::compiled::{
+    BindingDef, CompiledModel, Influence, KeyformRef, MeshAttrs, NO_BONE, ParamDef, ParentRef,
+};
 use crate::elements::Point;
 use crate::expr;
-use crate::rig::RotationKeyform;
-
-/// Maps a rotation deformer's local point to world space:
-/// `[m0 x + m2 y + t0, m1 x + m3 y + t1]`.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct Affine {
-    m: [f32; 4],
-    t: [f32; 2],
-}
-
-impl Affine {
-    fn apply(&self, p: Point) -> Point {
-        [
-            self.m[0] * p[0] + self.m[2] * p[1] + self.t[0],
-            self.m[1] * p[0] + self.m[3] * p[1] + self.t[1],
-        ]
-    }
-}
+use crate::rig::{BoneTransform, RotationKeyform};
 
 impl ParamDef {
     fn apply(&self, value: f32) -> f32 {
@@ -52,6 +38,8 @@ pub struct Frame {
     warp_opacity: Vec<f32>,
     rot_world: Vec<Affine>,
     rot_opacity: Vec<f32>,
+    bone_world: Vec<Affine>,
+    bone_skin: Vec<Affine>,
     scratch: Vec<f32>,
     positions: Vec<f32>,
     attrs: Vec<MeshAttrs>,
@@ -87,6 +75,8 @@ impl Frame {
             warp_opacity: vec![1.0; model.warps.len()],
             rot_world: vec![Affine::default(); model.rotations.len()],
             rot_opacity: vec![1.0; model.rotations.len()],
+            bone_world: vec![Affine::IDENTITY; model.bones.len()],
+            bone_skin: vec![Affine::IDENTITY; model.bones.len()],
             scratch: vec![0.0; max_points],
             positions: vec![0.0; model.mesh_base_positions.len()],
             attrs: vec![[0.0; 8]; model.meshes.len()],
@@ -138,6 +128,8 @@ impl Frame {
             warp_opacity,
             rot_world,
             rot_opacity,
+            bone_world,
+            bone_skin,
             scratch,
             positions,
             attrs,
@@ -174,6 +166,23 @@ impl Frame {
         for (i, parent) in model.part_parents.iter().enumerate() {
             let inherited = parent.map_or(1.0, |p| part_world[p]);
             part_world[i] = model.part_opacity[i] * inherited;
+        }
+
+        for (i, bone) in model.bones.iter().enumerate() {
+            let pose = match bone.keyforms {
+                Some(k) => {
+                    let cs = corner_slice(model, corners, corner_counts, k);
+                    blend_bone(cs, &model.bone_kf, k.first)
+                }
+                None => bone.base,
+            };
+            let local = Affine::from_bone(&pose);
+            let world = match bone.parent {
+                Some(p) => bone_world[p].then_after(&local),
+                None => local,
+            };
+            bone_world[i] = world;
+            bone_skin[i] = world.then_after(&bone.rest_inverse);
         }
 
         for &deformer in &model.deformer_order {
@@ -287,6 +296,14 @@ impl Frame {
                     &model.blend_deltas[delta..delta + n],
                     blend_weights[bi],
                 );
+            }
+            if let Some(start) = def.influence_start {
+                let influences = &model.influences[start..start + def.vertex_count];
+                for (v, inf) in out.as_chunks_mut::<2>().0.iter_mut().zip(influences) {
+                    let q = skin(inf, bone_skin, [v[0], v[1]]);
+                    v[0] = q[0];
+                    v[1] = q[1];
+                }
             }
             if def.parent != ParentRef::None {
                 let world = World {
@@ -481,6 +498,40 @@ fn blend_attrs(corners: &[(usize, f32)], data: &[MeshAttrs], first: usize) -> Me
     out
 }
 
+fn blend_bone(corners: &[(usize, f32)], data: &[BoneTransform], first: usize) -> BoneTransform {
+    let mut out = BoneTransform {
+        translation: [0.0; 2],
+        rotation_degrees: 0.0,
+        scale: [0.0; 2],
+    };
+    for &(k, w) in corners {
+        let b = &data[first + k];
+        for axis in 0..2 {
+            out.translation[axis] += w * b.translation[axis];
+            out.scale[axis] += w * b.scale[axis];
+        }
+        out.rotation_degrees += w * b.rotation_degrees;
+    }
+    out
+}
+
+/// `sum(w * skin * p)` plus the share of `p` the weights leave over; weights
+/// summing past 1 are scaled down to 1 (ADR-0021).
+fn skin(inf: &Influence, bone_skin: &[Affine], p: Point) -> Point {
+    let sum: f32 = inf.weights.iter().sum();
+    let scale = if sum > 1.0 { 1.0 / sum } else { 1.0 };
+    let rest = (1.0 - sum).max(0.0);
+    let mut out = [rest * p[0], rest * p[1]];
+    for (&b, &w) in inf.bones.iter().zip(&inf.weights) {
+        if b != NO_BONE {
+            let q = bone_skin[b as usize].apply(p);
+            out[0] += w * scale * q[0];
+            out[1] += w * scale * q[1];
+        }
+    }
+    out
+}
+
 /// Reflection flags are not interpolated: the heaviest grid point wins.
 fn blend_rotation(
     corners: &[(usize, f32)],
@@ -544,8 +595,8 @@ mod tests {
     use crate::keyform::{Axis, Binding, BindingId, KeyformGrid};
     use crate::model::Model;
     use crate::rig::{
-        ArtMesh, BlendShape, BlendTarget, DeformerRef, Glue, GlueNode, MeshKeyform,
-        RotationDeformer, WarpDeformer, WarpKeyform,
+        ArtMesh, BlendShape, BlendTarget, Bone, BoneTransform, DeformerRef, Glue, GlueNode,
+        MeshKeyform, RotationDeformer, VertexInfluences, WarpDeformer, WarpKeyform,
     };
 
     thread_local! {
@@ -1073,6 +1124,234 @@ mod tests {
         }
         assert_eq!(ALLOCS.with(Cell::get) - before, 0);
         assert!(frame.positions().iter().all(|v| v.is_finite()));
+    }
+
+    fn at(x: f32, y: f32) -> BoneTransform {
+        BoneTransform {
+            translation: [x, y],
+            ..BoneTransform::default()
+        }
+    }
+
+    fn turned(degrees: f32) -> BoneTransform {
+        BoneTransform {
+            rotation_degrees: degrees,
+            ..BoneTransform::default()
+        }
+    }
+
+    /// One vertex at `(1, 0)` skinned to `bones` with the given weights.
+    fn skinned(part: PartId, bones: &[(crate::rig::BoneId, f32)]) -> ArtMesh {
+        let mut skin = mesh(part, &[[1.0, 0.0]]);
+        let mut inf = VertexInfluences::default();
+        for (slot, &(bone, weight)) in bones.iter().enumerate() {
+            inf.bones[slot] = Some(bone);
+            inf.weights[slot] = weight;
+        }
+        skin.influences = vec![inf];
+        skin
+    }
+
+    /// A bone that moves by `(2, 0)` as `P` goes from -1 to 1.
+    fn driven_bone(
+        m: &mut Model,
+        name: &str,
+        p: ParameterId,
+        base: BoneTransform,
+    ) -> crate::rig::BoneId {
+        let b = binding(m, &[(p, &[-1.0, 1.0])]);
+        m.bones
+            .insert(
+                name,
+                Bone {
+                    parent: None,
+                    base,
+                    keyforms: Some(KeyformGrid::new(
+                        b,
+                        vec![
+                            base,
+                            BoneTransform {
+                                translation: [base.translation[0] + 2.0, base.translation[1]],
+                                ..base
+                            },
+                        ],
+                    )),
+                },
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_bone_at_rest_leaves_the_vertex_alone() {
+        let (mut m, part) = new_model();
+        let bone = m
+            .bones
+            .insert(
+                "B",
+                Bone {
+                    parent: None,
+                    base: at(5.0, 3.0),
+                    keyforms: None,
+                },
+            )
+            .unwrap();
+        m.meshes
+            .insert("Skin", skinned(part, &[(bone, 1.0)]))
+            .unwrap();
+        let (c, f) = run(&m, &[]);
+        near(f.mesh_positions(&c, 0), &[1.0, 0.0]);
+    }
+
+    #[test]
+    fn bone_keyforms_move_weighted_vertices() {
+        let (mut m, part) = new_model();
+        let p = param(&mut m, "P");
+        let bone = driven_bone(&mut m, "B", p, at(0.0, 0.0));
+        m.meshes
+            .insert("Full", skinned(part, &[(bone, 1.0)]))
+            .unwrap();
+        m.meshes
+            .insert("Half", skinned(part, &[(bone, 0.5)]))
+            .unwrap();
+        for (value, full, half) in [(-1.0, 1.0, 1.0), (0.0, 2.0, 1.5), (1.0, 3.0, 2.0)] {
+            let (c, f) = run(&m, &[("P", value)]);
+            near(f.mesh_positions(&c, 0), &[full, 0.0]);
+            near(f.mesh_positions(&c, 1), &[half, 0.0]);
+        }
+    }
+
+    #[test]
+    fn weights_past_one_are_scaled_down() {
+        let (mut m, part) = new_model();
+        let p = param(&mut m, "P");
+        let a = driven_bone(&mut m, "A", p, at(0.0, 0.0));
+        let b = driven_bone(&mut m, "B", p, at(0.0, 0.0));
+        m.meshes
+            .insert("Skin", skinned(part, &[(a, 1.0), (b, 1.0)]))
+            .unwrap();
+        let (c, f) = run(&m, &[("P", 1.0)]);
+        near(f.mesh_positions(&c, 0), &[3.0, 0.0]);
+    }
+
+    #[test]
+    fn a_child_bone_follows_its_parent() {
+        let (mut m, part) = new_model();
+        let p = param(&mut m, "P");
+        let b = binding(&mut m, &[(p, &[-1.0, 1.0])]);
+        let parent = m
+            .bones
+            .insert(
+                "Parent",
+                Bone {
+                    parent: None,
+                    base: BoneTransform::default(),
+                    keyforms: Some(KeyformGrid::new(b, vec![turned(0.0), turned(90.0)])),
+                },
+            )
+            .unwrap();
+        let child = m
+            .bones
+            .insert(
+                "Child",
+                Bone {
+                    parent: Some(parent),
+                    base: at(1.0, 0.0),
+                    keyforms: None,
+                },
+            )
+            .unwrap();
+        m.meshes
+            .insert("Skin", skinned(part, &[(child, 1.0)]))
+            .unwrap();
+        let (c, f) = run(&m, &[("P", 1.0)]);
+        near(f.mesh_positions(&c, 0), &[0.0, 1.0]);
+    }
+
+    #[test]
+    fn skinning_comes_before_the_parent_deformer() {
+        let (mut m, part) = new_model();
+        let p = param(&mut m, "P");
+        let bone = driven_bone(&mut m, "B", p, at(0.0, 0.0));
+        let rot = m
+            .rotations
+            .insert("R", rotation(part, None, [0.0, 0.0], 90.0))
+            .unwrap();
+        let mut skin = skinned(part, &[(bone, 1.0)]);
+        skin.parent = Some(DeformerRef::Rotation(rot));
+        m.meshes.insert("Skin", skin).unwrap();
+        // (1, 0) + (2, 0) in the deformer's space, then turned a quarter.
+        let (c, f) = run(&m, &[("P", 1.0)]);
+        near(f.mesh_positions(&c, 0), &[0.0, 3.0]);
+    }
+
+    #[test]
+    fn bone_compile_errors() {
+        let (mut m, part) = new_model();
+        let flat = BoneTransform {
+            scale: [0.0, 1.0],
+            ..BoneTransform::default()
+        };
+        m.bones
+            .insert(
+                "Flat",
+                Bone {
+                    parent: None,
+                    base: flat,
+                    keyforms: None,
+                },
+            )
+            .unwrap();
+        m.meshes.insert("Skin", mesh(part, &[[0.0, 0.0]])).unwrap();
+        assert!(matches!(
+            m.compile(),
+            Err(CompileError::DegenerateBone { bone }) if bone == "Flat"
+        ));
+
+        let (mut m, part) = new_model();
+        let bone = m
+            .bones
+            .insert(
+                "B",
+                Bone {
+                    parent: None,
+                    base: at(0.0, 0.0),
+                    keyforms: None,
+                },
+            )
+            .unwrap();
+        let rot = m
+            .rotations
+            .insert("R", rotation(part, None, [0.0, 0.0], 0.0))
+            .unwrap();
+        m.meshes
+            .insert("Free", skinned(part, &[(bone, 1.0)]))
+            .unwrap();
+        let mut under = skinned(part, &[(bone, 1.0)]);
+        under.parent = Some(DeformerRef::Rotation(rot));
+        m.meshes.insert("Under", under).unwrap();
+        assert!(matches!(
+            m.compile(),
+            Err(CompileError::BoneSpaceMismatch { bone }) if bone == "B"
+        ));
+    }
+
+    #[test]
+    fn steady_state_evaluation_with_bones_allocates_nothing() {
+        let (mut m, part) = new_model();
+        let p = param(&mut m, "P");
+        let bone = driven_bone(&mut m, "B", p, at(0.0, 0.0));
+        m.meshes
+            .insert("Skin", skinned(part, &[(bone, 1.0)]))
+            .unwrap();
+        let c = m.compile().unwrap();
+        let mut frame = Frame::new(&c);
+        frame.evaluate(&c);
+        let before = ALLOCS.with(Cell::get);
+        for i in 0..100 {
+            frame.set_parameter(0, i as f32 * 0.02 - 1.0);
+            frame.evaluate(&c);
+        }
+        assert_eq!(ALLOCS.with(Cell::get) - before, 0);
     }
 
     #[test]
