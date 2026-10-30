@@ -18,6 +18,17 @@ pub struct Texture {
     pub rgba: Vec<u8>,
 }
 
+impl Texture {
+    pub fn from_png(bytes: &[u8]) -> Result<Self, Error> {
+        let (width, height, rgba) = crate::decode_png(bytes)?;
+        Ok(Self {
+            width,
+            height,
+            rgba,
+        })
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {

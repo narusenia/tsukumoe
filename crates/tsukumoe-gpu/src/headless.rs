@@ -13,7 +13,62 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
+/// How two images of the same size differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Diff {
+    /// Largest difference of any channel of any pixel.
+    pub max: u8,
+    /// Pixels with a channel differing by more than the tolerance.
+    pub differing: usize,
+    pub pixels: usize,
+}
+
 impl Image {
+    /// Decodes a PNG; the colors become premultiplied.
+    pub fn from_png(bytes: &[u8]) -> Result<Self, Error> {
+        let (width, height, mut rgba) = crate::decode_png(bytes)?;
+        for px in rgba.as_chunks_mut::<4>().0 {
+            let a = u32::from(px[3]);
+            for c in &mut px[..3] {
+                *c = ((u32::from(*c) * a + 127) / 255) as u8;
+            }
+        }
+        Ok(Self {
+            width,
+            height,
+            rgba,
+        })
+    }
+
+    /// Compares with `other`, `None` when the sizes differ. The second image
+    /// is `|self - other|` per channel, alpha forced opaque.
+    pub fn diff(&self, other: &Image, tolerance: u8) -> Option<(Diff, Image)> {
+        if (self.width, self.height) != (other.width, other.height) {
+            return None;
+        }
+        let mut out = Vec::with_capacity(self.rgba.len());
+        let mut diff = Diff {
+            max: 0,
+            differing: 0,
+            pixels: self.rgba.len() / 4,
+        };
+        for (a, b) in self.rgba.chunks(4).zip(other.rgba.chunks(4)) {
+            let d: [u8; 4] = std::array::from_fn(|i| a[i].abs_diff(b[i]));
+            let worst = d.into_iter().max().unwrap_or(0);
+            diff.max = diff.max.max(worst);
+            diff.differing += usize::from(worst > tolerance);
+            out.extend_from_slice(&[d[0], d[1], d[2], 255]);
+        }
+        Some((
+            diff,
+            Image {
+                width: self.width,
+                height: self.height,
+                rgba: out,
+            },
+        ))
+    }
+
     /// PNG bytes. PNG is straight alpha, so the colors are un-premultiplied.
     pub fn to_png(&self) -> Vec<u8> {
         let mut straight = self.rgba.clone();
