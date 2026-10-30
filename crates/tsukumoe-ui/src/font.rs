@@ -5,30 +5,23 @@ use std::sync::Arc;
 
 use egui::{Context, FontData, FontDefinitions, FontFamily, Id};
 
-/// System fonts with Japanese glyphs, tried in order.
-const CANDIDATES: &[&str] = &[
-    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-    "/System/Library/Fonts/Hiragino Sans GB.ttc",
-    r"C:\Windows\Fonts\YuGothM.ttc",
-    r"C:\Windows\Fonts\meiryo.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-];
+const INTER: &[u8] = include_bytes!("../assets/fonts/Inter[opsz,wght].ttf");
+/// Subset to kana, punctuation and CJK ideographs (see `assets/fonts`).
+const NOTO_JP: &[u8] = include_bytes!("../assets/fonts/NotoSansCJKjp-Regular.otf");
 
-/// Adds the first available system CJK font as a fallback, so Japanese
-/// parameter names and input render. Without one, those glyphs show as boxes.
-/// Returns whether a font was found.
+/// Installs the bundled fonts: Inter for Latin text, Noto Sans CJK JP as the
+/// fallback for Japanese. Returns `true` (kept for callers that check).
 pub fn install_cjk_font(ctx: &Context) -> bool {
-    let Some(bytes) = CANDIDATES.iter().find_map(|path| std::fs::read(path).ok()) else {
-        return false;
-    };
     let mut fonts = FontDefinitions::default();
-    fonts
-        .font_data
-        .insert("cjk".into(), Arc::new(FontData::from_owned(bytes)));
+    for (name, bytes) in [("inter", INTER), ("noto-jp", NOTO_JP)] {
+        fonts
+            .font_data
+            .insert(name.into(), Arc::new(FontData::from_static(bytes)));
+    }
     for family in [FontFamily::Proportional, FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push("cjk".into());
+        let list = fonts.families.entry(family).or_default();
+        list.insert(0, "inter".into());
+        list.insert(1, "noto-jp".into());
     }
     ctx.set_fonts(fonts);
     ctx.data_mut(|d| d.insert_temp(Id::NULL.with("tsukumoe-ui-cjk"), true));
