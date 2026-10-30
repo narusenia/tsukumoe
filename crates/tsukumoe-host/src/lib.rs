@@ -5,4 +5,5 @@
 //! project, holds the parameters, advances the model and draws it into a
 //! texture view. The window and the sliders live in `app`, which only calls it.
 
+pub mod app;
 pub mod viewer;

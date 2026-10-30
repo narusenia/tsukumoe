@@ -11,7 +11,13 @@ repository.workspace = true
 tsukumoe-core.workspace = true
 tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true
+tsukumoe-ui.workspace = true
 wgpu.workspace = true
+wgpui.workspace = true
+
+[[bin]]
+name = "tsukumoe-host"
+path = "src/main.rs"
 
 [lints]
 workspace = true
