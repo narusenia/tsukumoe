@@ -15,6 +15,7 @@ use crate::physics::PhysicsRig;
 use crate::playback::{Expression, Motion, Pose};
 use crate::rig::{ArtMesh, BlendShape, Bone, Glue, RotationDeformer, WarpDeformer};
 use crate::table::Table;
+use crate::validate::ModelError;
 
 /// Equality ignores the history: two models are equal when their contents are.
 #[derive(Default)]
@@ -36,9 +37,57 @@ pub struct Model {
     pub(crate) history: History,
 }
 
+/// The content of a model, for building one from outside the editing
+/// commands (loading a file). See [`Model::from_parts`].
+#[derive(Default)]
+pub struct ModelParts {
+    pub parameters: Table<Parameter>,
+    pub parts: Table<Part>,
+    pub meshes: Table<ArtMesh>,
+    pub warps: Table<WarpDeformer>,
+    pub rotations: Table<RotationDeformer>,
+    pub glues: Table<Glue>,
+    pub bones: Table<Bone>,
+    pub blend_shapes: Table<BlendShape>,
+    pub drivers: Table<Driver>,
+    pub motions: Table<Motion>,
+    pub expressions: Table<Expression>,
+    pub bindings: Arena<Binding>,
+    pub pose: Option<Pose>,
+    pub physics: PhysicsRig,
+}
+
 impl Model {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Builds a model from its content. Only a consistent model is returned;
+    /// the history starts empty, as after loading a file.
+    pub fn from_parts(parts: ModelParts) -> Result<Self, Vec<ModelError>> {
+        let model = Self {
+            parameters: parts.parameters,
+            parts: parts.parts,
+            meshes: parts.meshes,
+            warps: parts.warps,
+            rotations: parts.rotations,
+            glues: parts.glues,
+            bones: parts.bones,
+            blend_shapes: parts.blend_shapes,
+            drivers: parts.drivers,
+            motions: parts.motions,
+            expressions: parts.expressions,
+            bindings: parts.bindings,
+            pose: parts.pose,
+            physics: parts.physics,
+            history: History::default(),
+        };
+        let errors = model.validate();
+        if errors.is_empty() {
+            Ok(model)
+        } else {
+            Err(errors)
+        }
     }
 
     pub fn parameters(&self) -> &Table<Parameter> {
