@@ -1,0 +1,6 @@
+{
+  "compile": 1000000,
+  "evaluate": 300000,
+  "evaluate_draw_list": 300000,
+  "advance_16ms": 300000
+}
