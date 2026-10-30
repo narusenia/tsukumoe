@@ -3,7 +3,7 @@
 
 [tools]
 rust = { version = "1.99", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown", profile = "minimal" }
-"github:indexable-inc/blaze" = "latest"
+"github:indexable-inc/blaze" = { version = "latest", os = ["linux", "macos"] }
 lefthook = "2.1.5"
 jq = "1.8"
 
