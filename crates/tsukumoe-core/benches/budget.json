@@ -1,6 +1,6 @@
 {
-  "compile": 1000000,
-  "evaluate": 300000,
-  "evaluate_draw_list": 300000,
-  "advance_16ms": 300000
+  "compile": 400000,
+  "evaluate": 750000,
+  "evaluate_draw_list": 750000,
+  "advance_16ms": 750000
 }

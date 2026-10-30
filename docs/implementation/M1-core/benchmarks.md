@@ -11,7 +11,7 @@
 - 基準モデル（M1-13）はまだない。代わりに基準モデル規模の合成モデルを測る: 100 メッシュ × 196 頂点（約 2 万頂点）、ワープ 1 つの子、各メッシュは 2 パラメータの 2×2 キーフォーム
 - 計測: `compile`、`evaluate`（毎フレーム両パラメータを動かす）、`evaluate_draw_list`、`advance_16ms`
 - 回帰検知: 中央値の上限（ns）を `benches/budget.json` に置き、`scripts/check-bench.sh` が比較する。CI は `bench` ジョブ（ubuntu）で `mise run bench`
-- 上限は、手元（Apple Silicon）の実測の約 4 倍。CI ランナーのばらつきを吸収する代わりに、検知できるのは大きな劣化だけ
+- 上限は、CI ランナー（ubuntu）の実測（evaluate 約 0.38 ms、compile 約 0.17 ms）の約 2 倍。手元（Apple Silicon）は約 5 倍速い。検知できるのは 2 倍近い劣化から
 
 ## 受入条件
 
