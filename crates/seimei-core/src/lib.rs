@@ -6,4 +6,5 @@
 pub mod arena;
 pub mod elements;
 pub mod keyform;
+pub mod rig;
 pub mod table;
