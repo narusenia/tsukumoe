@@ -7,8 +7,10 @@
 //! `wasm32-unknown-unknown` (see `docs/specifications/architecture.md`).
 
 pub mod arena;
+pub mod command;
 pub mod driver;
 pub mod elements;
+pub mod history;
 pub mod keyform;
 pub mod model;
 pub mod physics;
