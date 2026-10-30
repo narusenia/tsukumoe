@@ -12,7 +12,7 @@
 | M1-06 | [物理](physics.md)（振り子と物理チェーン、[ADR-0022](../../adr/0022-physics-stage.md)） | CORE-005 | M | M1-03 | 完了 |
 | M1-07 | [描画リスト](draw-list.md) | CORE-006 | M | M1-03 | 完了 |
 | M1-08 | [JSON プロジェクト形式](project-format.md)（zip / 展開ディレクトリ）と JSON Schema | FMT-001〜003, FMT-005 | M | M1-01 | 完了 |
-| M1-09 | 描画規則の仕様化と wgpu 参照レンダラ（ヘッドレス出力を含む） | RT-005, RT-006 | L | M1-07 | 未着手 |
+| M1-09 | [描画規則の仕様化と wgpu 参照レンダラ](gpu-renderer.md)（ヘッドレス出力を含む） | RT-005, RT-006 | L | M1-07 | 完了 |
 | M1-10 | `tsukumoe-cli`: 形式変換・検証・ヘッドレスレンダ・画像差分 | AI-002 | M | M1-08, M1-09 | 未着手 |
 | M1-11 | `tsukumoe-host` の芽: パラメータスライダ付きビューア（gpui-pre + gpui-kit） | TRK-003, UI-001, UI-002 | M | M1-09 | 未着手 |
 | M1-12 | criterion ベンチマークと CI での回帰検知 | PERF-002, PERF-009 | S | M1-03 | 未着手 |

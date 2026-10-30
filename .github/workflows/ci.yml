@@ -22,6 +22,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   CARGO_INCREMENTAL: "0"
+  TSUKUMOE_REQUIRE_GPU: "1"
 
 jobs:
   check:
@@ -38,6 +39,9 @@ jobs:
         with:
           install_args: rust jq
       - uses: Swatinem/rust-cache@v2
+      # The renderer tests need a Vulkan adapter; lavapipe is a software one.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
       - run: mise run check
 
   deny:
