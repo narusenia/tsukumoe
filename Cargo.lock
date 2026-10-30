@@ -3470,6 +3470,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukumoe-runtime"
+version = "0.1.0"
+dependencies = [
+ "tsukumoe-core",
+]
+
+[[package]]
 name = "tsukumoe-ui"
 version = "0.1.0"
 dependencies = [
