@@ -4,7 +4,7 @@ Related: REQ-FMT-001 to REQ-FMT-006
 
 License of this document: CC-BY 4.0
 
-Status: the manifest and the containers are defined (M1-08); the contents of `model.json` and the other files are filled in next in M1-08, and the runtime format in M3.
+Status: the manifest, the containers and the model files are defined (M1-08); the published JSON Schema is the next step of M1-08, and the runtime format is M3.
 
 ## 1. Project format (`.tsukumoe`)
 
@@ -50,6 +50,23 @@ sources/             # optional references to original PSD files
 - Archive entries are written in path order with a fixed timestamp, so the same project gives the same bytes.
 - Readers bound the entry count, the size of each file and the total size. The declared size in an archive is not trusted.
 - A directory is read without following links; a link or another non-regular file is an error.
+
+### 1.3 Files of the model
+
+All are UTF-8 JSON in the order of the field definitions in the Rust types (`tsukumoe-format::dto`).
+
+| File | Content |
+|---|---|
+| `model.json` | `parameters`, `parts`, `bindings`, `bones`, `warps`, `rotations`, `meshes`, `glues`, `blend_shapes`, `drivers`, optional `pose` |
+| `physics.json` | `pendulums`, `chains` |
+| `motions/NNNNNN-name.json` | one motion; the real name is the `name` field inside |
+| `expressions/NNNNNN-name.json` | one expression, same naming |
+
+- Elements refer to each other by **persistent name**, never by an internal index. The one exception is a keyform grid's `binding`: the position in `bindings`, because bindings are shared and unnamed.
+- Files under `motions/` and `expressions/` are numbered in the order of the model's table so the order survives; the name part is the real name with every byte outside `A-Z a-z 0-9 - _` written as `%XX`. A reader takes the name from inside the file.
+- Fields with a natural default (opacity 1, draw order 500, colors, `visible`, empty lists) may be left out when a file is edited by hand; a writer always writes them.
+- Reading validates the content as a model: a name that is not defined, a duplicate name, or a geometry that does not fit is an error that names the element.
+- Numbers must be finite; JSON has no NaN or infinity.
 
 ## 2. Runtime format (`.tmod`)
 

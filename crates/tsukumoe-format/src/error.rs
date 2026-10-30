@@ -30,6 +30,14 @@ pub enum Error {
     UnsafePath(String),
     DuplicatePath(String),
     TooLarge(String),
+    /// `field` of `owner` names an element the file does not define.
+    Reference {
+        owner: String,
+        field: &'static str,
+        name: String,
+    },
+    /// The content does not make a consistent model.
+    Invalid(String),
 }
 
 impl fmt::Display for Error {
@@ -50,6 +58,13 @@ impl fmt::Display for Error {
             Self::UnsafePath(path) => write!(f, "unsafe path '{path}'"),
             Self::DuplicatePath(path) => write!(f, "duplicate path '{path}'"),
             Self::TooLarge(what) => write!(f, "{what} is too large"),
+            Self::Reference { owner, field, name } => {
+                write!(
+                    f,
+                    "{owner}: {field} refers to '{name}', which does not exist"
+                )
+            }
+            Self::Invalid(message) => write!(f, "invalid model: {message}"),
         }
     }
 }
