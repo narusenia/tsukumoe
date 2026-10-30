@@ -2,7 +2,7 @@
 
 対象クレート: `tsukumoe-app` / `tsukumoe-host`
 
-## REQ-UI-001: gpui-pre と gpui-kit を fork せず採用
+## REQ-UI-001: wgpui を UI の土台に採用
 
 | 項目 | 内容 |
 |------|------|
@@ -12,20 +12,20 @@
 
 ### 説明
 
-UI は Zed の gpui のスナップショット公開である `gpui-pre` と、その上の `gpui-kit`（`gpui-base` / `gpui-component`）で作る。fork は持たない。
+UI は `wgpui`（wgpu + winit の GPUI 系フレームワーク）とその上の `wgpui-base` で作る。独自の fork は持たない。
 上流に足りない機能は、まず上流への PR で解決する。
-経緯は ADR-0003。
+経緯は ADR-0025（ADR-0003 を置き換え）。
 
 ### 受入条件
 
-- [ ] `Cargo.toml` が crates.io / 上流 git の `gpui-pre` 系と `gpui-kit` 系だけを参照している
+- [ ] `Cargo.toml` が crates.io / 上流 git の `wgpui` 系だけを UI の土台として参照している
 - [ ] fork が必要になった場合は、ADR で理由と解消条件を記録している
 
 ### 依存要件
 
 - なし
 
-## REQ-UI-002: GPUI 系と wgpu の同一リビジョン固定
+## REQ-UI-002: wgpui 系と wgpu の同一版固定
 
 | 項目 | 内容 |
 |------|------|
@@ -35,12 +35,12 @@ UI は Zed の gpui のスナップショット公開である `gpui-pre` と、
 
 ### 説明
 
-`gpui-pre` と兄弟クレート（`-platform` / `-wgpu` 等）と `gpui-kit` を、同じ Zed リビジョンに対応する版に固定し、1 回の変更で同時に更新する。
-`wgpu` は `gpui-pre-wgpu` が依存する版と同じにし、エディタのビューポートを UI と同じ device で描く。
+`wgpui` と `wgpui-base` を対応する版に固定し、1 回の変更で同時に更新する。
+`wgpu` は `wgpui` が依存する版と同じにし、エディタのビューポートを UI と同じ device で描く。
 
 ### 受入条件
 
-- [ ] `cargo tree -d` で `gpui` 系・`wgpu` の重複がないことを CI で検査する
+- [ ] `cargo tree -d` で `wgpui` 系・`wgpu` の重複がないことを CI で検査する
 - [ ] ビューポートが UI と同じ wgpu device を使って描画している
 - [ ] 上流追従の手順が `docs/dev/` に書かれている
 
@@ -59,11 +59,11 @@ UI は Zed の gpui のスナップショット公開である `gpui-pre` と、
 
 ### 説明
 
-`tsukumoe-core` / `-format` / `-gpu` / `-compat` / `-runtime` / `-ffi` / `-wasm` / `-tracking` / `-ai` / `-cli` は GPUI に依存しない。GPUI の更新がランタイムに波及しないようにする。
+`tsukumoe-core` / `-format` / `-gpu` / `-compat` / `-runtime` / `-ffi` / `-wasm` / `-tracking` / `-ai` / `-cli` は GPUI 系（`gpui` / `wgpui`）に依存しない。UI の更新がランタイムに波及しないようにする。
 
 ### 受入条件
 
-- [ ] 上記クレートの依存ツリーに `gpui` 系が現れないことを CI で検査する
+- [ ] 上記クレートの依存ツリーに `gpui` / `wgpui` 系が現れないことを CI で検査する
 
 ### 依存要件
 
@@ -79,11 +79,12 @@ UI は Zed の gpui のスナップショット公開である `gpui-pre` と、
 
 ### 説明
 
-ウィジェットは `gpui-base`（スタイルを持たない振る舞い層）の上に自前で作り、見た目を Tsukumoe のテーマで統一する。初めは `tsukumoe-app` の中に置き、必要になったら `tsukumoe-ui` / `-widgets` / `-dock` に分ける。
+ウィジェットは `wgpui-base`（スタイルを持たない振る舞い層）の上に自前で作り、見た目を Tsukumoe のテーマで統一する。`tsukumoe-ui` に置く（ADR-0026）。`wgpui-component` は使わない。
 
 ### 受入条件
 
 - [ ] テーマ（色・余白・フォント）がトークンとして一か所で定義されている
+- [ ] 各部品の状態を並べる gallery がある
 
 ### 依存要件
 
