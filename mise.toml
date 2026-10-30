@@ -38,3 +38,7 @@ depends = ["fmt", "clippy", "deps", "wasm", "test"]
 [tasks."hooks:install"]
 description = "Install lefthook git hooks"
 run = "lefthook install"
+
+[tasks.bench]
+description = "Run the core benchmarks and compare with the ceilings in benches/budget.json"
+run = ["cargo bench -p tsukumoe-core", "bash scripts/check-bench.sh"]
