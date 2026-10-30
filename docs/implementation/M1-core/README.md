@@ -9,7 +9,7 @@
 | M1-03 | [評価用モデルへのコンパイルと評価パイプライン](eval-pipeline.md)（キーフォーム・デフォーマ・グルー・ブレンドシェイプ） | CORE-001, CORE-008 | L | M1-01 | 完了 |
 | M1-04 | [パラメータ式](driver-expressions.md) | CORE-004 | M | M1-03 | 完了 |
 | M1-05 | [ボーンとスキニング](bone-skinning.md)（適用順は [ADR-0021](../../adr/0021-skinning-order.md)） | CORE-003 | M | M1-03 | 完了 |
-| M1-06 | 物理（振り子と物理チェーン） | CORE-005 | M | M1-03 | 未着手 |
+| M1-06 | [物理](physics.md)（振り子と物理チェーン、[ADR-0022](../../adr/0022-physics-stage.md)） | CORE-005 | M | M1-03 | 完了 |
 | M1-07 | [描画リスト](draw-list.md) | CORE-006 | M | M1-03 | 完了 |
 | M1-08 | JSON プロジェクト形式（zip / 展開ディレクトリ）と JSON Schema | FMT-001〜003, FMT-005 | M | M1-01 | 未着手 |
 | M1-09 | 描画規則の仕様化と wgpu 参照レンダラ（ヘッドレス出力を含む） | RT-005, RT-006 | L | M1-07 | 未着手 |

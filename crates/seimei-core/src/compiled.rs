@@ -10,10 +10,11 @@
 use std::collections::HashMap;
 
 use crate::affine::Affine;
-use crate::elements::ParameterId;
+use crate::elements::{ParameterId, Point};
 use crate::expr::{self, ExprError, Op};
 use crate::keyform::BindingId;
 use crate::model::Model;
+use crate::physics::{Channel, Range};
 use crate::rig::{
     BlendMode, BlendTarget, BoneId, BoneTransform, DeformerRef, GlueNode, RotationKeyform,
 };
@@ -42,6 +43,10 @@ pub enum CompileError {
     /// Meshes with different parent deformers share the bone's tree (ADR-0021).
     BoneSpaceMismatch {
         bone: String,
+    },
+    /// A driver also writes a parameter that physics writes (ADR-0022).
+    PhysicsOutputConflict {
+        group: String,
     },
 }
 
@@ -105,6 +110,58 @@ pub struct BoneDef {
 }
 
 pub const NO_BONE: u32 = u32::MAX;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicsInputDef {
+    pub parameter: usize,
+    pub channel: Channel,
+    /// Percent.
+    pub weight: f32,
+    pub reflect: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicsOutputDef {
+    pub parameter: usize,
+    pub channel: Channel,
+    /// Index within the group's particles.
+    pub particle: usize,
+    pub scale: f32,
+    /// Percent.
+    pub weight: f32,
+    pub reflect: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PhysicsKind {
+    Pendulum { position: Range, angle: Range },
+    Chain { gravity: Point, wind: Point },
+}
+
+/// One pendulum particle or chain joint. Fields a kind does not use are 0.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhysicsParticle {
+    pub rest: Point,
+    /// Distance to the parent: a pendulum's `radius`, a chain's joint length.
+    pub length: f32,
+    pub mobility: f32,
+    pub delay: f32,
+    pub acceleration: f32,
+    pub stiffness: f32,
+    pub damping: f32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhysicsDef {
+    pub name: String,
+    pub kind: PhysicsKind,
+    pub input_start: usize,
+    pub input_count: usize,
+    pub output_start: usize,
+    pub output_count: usize,
+    pub particle_start: usize,
+    pub particle_count: usize,
+}
 
 /// Up to four bones moving one vertex; unused slots are `NO_BONE` with weight 0.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -232,6 +289,11 @@ pub struct CompiledModel {
     pub bone_kf: Vec<BoneTransform>,
     pub influences: Vec<Influence>,
 
+    pub physics: Vec<PhysicsDef>,
+    pub physics_inputs: Vec<PhysicsInputDef>,
+    pub physics_outputs: Vec<PhysicsOutputDef>,
+    pub physics_particles: Vec<PhysicsParticle>,
+
     pub glues: Vec<GlueDef>,
     pub glue_nodes: Vec<GlueNode>,
     pub glue_kf_intensity: Vec<f32>,
@@ -259,8 +321,8 @@ fn flatten(points: &[[f32; 2]], out: &mut Vec<f32>) {
 }
 
 impl Model {
-    /// Flattens the model for evaluation. Physics is not part of the
-    /// compiled model yet.
+    /// Flattens the model for evaluation. Physics is compiled too, but
+    /// its state lives in the frame.
     pub fn compile(&self) -> Result<CompiledModel, CompileError> {
         let errors = self.validate();
         if !errors.is_empty() {
@@ -281,6 +343,7 @@ impl Model {
         }
 
         compile_drivers(self, &param_index, &mut c)?;
+        compile_physics(self, &param_index, &mut c)?;
 
         let mut binding_index: HashMap<BindingId, usize> = HashMap::new();
         for (i, (id, binding)) in self.bindings.iter().enumerate() {
@@ -528,6 +591,104 @@ impl Model {
 
         Ok(c)
     }
+}
+
+fn compile_physics(
+    model: &Model,
+    param_index: &HashMap<ParameterId, usize>,
+    c: &mut CompiledModel,
+) -> Result<(), CompileError> {
+    let rig = &model.physics;
+    let ios = |c: &mut CompiledModel,
+               inputs: &[crate::physics::PhysicsInput],
+               outputs: &[crate::physics::PhysicsOutput]| {
+        let start = (c.physics_inputs.len(), c.physics_outputs.len());
+        c.physics_inputs
+            .extend(inputs.iter().map(|i| PhysicsInputDef {
+                parameter: param_index[&i.parameter],
+                channel: i.channel,
+                weight: i.weight,
+                reflect: i.reflect,
+            }));
+        c.physics_outputs
+            .extend(outputs.iter().map(|o| PhysicsOutputDef {
+                parameter: param_index[&o.parameter],
+                channel: o.channel,
+                particle: o.particle,
+                scale: o.scale,
+                weight: o.weight,
+                reflect: o.reflect,
+            }));
+        start
+    };
+
+    for group in &rig.pendulums {
+        let (input_start, output_start) = ios(c, &group.inputs, &group.outputs);
+        let particle_start = c.physics_particles.len();
+        c.physics_particles
+            .extend(group.particles.iter().map(|p| PhysicsParticle {
+                rest: p.position,
+                length: p.radius,
+                mobility: p.mobility,
+                delay: p.delay,
+                acceleration: p.acceleration,
+                stiffness: 0.0,
+                damping: 0.0,
+            }));
+        c.physics.push(PhysicsDef {
+            name: group.name.clone(),
+            kind: PhysicsKind::Pendulum {
+                position: group.position_range,
+                angle: group.angle_range,
+            },
+            input_start,
+            input_count: group.inputs.len(),
+            output_start,
+            output_count: group.outputs.len(),
+            particle_start,
+            particle_count: group.particles.len(),
+        });
+    }
+    for chain in &rig.chains {
+        let (input_start, output_start) = ios(c, &chain.inputs, &chain.outputs);
+        let particle_start = c.physics_particles.len();
+        c.physics_particles
+            .extend(chain.joints.iter().map(|j| PhysicsParticle {
+                rest: [0.0, 0.0],
+                length: j.length,
+                mobility: 0.0,
+                delay: 0.0,
+                acceleration: 0.0,
+                stiffness: j.stiffness,
+                damping: j.damping,
+            }));
+        c.physics.push(PhysicsDef {
+            name: chain.name.clone(),
+            kind: PhysicsKind::Chain {
+                gravity: chain.gravity,
+                wind: chain.wind,
+            },
+            input_start,
+            input_count: chain.inputs.len(),
+            output_start,
+            output_count: chain.outputs.len(),
+            particle_start,
+            particle_count: chain.joints.len(),
+        });
+    }
+
+    for def in &c.physics {
+        let outputs = &c.physics_outputs[def.output_start..def.output_start + def.output_count];
+        if outputs
+            .iter()
+            .any(|o| c.drivers.iter().any(|d| d.output == o.parameter))
+        {
+            return Err(CompileError::PhysicsOutputConflict {
+                group: def.name.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Bones, parents first, with the inverse of each rest transform.

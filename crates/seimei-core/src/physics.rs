@@ -3,7 +3,7 @@
 
 //! Physics: pendulum groups (physics3 compatible) and physics chains.
 //!
-//! Types only; simulation is M1-06.
+//! The simulation is in `simulate.rs`.
 
 use crate::elements::{ParameterId, Point};
 

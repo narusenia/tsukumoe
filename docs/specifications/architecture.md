@@ -49,16 +49,15 @@ seimei-compat ──► seimei-format ──► seimei-core ◄── seimei-run
 ## 評価パイプライン
 
 ```
-params ─► drivers ─► keyform interp ─► skinning ─► deformer hierarchy ─► physics ─► draw list
-         (式)        (多重線形 /         (bones)     (warp / rotation /    (pendulum /
-                      blend shape)                    glue)                 chain)
+params ─► drivers ─► physics ─► keyform interp ─► skinning ─► deformer hierarchy ─► draw list
+         (式)        (pendulum /  (多重線形 /       (bones)     (warp / rotation /
+                      chain)       blend shape)                  glue)
 ```
 
 - 編集用モデル（木構造・名前付き）と評価用モデル（SoA・インデックス参照・事前計算済み）を分ける。編集用 → 評価用は「コンパイル」で、ランタイム形式は評価用モデルをそのまま直列化したもの
 - 定常状態のフレーム評価でヒープ確保をしない（REQ-CORE-008）
 - 物理は固定タイムステップで、残り時間を次フレームに持ち越す
-- 物理の出力パラメータは次段の入力に戻すため、物理段のあとに「物理が書いたパラメータに依存する段」を再評価する。範囲はコンパイル時に求める
-  - TODO: Cubism の評価順と一致させる方法を M1 で確定する
+- 物理の入出力はパラメータだけなので、物理はドライバの直後に評価し、出力は同じフレームのキーフォーム補間に届く（再評価は要らない、[ADR-0022](../adr/0022-physics-stage.md)）
 
 ## GPU と UI
 

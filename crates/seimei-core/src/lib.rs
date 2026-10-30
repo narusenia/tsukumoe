@@ -21,5 +21,6 @@ pub mod model;
 pub mod physics;
 pub mod playback;
 pub mod rig;
+pub mod simulate;
 pub mod table;
 pub mod validate;
