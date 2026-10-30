@@ -29,3 +29,15 @@ ADR-0003 は、ビューポートを UI と同じ wgpu device で描くために
 - ADR-0003 の「fork を持たない」は、wgpui を上流とみなす限り保たれる
 - `wgpui` の依存木は大きい（HTTP・async-std・zbus など）。`deny.toml` で、保守停止の警告は自分の依存だけに限り（`unmaintained = "workspace"`）、ライセンスに BSL-1.0 と NCSA を足した
 - `wgpui` が引く `xattr` 0.2.3 は `libc` 0.2.191 の Linux でコンパイルできない（`ENOATTR` の削除）。`Cargo.lock` で `libc` を 0.2.189 に固定している。`xattr` の更新か `wgpui` の対応を待って外す
+
+## IME の検証（2026-10-30）
+
+macOS の日本語 IME（ローマ字入力）で、`wgpui-base` の `Input` と egui（eframe 0.37）の `TextEdit` を同じ手順で比べた。手順は「`nihongo` → Space → Enter」と「Space を 2 回で候補リスト」。
+
+- どちらも、変換・確定、未確定文字列の下線、値への反映は正しい
+- egui: 候補窓がキャレットの直下に出る
+- wgpui: そのままだと候補窓が窓の左上に固定される。`wgpui-base` の入力欄が `Window::invalidate_character_coordinates` を呼ばず、IME への位置通知が更新されないため
+- wgpui の対処: 入力欄を含む画面の `render` ごとに `window.invalidate_character_coordinates()` を呼ぶ。これで egui と同じ位置（未確定文字列の直下）に出る
+- 方針: `tsukumoe-ui` に入力欄を足すときは、この呼び出しを部品の中に入れる（利用側に忘れさせない）
+- 未検証: Windows / Linux、複数行（Textarea）、変換中のカーソル移動、全角英数、IME 窓の画面端での反転
+- これで IME は、wgpui を外す理由にならない。再判断（M5-02 の前）の材料は、保守状況と依存の重さに絞られる
