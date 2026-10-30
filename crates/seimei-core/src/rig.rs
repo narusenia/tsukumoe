@@ -1,3 +1,6 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 //! Rig elements: meshes, deformers, glue, bones and blend shapes.
 //!
 //! Keyforms hold absolute values, not deltas from a base shape (ADR-0018), so

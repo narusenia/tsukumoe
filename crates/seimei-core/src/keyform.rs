@@ -1,3 +1,6 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 //! Keyform bindings and grids (ADR-0018).
 //!
 //! A [`Binding`] names the parameters an element reacts to and the key

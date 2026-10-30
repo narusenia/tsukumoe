@@ -1,3 +1,6 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 //! Physics: pendulum groups (physics3 compatible) and physics chains.
 //!
 //! Types only; simulation is M1-06.

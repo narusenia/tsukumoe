@@ -1,3 +1,6 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 //! The editing model.
 //!
 //! Fields are crate-private on purpose: ADR-0018 routes every write through

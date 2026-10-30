@@ -1,3 +1,6 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 //! GPU-independent rig model, evaluation pipeline and edit commands.
 //!
 //! This crate must not depend on `wgpu` or `gpui*`, and must build for

@@ -1,3 +1,6 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 //! Playback data: motions, expressions and the part pose.
 //!
 //! Counterparts of motion3, exp3 and pose3.

@@ -1,3 +1,6 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 //! An arena whose elements also carry a persistent, unique string id.
 //!
 //! The internal [`Id`] changes between loads; the persistent name is what
