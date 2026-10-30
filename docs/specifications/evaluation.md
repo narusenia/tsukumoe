@@ -16,7 +16,7 @@
 8. グルーで頂点を寄せる
 9. 描画順を決め、前フレームとの変化を判定する（[draw-list.md](draw-list.md)）
 
-手順 1 の前に、ドライバ（M1-04）が出力パラメータの値を書き込む（手順 0、[driver-expressions.md](driver-expressions.md)）。物理（M1-06）は、この手順にまだ入らない。
+手順 1 の前に、ドライバ（M1-04）が出力パラメータの値を書き込む（手順 0、[driver-expressions.md](driver-expressions.md)）。続けて物理（M1-06）が出力パラメータの値を書き込む（[physics.md](physics.md)、ADR-0022）。ドライバと物理の出力は、手順 1 で通常のパラメータと同じく範囲に収める。
 
 ## キーフォームの補間
 
