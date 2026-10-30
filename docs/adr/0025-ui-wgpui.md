@@ -27,3 +27,5 @@ ADR-0003 は、ビューポートを UI と同じ wgpu device で描くために
 - 代わりに、`wgpui` は個人 fork（0.x）で Zed 本流に追随しない。保守が止まった場合は fork を持つか `gpui-pre` へ戻る。戻す条件は、`gpui-pre` の macOS 側が wgpu の device を公開したとき
 - Linux / Windows での窓の動作は未検証（CI はビルドのみ）
 - ADR-0003 の「fork を持たない」は、wgpui を上流とみなす限り保たれる
+- `wgpui` の依存木は大きい（HTTP・async-std・zbus など）。`deny.toml` で、保守停止の警告は自分の依存だけに限り（`unmaintained = "workspace"`）、ライセンスに BSL-1.0 と NCSA を足した
+- `wgpui` が引く `xattr` 0.2.3 は `libc` 0.2.191 の Linux でコンパイルできない（`ENOATTR` の削除）。`Cargo.lock` で `libc` を 0.2.189 に固定している。`xattr` の更新か `wgpui` の対応を待って外す
