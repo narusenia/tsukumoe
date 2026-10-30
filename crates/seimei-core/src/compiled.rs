@@ -1,0 +1,428 @@
+// Copyright 2026 Seimei Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+//! The read-only evaluation model (ADR-0020).
+//!
+//! Every element is flattened into contiguous buffers addressed by offsets.
+//! Coordinates are interleaved `x0, y0, x1, y1, …`. Indices below are
+//! positions in the iteration order of the editing model's tables.
+
+use std::collections::HashMap;
+
+use crate::keyform::BindingId;
+use crate::model::Model;
+use crate::rig::{BlendTarget, DeformerRef, GlueNode, RotationKeyform};
+use crate::validate::ModelError;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompileError {
+    /// Only a consistent model compiles.
+    Invalid(Vec<ModelError>),
+}
+
+/// The deformer an element hangs from, as an index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParentRef {
+    None,
+    Warp(usize),
+    Rotation(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParamDef {
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+    pub repeat: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AxisDef {
+    pub parameter: usize,
+    pub keys: Vec<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BindingDef {
+    pub axes: Vec<AxisDef>,
+    pub keyform_count: usize,
+    /// Where this binding's corner scratch starts in a frame, and its size.
+    pub corner_start: usize,
+    pub max_corners: usize,
+}
+
+/// A keyform grid: which binding weights it and the index of its first
+/// keyform in the element kind's keyform array.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyformRef {
+    pub binding: usize,
+    pub first: usize,
+}
+
+/// Opacity, draw order, multiply color, screen color.
+pub type MeshAttrs = [f32; 8];
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshDef {
+    /// First vertex in the shared vertex buffer (a float offset is twice this).
+    pub vertex_start: usize,
+    pub vertex_count: usize,
+    pub parent: ParentRef,
+    pub part: usize,
+    pub base_attrs: MeshAttrs,
+    pub keyforms: Option<KeyformRef>,
+    /// Float offset of keyform 0's positions in `mesh_kf_positions`.
+    pub kf_positions: usize,
+    pub blends: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WarpDef {
+    pub rows: usize,
+    pub columns: usize,
+    pub parent: ParentRef,
+    /// Float offset of this warp's control points; the same offset addresses
+    /// its slice of the frame's world grid.
+    pub point_start: usize,
+    pub point_count: usize,
+    pub base_opacity: f32,
+    pub keyforms: Option<KeyformRef>,
+    /// Float offset of keyform 0's points in `warp_kf_points`.
+    pub kf_points: usize,
+    pub blends: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RotationDef {
+    pub parent: ParentRef,
+    pub base: RotationKeyform,
+    pub keyforms: Option<KeyformRef>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlueDef {
+    pub mesh_a: usize,
+    pub mesh_b: usize,
+    pub node_start: usize,
+    pub node_count: usize,
+    pub intensity: f32,
+    pub keyforms: Option<KeyformRef>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendTargetRef {
+    Mesh(usize),
+    Warp(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlendDef {
+    pub target: BlendTargetRef,
+    pub parameter: usize,
+    pub keys: Vec<f32>,
+    pub weights: Vec<f32>,
+    /// Float offset in `blend_deltas`.
+    pub delta_start: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CompiledModel {
+    pub parameter_names: Vec<String>,
+    pub parameters: Vec<ParamDef>,
+    pub bindings: Vec<BindingDef>,
+    /// Total corner scratch a frame needs.
+    pub corner_capacity: usize,
+
+    /// Parents come before children.
+    pub part_parents: Vec<Option<usize>>,
+    pub part_opacity: Vec<f32>,
+
+    pub mesh_names: Vec<String>,
+    pub meshes: Vec<MeshDef>,
+    pub mesh_base_positions: Vec<f32>,
+    pub mesh_kf_positions: Vec<f32>,
+    pub mesh_kf_attrs: Vec<MeshAttrs>,
+
+    pub warps: Vec<WarpDef>,
+    pub warp_base_points: Vec<f32>,
+    pub warp_kf_points: Vec<f32>,
+    pub warp_kf_opacity: Vec<f32>,
+
+    pub rotations: Vec<RotationDef>,
+    pub rotation_kf: Vec<RotationKeyform>,
+
+    /// Warps and rotations, parents first.
+    pub deformer_order: Vec<ParentRef>,
+
+    pub glues: Vec<GlueDef>,
+    pub glue_nodes: Vec<GlueNode>,
+    pub glue_kf_intensity: Vec<f32>,
+
+    pub blends: Vec<BlendDef>,
+    pub blend_deltas: Vec<f32>,
+}
+
+impl CompiledModel {
+    pub fn parameter_index(&self, name: &str) -> Option<usize> {
+        self.parameter_names.iter().position(|n| n == name)
+    }
+
+    pub fn mesh_index(&self, name: &str) -> Option<usize> {
+        self.mesh_names.iter().position(|n| n == name)
+    }
+
+    pub fn vertex_count(&self) -> usize {
+        self.mesh_base_positions.len() / 2
+    }
+}
+
+fn flatten(points: &[[f32; 2]], out: &mut Vec<f32>) {
+    out.extend(points.iter().flatten());
+}
+
+impl Model {
+    /// Flattens the model for evaluation. Drivers, bones and physics are not
+    /// part of the compiled model yet.
+    pub fn compile(&self) -> Result<CompiledModel, CompileError> {
+        let errors = self.validate();
+        if !errors.is_empty() {
+            return Err(CompileError::Invalid(errors));
+        }
+        let mut c = CompiledModel::default();
+
+        let mut param_index = HashMap::new();
+        for (i, (id, name, p)) in self.parameters.iter().enumerate() {
+            param_index.insert(id, i);
+            c.parameter_names.push(name.to_owned());
+            c.parameters.push(ParamDef {
+                min: p.min,
+                max: p.max,
+                default: p.default,
+                repeat: p.repeat,
+            });
+        }
+
+        let mut binding_index: HashMap<BindingId, usize> = HashMap::new();
+        for (i, (id, binding)) in self.bindings.iter().enumerate() {
+            binding_index.insert(id, i);
+            let axes: Vec<AxisDef> = binding
+                .axes()
+                .iter()
+                .map(|a| AxisDef {
+                    parameter: param_index[&a.parameter],
+                    keys: a.keys.clone(),
+                })
+                .collect();
+            let max_corners = axes.iter().map(|a| a.keys.len().min(2)).product();
+            c.bindings.push(BindingDef {
+                axes,
+                keyform_count: binding.keyform_count(),
+                corner_start: c.corner_capacity,
+                max_corners,
+            });
+            c.corner_capacity += max_corners;
+        }
+
+        // Parts, parents first.
+        let mut part_ids: Vec<_> = self.parts.iter().map(|(id, _, _)| id).collect();
+        let part_depth = |mut id| {
+            let mut depth = 0;
+            while let Some(parent) = self.parts.get(id).and_then(|p| p.parent) {
+                depth += 1;
+                id = parent;
+            }
+            depth
+        };
+        part_ids.sort_by_key(|&id| part_depth(id));
+        let part_index: HashMap<_, _> = part_ids
+            .iter()
+            .enumerate()
+            .map(|(i, &id)| (id, i))
+            .collect();
+        for &id in &part_ids {
+            let part = self.parts.get(id).expect("listed part exists");
+            c.part_parents
+                .push(part.parent.map(|parent| part_index[&parent]));
+            c.part_opacity.push(part.opacity);
+        }
+
+        let mesh_index: HashMap<_, _> = self
+            .meshes
+            .iter()
+            .enumerate()
+            .map(|(i, (id, _, _))| (id, i))
+            .collect();
+        let warp_index: HashMap<_, _> = self
+            .warps
+            .iter()
+            .enumerate()
+            .map(|(i, (id, _, _))| (id, i))
+            .collect();
+        let rotation_index: HashMap<_, _> = self
+            .rotations
+            .iter()
+            .enumerate()
+            .map(|(i, (id, _, _))| (id, i))
+            .collect();
+        let parent_ref = |parent: Option<DeformerRef>| match parent {
+            None => ParentRef::None,
+            Some(DeformerRef::Warp(id)) => ParentRef::Warp(warp_index[&id]),
+            Some(DeformerRef::Rotation(id)) => ParentRef::Rotation(rotation_index[&id]),
+        };
+        let keyform_ref = |grid_binding: BindingId, first: usize| KeyformRef {
+            binding: binding_index[&grid_binding],
+            first,
+        };
+
+        for (_, name, mesh) in self.meshes.iter() {
+            let vertex_start = c.mesh_base_positions.len() / 2;
+            flatten(&mesh.positions, &mut c.mesh_base_positions);
+            let base_attrs = attrs(
+                mesh.opacity,
+                mesh.draw_order,
+                mesh.multiply_color,
+                mesh.screen_color,
+            );
+            let mut keyforms = None;
+            let kf_positions = c.mesh_kf_positions.len();
+            if let Some(grid) = &mesh.keyforms {
+                keyforms = Some(keyform_ref(grid.binding, c.mesh_kf_attrs.len()));
+                for kf in &grid.keyforms {
+                    flatten(&kf.positions, &mut c.mesh_kf_positions);
+                    c.mesh_kf_attrs.push(attrs(
+                        kf.opacity,
+                        kf.draw_order,
+                        kf.multiply_color,
+                        kf.screen_color,
+                    ));
+                }
+            }
+            c.mesh_names.push(name.to_owned());
+            c.meshes.push(MeshDef {
+                vertex_start,
+                vertex_count: mesh.positions.len(),
+                parent: parent_ref(mesh.parent),
+                part: part_index[&mesh.part],
+                base_attrs,
+                keyforms,
+                kf_positions,
+                blends: Vec::new(),
+            });
+        }
+
+        for (_, _, warp) in self.warps.iter() {
+            let point_start = c.warp_base_points.len();
+            flatten(&warp.base_points, &mut c.warp_base_points);
+            let kf_points = c.warp_kf_points.len();
+            let mut keyforms = None;
+            if let Some(grid) = &warp.keyforms {
+                keyforms = Some(keyform_ref(grid.binding, c.warp_kf_opacity.len()));
+                for kf in &grid.keyforms {
+                    flatten(&kf.points, &mut c.warp_kf_points);
+                    c.warp_kf_opacity.push(kf.opacity);
+                }
+            }
+            c.warps.push(WarpDef {
+                rows: warp.rows as usize,
+                columns: warp.columns as usize,
+                parent: parent_ref(warp.parent),
+                point_start,
+                point_count: warp.base_points.len(),
+                base_opacity: 1.0,
+                keyforms,
+                kf_points,
+                blends: Vec::new(),
+            });
+        }
+
+        for (_, _, rotation) in self.rotations.iter() {
+            let mut keyforms = None;
+            if let Some(grid) = &rotation.keyforms {
+                keyforms = Some(keyform_ref(grid.binding, c.rotation_kf.len()));
+                c.rotation_kf.extend(grid.keyforms.iter().copied());
+            }
+            c.rotations.push(RotationDef {
+                parent: parent_ref(rotation.parent),
+                base: rotation.base,
+                keyforms,
+            });
+        }
+
+        for (_, _, glue) in self.glues.iter() {
+            let node_start = c.glue_nodes.len();
+            c.glue_nodes.extend(glue.nodes.iter().copied());
+            let mut keyforms = None;
+            if let Some(grid) = &glue.keyforms {
+                keyforms = Some(keyform_ref(grid.binding, c.glue_kf_intensity.len()));
+                c.glue_kf_intensity.extend(grid.keyforms.iter().copied());
+            }
+            c.glues.push(GlueDef {
+                mesh_a: mesh_index[&glue.mesh_a],
+                mesh_b: mesh_index[&glue.mesh_b],
+                node_start,
+                node_count: glue.nodes.len(),
+                intensity: glue.intensity,
+                keyforms,
+            });
+        }
+
+        for (_, _, shape) in self.blend_shapes.iter() {
+            let index = c.blends.len();
+            let target = match shape.target {
+                BlendTarget::Mesh(id) => {
+                    let m = mesh_index[&id];
+                    c.meshes[m].blends.push(index);
+                    BlendTargetRef::Mesh(m)
+                }
+                BlendTarget::Warp(id) => {
+                    let w = warp_index[&id];
+                    c.warps[w].blends.push(index);
+                    BlendTargetRef::Warp(w)
+                }
+            };
+            let delta_start = c.blend_deltas.len();
+            flatten(&shape.deltas, &mut c.blend_deltas);
+            c.blends.push(BlendDef {
+                target,
+                parameter: param_index[&shape.parameter],
+                keys: shape.keys.clone(),
+                weights: shape.weights.clone(),
+                delta_start,
+            });
+        }
+
+        // Deformers, parents first: sort by depth in the parent chain.
+        let depth = |mut parent: ParentRef| {
+            let mut depth = 0;
+            loop {
+                parent = match parent {
+                    ParentRef::None => return depth,
+                    ParentRef::Warp(i) => c.warps[i].parent,
+                    ParentRef::Rotation(i) => c.rotations[i].parent,
+                };
+                depth += 1;
+            }
+        };
+        let mut order: Vec<ParentRef> = (0..c.warps.len())
+            .map(ParentRef::Warp)
+            .chain((0..c.rotations.len()).map(ParentRef::Rotation))
+            .collect();
+        order.sort_by_key(|&d| depth(d));
+        c.deformer_order = order;
+
+        Ok(c)
+    }
+}
+
+fn attrs(opacity: f32, draw_order: f32, multiply: [f32; 3], screen: [f32; 3]) -> MeshAttrs {
+    [
+        opacity,
+        draw_order,
+        multiply[0],
+        multiply[1],
+        multiply[2],
+        screen[0],
+        screen[1],
+        screen[2],
+    ]
+}

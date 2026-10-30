@@ -8,6 +8,7 @@
 
 pub mod arena;
 pub mod command;
+pub mod compiled;
 pub mod driver;
 pub mod elements;
 pub mod history;
