@@ -81,6 +81,58 @@ pub mod id {
     pub const TEXTURE_DATA: u32 = 0x81;
 }
 
+/// The name of a section ID in this version, for tools that print the table.
+pub fn section_name(section: u32) -> Option<&'static str> {
+    use id::*;
+    Some(match section {
+        META => "meta",
+        STRINGS => "strings",
+        PARAMETER_NAMES => "parameter_names",
+        PARAMETERS => "parameters",
+        BINDINGS => "bindings",
+        AXES => "axes",
+        AXIS_KEYS => "axis_keys",
+        DRIVERS => "drivers",
+        OPS => "ops",
+        PART_PARENTS => "part_parents",
+        PART_OPACITY => "part_opacity",
+        MESH_NAMES => "mesh_names",
+        MESHES => "meshes",
+        MESH_BASE_POSITIONS => "mesh_base_positions",
+        MESH_UVS => "mesh_uvs",
+        MESH_INDICES => "mesh_indices",
+        MESH_MASKS => "mesh_masks",
+        MESH_KF_POSITIONS => "mesh_kf_positions",
+        MESH_KF_ATTRS => "mesh_kf_attrs",
+        WARPS => "warps",
+        WARP_BASE_POINTS => "warp_base_points",
+        WARP_KF_POINTS => "warp_kf_points",
+        WARP_KF_OPACITY => "warp_kf_opacity",
+        ROTATIONS => "rotations",
+        ROTATION_KF => "rotation_kf",
+        DEFORMER_ORDER => "deformer_order",
+        BONE_NAMES => "bone_names",
+        BONES => "bones",
+        BONE_KF => "bone_kf",
+        INFLUENCES => "influences",
+        PHYSICS => "physics",
+        PHYSICS_INPUTS => "physics_inputs",
+        PHYSICS_OUTPUTS => "physics_outputs",
+        PHYSICS_PARTICLES => "physics_particles",
+        GLUES => "glues",
+        GLUE_NODES => "glue_nodes",
+        GLUE_KF_INTENSITY => "glue_kf_intensity",
+        BLENDS => "blends",
+        BLEND_KEYS => "blend_keys",
+        BLEND_WEIGHTS => "blend_weights",
+        BLEND_DELTAS => "blend_deltas",
+        BLEND_REFS => "blend_refs",
+        TEXTURE_TABLE => "texture_table",
+        TEXTURE_DATA => "texture_data",
+        _ => return None,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// The buffer does not start on a 16-byte boundary; reading it would need a copy.
@@ -347,11 +399,23 @@ pub(crate) fn assemble(s: &[Section<'_>]) -> Vec<u8> {
     out
 }
 
+/// One row of the section table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionInfo {
+    pub id: u32,
+    pub required: bool,
+    pub offset: u64,
+    pub length: u64,
+    pub count: u32,
+}
+
 /// A validated `.tmod` buffer. `model` borrows its arrays from the buffer.
 #[derive(Debug, Clone)]
 pub struct Tmod<'a> {
     pub major: u16,
     pub minor: u16,
+    /// The section table, unknown sections included.
+    pub sections: Vec<SectionInfo>,
     pub model: CompiledModel<'a>,
     texture_table: &'a [StrRef],
     texture_data: &'a [u8],
@@ -570,9 +634,20 @@ impl<'a> Tmod<'a> {
                 (None, Some(_)) => return Err(Error::MissingSection(id::TEXTURE_TABLE)),
             };
 
+        let sections = entries
+            .iter()
+            .map(|e| SectionInfo {
+                id: e.id,
+                required: e.flags & SECTION_REQUIRED != 0,
+                offset: e.offset,
+                length: e.length,
+                count: e.count,
+            })
+            .collect();
         Ok(Self {
             major,
             minor,
+            sections,
             model,
             texture_table,
             texture_data,
