@@ -3,6 +3,6 @@
   "evaluate": 750000,
   "evaluate_draw_list": 750000,
   "advance_16ms": 750000,
-  "reference_evaluate": 1500000,
-  "reference_advance_16ms": 1500000
+  "reference_evaluate": 1100000,
+  "reference_advance_16ms": 1100000
 }
