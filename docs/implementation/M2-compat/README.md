@@ -10,5 +10,5 @@ moc3 の単位（M2-03 以降）は法務ゲート（ADR-0016）を通るまで�
 | M2-02 | 法務ゲート（着手前確認）と ADR 記録 | COMPAT-001 | S | — | 未着手 |
 | M2-03 | 検証用の自作 Live2D モデル群と期待画像の作成 | COMPAT-005, PERF-001 | M | M2-02 | 未着手 |
 | M2-04 | moc3 のクリーンルーム解析と形式ノート（出所付き） | COMPAT-002 | L | M2-02 | 未着手 |
-| M2-05 | `seimei-compat` の `moc3` feature で読み込み | COMPAT-002, COMPAT-003 | L | M2-04 | 未着手 |
+| M2-05 | `tsukumoe-compat` の `moc3` feature で読み込み | COMPAT-002, COMPAT-003 | L | M2-04 | 未着手 |
 | M2-06 | Live2D 互換モードと画像差分テストの CI 組込み | CORE-009, COMPAT-005 | M | M2-03, M2-05 | 未着手 |

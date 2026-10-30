@@ -1,4 +1,4 @@
-# Seimei Rendering Rules
+# Tsukumoe Rendering Rules
 
 Related: REQ-CORE-006, REQ-RT-005, REQ-RT-006, REQ-RT-007
 

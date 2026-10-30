@@ -5,7 +5,7 @@
 
 ## 背景
 
-Live2D は編集形式（cmo3）と再生形式（moc3）を分けており、どちらも非公開である。Ravel は RON を使っているが、Seimei は Unity・Web・他言語・AI エージェントから読まれる。
+Live2D は編集形式（cmo3）と再生形式（moc3）を分けており、どちらも非公開である。Ravel は RON を使っているが、Tsukumoe は Unity・Web・他言語・AI エージェントから読まれる。
 
 ## 決定
 

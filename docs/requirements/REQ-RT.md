@@ -1,6 +1,6 @@
 # RT 要件定義（ランタイム・バインディング）
 
-対象クレート: `seimei-runtime` / `seimei-gpu` / `seimei-ffi` / `seimei-wasm`、別リポジトリの Unity パッケージ
+対象クレート: `tsukumoe-runtime` / `tsukumoe-gpu` / `tsukumoe-ffi` / `tsukumoe-wasm`、別リポジトリの Unity パッケージ
 
 ## REQ-RT-001: 再生用ランタイム API
 
@@ -16,7 +16,7 @@
 
 ### 受入条件
 
-- [ ] 編集機能を含まず、`seimei-core` の評価部分だけに依存する
+- [ ] 編集機能を含まず、`tsukumoe-core` の評価部分だけに依存する
 - [ ] モーションのクロスフェード・優先度・ループを扱える
 - [ ] まばたき・呼吸などの自動動作を設定で有効にできる
 
@@ -80,7 +80,7 @@
 
 ### 説明
 
-Unity 向けのパッケージを別リポジトリで提供する（UPM 配布）。評価は `seimei-ffi` のネイティブプラグイン、描画は Unity のシェーダで行う。wgpu を Unity に持ち込まない。
+Unity 向けのパッケージを別リポジトリで提供する（UPM 配布）。評価は `tsukumoe-ffi` のネイティブプラグイン、描画は Unity のシェーダで行う。wgpu を Unity に持ち込まない。
 
 ### 受入条件
 

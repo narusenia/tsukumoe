@@ -14,7 +14,7 @@ moc3 は非公開のバイナリ形式である。Cubism Core のライセンス
 - 解析素材は、自分で Cubism Editor から書き出した自作モデルだけを使う。他者モデル・SDK / Core バイナリの解析（逆アセンブルを含む）はしない
 - 既存 OSS の moc3 パーサのコード・ドキュメントを参照しない。AI エージェントのコンテキストにも入れない（AGENTS.md に明記）
 - 得た知見は出所付きで自作ドキュメントに記録する
-- moc3 対応は `seimei-compat` の `moc3` feature に閉じ、別リポジトリ・別配布に移せる構造にする
+- moc3 対応は `tsukumoe-compat` の `moc3` feature に閉じ、別リポジトリ・別配布に移せる構造にする
 - ゲートを通るまで moc3 関連コードを main に入れない、または公開しない
 - ゲートが NG なら、本体は Live2D JSON 群と Inochi2D だけで出す
 

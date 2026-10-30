@@ -1,4 +1,4 @@
-# Seimei File Formats
+# Tsukumoe File Formats
 
 Related: REQ-FMT-001 to REQ-FMT-006
 
@@ -6,11 +6,11 @@ License of this document: CC-BY 4.0
 
 Status: outline. Field-level definitions are filled in during M1 (project format) and M3 (runtime format).
 
-## 1. Project format (`.seimei`)
+## 1. Project format (`.tsukumoe`)
 
 The editing format. Two physical layouts with identical content:
 
-- **Archive**: a zip file with extension `.seimei`
+- **Archive**: a zip file with extension `.tsukumoe`
 - **Directory**: an unpacked directory with the same tree, intended for git and for direct editing by agents
 
 ```
@@ -26,7 +26,7 @@ sources/             # optional references to original PSD files
 - Encoding: UTF-8 JSON. Object keys are written in a stable order so diffs stay readable.
 - Schema: JSON Schema generated from the Rust types and published under `schema/`.
 
-## 2. Runtime format (`.smod`)
+## 2. Runtime format (`.tmod`)
 
 The distribution format. Designed for zero-copy loading: after validation, the evaluator reads directly from the loaded buffer.
 

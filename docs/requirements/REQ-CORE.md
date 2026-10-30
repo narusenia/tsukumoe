@@ -1,6 +1,6 @@
 # CORE 要件定義（リグ評価コア）
 
-対象クレート: `seimei-core`
+対象クレート: `tsukumoe-core`
 
 ## REQ-CORE-001: GPU 非依存の固定段評価パイプライン
 
@@ -18,7 +18,7 @@
 
 ### 受入条件
 
-- [ ] `seimei-core` が `wgpu` / `gpui` 系に依存しない（`cargo tree` で CI 検査）
+- [ ] `tsukumoe-core` が `wgpu` / `gpui` 系に依存しない（`cargo tree` で CI 検査）
 - [ ] `wasm32-unknown-unknown` 向けにビルドできる
 - [ ] 各段が独立にテストできる
 
@@ -45,7 +45,7 @@ moc3 を損失なく読み込めるよう、Cubism モデルの機能をすべ�
 
 - [ ] 上記の各機能をデータモデルで表現できる
 - [ ] 各機能の評価結果が単体テストで検証されている
-- [ ] Cubism 機能と Seimei データモデルの対応表が `docs/specifications/data-model.md` にある
+- [ ] Cubism 機能と Tsukumoe データモデルの対応表が `docs/specifications/data-model.md` にある
 
 ### 依存要件
 
@@ -197,7 +197,7 @@ Live2D にない機能（ボーン・パラメータ式・物理チェーン）�
 
 ### 受入条件
 
-- [ ] 互換モードで Seimei 独自機能を含むモデルを読むと警告を出す
+- [ ] 互換モードで Tsukumoe 独自機能を含むモデルを読むと警告を出す
 - [ ] 互換モードの出力が REQ-COMPAT-005 の画像差分検証を通る
 
 ### 依存要件

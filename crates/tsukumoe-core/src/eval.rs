@@ -1,4 +1,4 @@
-// Copyright 2026 Seimei Contributors
+// Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! Frame evaluation. The rules are in `docs/specifications/evaluation.md`.

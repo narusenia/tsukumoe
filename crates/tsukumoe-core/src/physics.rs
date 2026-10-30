@@ -1,4 +1,4 @@
-// Copyright 2026 Seimei Contributors
+// Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! Physics: pendulum groups (physics3 compatible) and physics chains.

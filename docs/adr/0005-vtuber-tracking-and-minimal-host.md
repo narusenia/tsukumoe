@@ -5,7 +5,7 @@
 
 ## 背景
 
-VTuber 配信では VTube Studio（内部は Cubism SDK）が事実上の標準で、Seimei モデルを配信で使うには動かすアプリが要る。
+VTuber 配信では VTube Studio（内部は Cubism SDK）が事実上の標準で、Tsukumoe モデルを配信で使うには動かすアプリが要る。
 
 ## 決定
 

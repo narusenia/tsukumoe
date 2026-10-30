@@ -1,4 +1,4 @@
-# Seimei
+# Tsukumoe
 
 > 日本語版: [`README_ja.md`](README_ja.md)
 

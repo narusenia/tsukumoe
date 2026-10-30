@@ -12,7 +12,7 @@ Live2D の主な利用先は Unity（ゲーム・VTuber アプリ）と Web で�
 - v1: C ABI、WASM（WebGPU、WebGL2 フォールバック）、Unity
 - Godot / Unreal / モバイル専用対応は v1.x
 - core は GPU 非依存で、描画リストまでを出す。レンダラは差し替え式
-- `seimei-gpu`（wgpu）は参照実装。Unity は Unity のシェーダで描き、wgpu を持ち込まない
+- `tsukumoe-gpu`（wgpu）は参照実装。Unity は Unity のシェーダで描き、wgpu を持ち込まない
 - Unity パッケージは別リポジトリ（UPM 配布）
 
 ## 結果

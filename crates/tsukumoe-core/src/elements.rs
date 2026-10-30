@@ -1,4 +1,4 @@
-// Copyright 2026 Seimei Contributors
+// Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! Parameters and parts: the elements everything else refers to.

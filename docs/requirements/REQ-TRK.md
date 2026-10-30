@@ -1,6 +1,6 @@
 # TRK 要件定義（トラッキング・配信ホスト）
 
-対象クレート: `seimei-tracking` / `seimei-host`
+対象クレート: `tsukumoe-tracking` / `tsukumoe-host`
 
 ## REQ-TRK-001: トラッキング入力アダプタ
 

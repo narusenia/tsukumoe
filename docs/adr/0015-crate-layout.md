@@ -9,9 +9,9 @@
 
 ## 決定
 
-`seimei-core` / `-format` / `-gpu` / `-compat` / `-runtime` / `-ffi` / `-wasm` / `-tracking` / `-ai` / `-cli`（GPUI 非依存）と、`seimei-host` / `seimei-app`（GPUI 依存）。詳細は `docs/specifications/architecture.md`。
+`tsukumoe-core` / `-format` / `-gpu` / `-compat` / `-runtime` / `-ffi` / `-wasm` / `-tracking` / `-ai` / `-cli`（GPUI 非依存）と、`tsukumoe-host` / `tsukumoe-app`（GPUI 依存）。詳細は `docs/specifications/architecture.md`。
 
-- UI 部品は Ravel のように最初から `-ui` / `-widgets` / `-dock` に分けず、`seimei-app` から始めて必要になったら分ける
+- UI 部品は Ravel のように最初から `-ui` / `-widgets` / `-dock` に分けず、`tsukumoe-app` から始めて必要になったら分ける
 - Unity パッケージは別リポジトリ
 - 各クレートは必要になったマイルストーンで追加する
 

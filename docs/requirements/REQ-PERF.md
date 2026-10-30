@@ -17,7 +17,7 @@
 
 ### 受入条件
 
-- [ ] Seimei 形式と、Cubism Editor で作った同等の Live2D 形式の両方がある
+- [ ] Tsukumoe 形式と、Cubism Editor で作った同等の Live2D 形式の両方がある
 - [ ] 規模が上記を満たす
 
 ### 依存要件

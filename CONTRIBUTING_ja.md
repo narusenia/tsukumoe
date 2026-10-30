@@ -1,4 +1,4 @@
-# Seimei への貢献
+# Tsukumoe への貢献
 
 > English: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 

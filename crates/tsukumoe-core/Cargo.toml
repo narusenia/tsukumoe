@@ -1,6 +1,6 @@
 [package]
-name = "seimei-core"
-description = "GPU-independent rig model, evaluation pipeline and edit commands for Seimei"
+name = "tsukumoe-core"
+description = "GPU-independent rig model, evaluation pipeline and edit commands for Tsukumoe"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
