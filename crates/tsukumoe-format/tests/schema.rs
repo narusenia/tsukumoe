@@ -39,9 +39,23 @@ fn published_schemas_match_the_types() {
     check::<ExpressionFile>("expression.schema.json");
 }
 
+fn validate<T: JsonSchema>(dir: &Path, file: &str) {
+    let schema = serde_json::to_value(schema_for!(T)).unwrap();
+    let instance: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join(file)).unwrap()).unwrap();
+    if let Err(e) = jsonschema::validate(&schema, &instance) {
+        panic!("{file} does not match its schema: {e}");
+    }
+}
+
 #[test]
 fn the_hand_written_fixture_loads() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/minimal");
     let model = read_model(&Project::read_dir(&dir).unwrap()).unwrap();
     assert_eq!(model.parameters().len(), 2);
+
+    validate::<Manifest>(&dir, "manifest.json");
+    validate::<ModelFile>(&dir, "model.json");
+    validate::<MotionFile>(&dir, "motions/wave.json");
+    validate::<ExpressionFile>(&dir, "expressions/blink.json");
 }

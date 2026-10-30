@@ -4,7 +4,7 @@
 
 An open 2D rigging and animation platform: an alternative to Live2D Cubism, with a fast runtime SDK and an editor.
 
-**Status: early development (M0, repository foundation). Nothing is usable yet.**
+**Status: early development (M1). The core (evaluation, physics, draw list) and the project file format with its JSON Schema exist; the reference renderer is next. Not yet usable as an application.**
 
 ## Goals
 

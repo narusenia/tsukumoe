@@ -14,5 +14,8 @@ serde_json.workspace = true
 schemars.workspace = true
 zip.workspace = true
 
+[dev-dependencies]
+jsonschema.workspace = true
+
 [lints]
 workspace = true

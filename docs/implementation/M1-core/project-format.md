@@ -48,4 +48,4 @@
 - [x] `Manifest` / `ModelFile` / `PhysicsFile` / `MotionFile` / `ExpressionFile` の JSON Schema を `schema/*.schema.json` に書き出す
 - [x] 生成結果とファイルの差分をテストが検出する（CI の `cargo test` で動く）。再生成は `TSUKUMOE_UPDATE_SCHEMA=1`
 - [x] 手書きの最小モデル（`tests/fixtures/minimal/`）が読み込める
-- 未実施: スキーマに対するフィクスチャの検証（検証用クレートの追加承認が要る）
+- [x] フィクスチャ（`manifest` `model` `motion` `expression`）を生成スキーマで検証する（`jsonschema`、dev-dependency）
