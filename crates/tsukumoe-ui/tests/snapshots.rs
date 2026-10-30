@@ -31,6 +31,7 @@ fn snapshot(
             let ctx = ui.ctx().clone();
             // Idempotent; must happen before the first frame draws an icon.
             egui_extras::install_image_loaders(&ctx);
+            tsukumoe_ui::install_cjk_font(&ctx);
             set_density(&ctx, density);
             set_mode(&ctx, mode);
             let t = Theme::get(&ctx);
@@ -81,6 +82,37 @@ fn the_regular_density() {
             Density::Regular,
             "dark_regular",
         );
+    }
+    results.unwrap();
+}
+
+#[test]
+fn the_built_in_named_themes() {
+    let mut results = SnapshotResults::new();
+    for named in tsukumoe_ui::builtin_themes() {
+        for section in [Section::Buttons, Section::Fields, Section::Structure] {
+            let mut showcase = Showcase::new();
+            let theme = named.theme;
+            let mut harness = Harness::builder()
+                .with_size(egui::vec2(560.0, 200.0))
+                .wgpu()
+                .build_ui(move |ui| {
+                    let ctx = ui.ctx().clone();
+                    egui_extras::install_image_loaders(&ctx);
+                    tsukumoe_ui::install_cjk_font(&ctx);
+                    tsukumoe_ui::set_theme(&ctx, theme);
+                    egui::Frame::NONE
+                        .fill(theme.colors.background)
+                        .inner_margin(theme.metrics.pad)
+                        .show(ui, |ui| showcase.show(ui, section));
+                });
+            harness.fit_contents();
+            harness.run();
+            harness.fit_contents();
+            let theme_name = named.name.to_lowercase().replace(' ', "_");
+            harness.snapshot(format!("{}_{theme_name}", name(section)));
+            results.extend_harness(&mut harness);
+        }
     }
     results.unwrap();
 }
