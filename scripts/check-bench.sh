@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Fails when a benchmark's median exceeds its ceiling (nanoseconds) in
-# crates/tsukumoe-core/benches/budget.json. Run `cargo bench -p tsukumoe-core` first.
+# scripts/bench-budget.json. Run `cargo bench --workspace` first.
 set -euo pipefail
 
-budget=crates/tsukumoe-core/benches/budget.json
+budget=scripts/bench-budget.json
 fail=0
 for name in $(jq -r 'keys[]' "$budget"); do
   file="target/criterion/$name/new/estimates.json"
