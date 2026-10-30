@@ -2,7 +2,7 @@
 
 - REQ: REQ-RT-002
 - 単位: M3-03
-- 状態: 実装済み（3 OS の CI と `unsafe` の検査が残る）
+- 状態: 実装済み（3 OS の CI 確認が残る）
 - 依存: M3-02
 - クレート: `tsukumoe-ffi`（新設。`tsukumoe-runtime` と `tsukumoe-core` だけに依存する。`unsafe` はこのクレートだけに置く）
 
@@ -46,7 +46,7 @@
 - [x] パニックが FFI 境界を越えない（すべてエラーコードに変換する）
 - [ ] C のサンプルプログラムが 3 OS でビルド・実行できる（macOS で確認済み。Ubuntu・Windows は CI で確認する）
 - [x] 寿命・スレッド・エラーの規則が仕様にある
-- [ ] `unsafe` が `tsukumoe-ffi` だけにある（`deps` タスクで検査）。`tsukumoe-core` のテスト（`eval.rs` の割り当て計数用 `GlobalAlloc`）に `unsafe` があるため検査を入れていない。方針の判断待ち。依存の範囲の検査は `deps` に入れた
+- [x] `unsafe` が `tsukumoe-ffi` だけにある（`deps` タスクで検査。例外は `tsukumoe-core/src/eval.rs` のテストにある割り当て計数用の `GlobalAlloc` 1 か所）
 
 ## 決めたこと
 

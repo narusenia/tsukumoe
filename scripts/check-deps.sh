@@ -36,4 +36,10 @@ if tree tsukumoe-ffi | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(ffi|runtime
   echo "error: tsukumoe-ffi must depend on tsukumoe-runtime and tsukumoe-core only" >&2
   fail=1
 fi
+# `unsafe` lives in tsukumoe-ffi only. The one exception is the allocation
+# counter in the evaluator's tests (it proves a frame does not allocate).
+if grep -rnE '\bunsafe[[:space:]]+(impl|fn|trait|extern|\{)' crates --include='*.rs' | grep -vE '^crates/tsukumoe-ffi/|^crates/tsukumoe-core/src/eval\.rs:'; then
+  echo "error: unsafe code outside tsukumoe-ffi" >&2
+  fail=1
+fi
 exit "$fail"
