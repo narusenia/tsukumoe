@@ -10,7 +10,7 @@ use crate::eval::Frame;
 use crate::rig::BlendMode;
 
 pub struct DrawList<'a> {
-    model: &'a CompiledModel,
+    model: &'a CompiledModel<'a>,
     frame: &'a Frame,
 }
 
@@ -49,7 +49,7 @@ pub struct Drawable<'a> {
 
 impl Frame {
     /// The draw list of the last [`Frame::evaluate`].
-    pub fn draw_list<'a>(&'a self, model: &'a CompiledModel) -> DrawList<'a> {
+    pub fn draw_list<'a>(&'a self, model: &'a CompiledModel<'a>) -> DrawList<'a> {
         DrawList { model, frame: self }
     }
 }
@@ -89,21 +89,24 @@ impl<'a> DrawList<'a> {
     pub fn drawable(&self, mesh: usize) -> Drawable<'a> {
         let (model, frame) = (self.model, self.frame);
         let def = &model.meshes[mesh];
-        let vertices = def.vertex_start * 2..(def.vertex_start + def.vertex_count) * 2;
+        let (start, count) = (def.vertex_start as usize, def.vertex_count as usize);
+        let vertices = start * 2..(start + count) * 2;
         let a = frame.mesh_attrs(mesh);
         Drawable {
             mesh,
-            name: &model.mesh_names[mesh],
+            name: model.mesh_name(mesh),
             texture: def.texture,
-            blend_mode: def.blend_mode,
-            double_sided: def.double_sided,
+            blend_mode: def.blend_mode(),
+            double_sided: def.double_sided != 0,
             positions: &frame.positions()[vertices.clone()],
             uvs: &model.mesh_uvs[vertices],
-            indices: &model.mesh_indices[def.index_start..def.index_start + def.index_count],
-            vertex_start: def.vertex_start,
-            index_start: def.index_start,
-            masks: &model.mesh_masks[def.mask_start..def.mask_start + def.mask_count],
-            mask_inverted: def.mask_inverted,
+            indices: &model.mesh_indices
+                [def.index_start as usize..(def.index_start + def.index_count) as usize],
+            vertex_start: start,
+            index_start: def.index_start as usize,
+            masks: &model.mesh_masks
+                [def.mask_start as usize..(def.mask_start + def.mask_count) as usize],
+            mask_inverted: def.mask_inverted != 0,
             opacity: a[0],
             draw_order: a[1],
             multiply_color: [a[2], a[3], a[4]],

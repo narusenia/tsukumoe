@@ -105,7 +105,7 @@ fn model() -> Model {
     Model::from_parts(p).unwrap()
 }
 
-fn compiled() -> CompiledModel {
+fn compiled() -> CompiledModel<'static> {
     model().compile().unwrap()
 }
 

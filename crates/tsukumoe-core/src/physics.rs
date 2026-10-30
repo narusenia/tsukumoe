@@ -14,6 +14,21 @@ pub enum Channel {
     Angle,
 }
 
+impl Channel {
+    pub fn to_u32(self) -> u32 {
+        self as u32
+    }
+
+    pub fn from_u32(v: u32) -> Option<Self> {
+        Some(match v {
+            0 => Self::X,
+            1 => Self::Y,
+            2 => Self::Angle,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Range {
     pub min: f32,

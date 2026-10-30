@@ -5,7 +5,8 @@
 
 use crate::affine::Affine;
 use crate::compiled::{
-    BindingDef, CompiledModel, Influence, KeyformRef, MeshAttrs, NO_BONE, ParamDef, ParentRef,
+    BindingDef, CompiledModel, Influence, KeyformRef, MeshAttrs, NO_BONE, NONE, ParamDef,
+    ParentRef, RotationKf,
 };
 use crate::elements::Point;
 use crate::expr;
@@ -17,7 +18,7 @@ impl ParamDef {
         if !value.is_finite() {
             return self.default;
         }
-        if self.repeat {
+        if self.repeat != 0 {
             self.min + (value - self.min).rem_euclid(self.max - self.min)
         } else {
             value.clamp(self.min, self.max)
@@ -62,13 +63,13 @@ impl Frame {
         let max_points = model
             .warps
             .iter()
-            .map(|w| w.point_count * 2)
+            .map(|w| w.point_count as usize * 2)
             .max()
             .unwrap_or(0);
         Self {
             values: model.parameters.iter().map(|p| p.default).collect(),
             clamped: vec![0.0; model.parameters.len()],
-            corners: vec![(0, 0.0); model.corner_capacity],
+            corners: vec![(0, 0.0); model.corner_capacity as usize],
             corner_counts: vec![0; model.bindings.len()],
             blend_weights: vec![0.0; model.blends.len()],
             part_world: vec![1.0; model.part_opacity.len()],
@@ -110,7 +111,8 @@ impl Frame {
 
     pub fn mesh_positions(&self, model: &CompiledModel, mesh: usize) -> &[f32] {
         let def = &model.meshes[mesh];
-        &self.positions[def.vertex_start * 2..(def.vertex_start + def.vertex_count) * 2]
+        let (start, count) = (def.vertex_start as usize, def.vertex_count as usize);
+        &self.positions[start * 2..(start + count) * 2]
     }
 
     /// Opacity (final), draw order, multiply color, screen color.
@@ -157,8 +159,9 @@ impl Frame {
         std::mem::swap(positions, prev_positions);
         std::mem::swap(attrs, prev_attrs);
 
-        for d in &model.drivers {
-            values[d.output] = expr::eval(&model.ops[d.start..d.start + d.len], values);
+        for d in model.drivers.iter() {
+            let ops = &model.ops[d.start as usize..(d.start + d.len) as usize];
+            values[d.output as usize] = expr::eval(ops, values);
         }
 
         simulate::advance(model, physics, values, dt);
@@ -168,29 +171,38 @@ impl Frame {
         }
 
         for (b, def) in model.bindings.iter().enumerate() {
-            let slice = &mut corners[def.corner_start..def.corner_start + def.max_corners];
-            corner_counts[b] = compute_corners(def, clamped, slice);
+            let start = def.corner_start as usize;
+            let slice = &mut corners[start..start + def.max_corners as usize];
+            corner_counts[b] = compute_corners(model, def, clamped, slice);
         }
 
         for (i, blend) in model.blends.iter().enumerate() {
-            blend_weights[i] = piecewise(&blend.keys, &blend.weights, clamped[blend.parameter]);
+            blend_weights[i] = piecewise(
+                model.blend_keys_of(blend),
+                model.blend_weights_of(blend),
+                clamped[blend.parameter as usize],
+            );
         }
 
-        for (i, parent) in model.part_parents.iter().enumerate() {
-            let inherited = parent.map_or(1.0, |p| part_world[p]);
+        for (i, &parent) in model.part_parents.iter().enumerate() {
+            let inherited = if parent == NONE {
+                1.0
+            } else {
+                part_world[parent as usize]
+            };
             part_world[i] = model.part_opacity[i] * inherited;
         }
 
         for (i, bone) in model.bones.iter().enumerate() {
-            let pose = match bone.keyforms {
+            let pose = match bone.keyforms.get() {
                 Some(k) => {
                     let cs = corner_slice(model, corners, corner_counts, k);
-                    blend_bone(cs, &model.bone_kf, k.first)
+                    blend_bone(cs, &model.bone_kf, k.first as usize)
                 }
                 None => bone.base,
             };
             let local = Affine::from_bone(&pose);
-            let world = match bone.parent {
+            let world = match bone.parent() {
                 Some(p) => bone_world[p].then_after(&local),
                 None => local,
             };
@@ -198,25 +210,27 @@ impl Frame {
             bone_skin[i] = world.then_after(&bone.rest_inverse);
         }
 
-        for &deformer in &model.deformer_order {
+        for deformer in model.deformer_order.iter().map(|d| d.get()) {
             match deformer {
                 ParentRef::None => {}
                 ParentRef::Warp(w) => {
                     let def = &model.warps[w];
-                    let n = def.point_count * 2;
-                    let range = def.point_start..def.point_start + n;
+                    let n = def.point_count as usize * 2;
+                    let start = def.point_start as usize;
+                    let range = start..start + n;
                     let local = &mut warp_local[range.clone()];
                     let mut opacity = def.base_opacity;
-                    match def.keyforms {
+                    match def.keyforms() {
                         Some(k) => {
                             let cs = corner_slice(model, corners, corner_counts, k);
-                            blend(local, &model.warp_kf_points, def.kf_points, cs);
-                            opacity = scalar(cs, &model.warp_kf_opacity, k.first);
+                            blend(local, &model.warp_kf_points, def.kf_points as usize, cs);
+                            opacity = scalar(cs, &model.warp_kf_opacity, k.first as usize);
                         }
                         None => local.copy_from_slice(&model.warp_base_points[range.clone()]),
                     }
-                    for &bi in &def.blends {
-                        let delta = model.blends[bi].delta_start;
+                    for &bi in model.warp_blends(def) {
+                        let bi = bi as usize;
+                        let delta = model.blends[bi].delta_start as usize;
                         add_scaled(
                             local,
                             &model.blend_deltas[delta..delta + n],
@@ -229,31 +243,31 @@ impl Frame {
                             warp_world,
                             rot_world,
                         };
-                        for i in 0..def.point_count {
-                            let q = world.apply(def.parent, [local[2 * i], local[2 * i + 1]]);
+                        for i in 0..def.point_count as usize {
+                            let q = world.apply(def.parent(), [local[2 * i], local[2 * i + 1]]);
                             scratch[2 * i] = q[0];
                             scratch[2 * i + 1] = q[1];
                         }
                     }
                     warp_world[range].copy_from_slice(&scratch[..n]);
                     warp_opacity[w] =
-                        opacity * parent_opacity(def.parent, warp_opacity, rot_opacity);
+                        opacity * parent_opacity(def.parent(), warp_opacity, rot_opacity);
                 }
                 ParentRef::Rotation(r) => {
                     let def = &model.rotations[r];
-                    let kf = match def.keyforms {
+                    let kf = match def.keyforms() {
                         Some(k) => {
                             let cs = corner_slice(model, corners, corner_counts, k);
-                            blend_rotation(cs, &model.rotation_kf, k.first)
+                            blend_rotation(cs, &model.rotation_kf, k.first as usize)
                         }
-                        None => def.base,
+                        None => def.base.into(),
                     };
                     let (sin, cos) = kf.angle_degrees.to_radians().sin_cos();
                     let sx = if kf.reflect_x { -1.0 } else { 1.0 };
                     let sy = if kf.reflect_y { -1.0 } else { 1.0 };
                     let ex = [kf.scale * cos * sx, kf.scale * sin * sx];
                     let ey = [-kf.scale * sin * sy, kf.scale * cos * sy];
-                    let affine = match def.parent {
+                    let affine = match def.parent() {
                         ParentRef::None => Affine {
                             m: [ex[0], ex[1], ey[0], ey[1]],
                             t: kf.origin,
@@ -284,69 +298,72 @@ impl Frame {
                     };
                     rot_world[r] = affine;
                     rot_opacity[r] =
-                        kf.opacity * parent_opacity(def.parent, warp_opacity, rot_opacity);
+                        kf.opacity * parent_opacity(def.parent(), warp_opacity, rot_opacity);
                 }
             }
         }
 
         for (mi, def) in model.meshes.iter().enumerate() {
-            let n = def.vertex_count * 2;
-            let range = def.vertex_start * 2..def.vertex_start * 2 + n;
+            let n = def.vertex_count as usize * 2;
+            let range = def.vertex_start as usize * 2..def.vertex_start as usize * 2 + n;
             let out = &mut positions[range.clone()];
             let mut a = def.base_attrs;
-            match def.keyforms {
+            match def.keyforms() {
                 Some(k) => {
                     let cs = corner_slice(model, corners, corner_counts, k);
-                    blend(out, &model.mesh_kf_positions, def.kf_positions, cs);
-                    a = blend_attrs(cs, &model.mesh_kf_attrs, k.first);
+                    blend(out, &model.mesh_kf_positions, def.kf_positions as usize, cs);
+                    a = blend_attrs(cs, &model.mesh_kf_attrs, k.first as usize);
                 }
                 None => out.copy_from_slice(&model.mesh_base_positions[range]),
             }
-            for &bi in &def.blends {
-                let delta = model.blends[bi].delta_start;
+            for &bi in model.mesh_blends(def) {
+                let bi = bi as usize;
+                let delta = model.blends[bi].delta_start as usize;
                 add_scaled(
                     out,
                     &model.blend_deltas[delta..delta + n],
                     blend_weights[bi],
                 );
             }
-            if let Some(start) = def.influence_start {
-                let influences = &model.influences[start..start + def.vertex_count];
+            if let Some(start) = def.influence_start() {
+                let influences = &model.influences[start..start + def.vertex_count as usize];
                 for (v, inf) in out.as_chunks_mut::<2>().0.iter_mut().zip(influences) {
                     let q = skin(inf, bone_skin, [v[0], v[1]]);
                     v[0] = q[0];
                     v[1] = q[1];
                 }
             }
-            if def.parent != ParentRef::None {
+            if def.parent() != ParentRef::None {
                 let world = World {
                     model,
                     warp_world,
                     rot_world,
                 };
                 for v in out.as_chunks_mut::<2>().0 {
-                    let q = world.apply(def.parent, [v[0], v[1]]);
+                    let q = world.apply(def.parent(), [v[0], v[1]]);
                     v[0] = q[0];
                     v[1] = q[1];
                 }
             }
-            a[0] *= parent_opacity(def.parent, warp_opacity, rot_opacity) * part_world[def.part];
+            a[0] *= parent_opacity(def.parent(), warp_opacity, rot_opacity)
+                * part_world[def.part as usize];
             attrs[mi] = a;
         }
 
-        for glue in &model.glues {
-            let intensity = match glue.keyforms {
+        for glue in model.glues.iter() {
+            let intensity = match glue.keyforms() {
                 Some(k) => scalar(
                     corner_slice(model, corners, corner_counts, k),
                     &model.glue_kf_intensity,
-                    k.first,
+                    k.first as usize,
                 ),
                 None => glue.intensity,
             };
-            let nodes = &model.glue_nodes[glue.node_start..glue.node_start + glue.node_count];
+            let node_start = glue.node_start as usize;
+            let nodes = &model.glue_nodes[node_start..node_start + glue.node_count as usize];
             let (a0, b0) = (
-                model.meshes[glue.mesh_a].vertex_start,
-                model.meshes[glue.mesh_b].vertex_start,
+                model.meshes[glue.mesh_a as usize].vertex_start as usize,
+                model.meshes[glue.mesh_b as usize].vertex_start as usize,
             );
             for node in nodes {
                 let ia = (a0 + node.index_a as usize) * 2;
@@ -362,7 +379,8 @@ impl Frame {
         }
 
         for (i, def) in model.meshes.iter().enumerate() {
-            let range = def.vertex_start * 2..(def.vertex_start + def.vertex_count) * 2;
+            let (start, count) = (def.vertex_start as usize, def.vertex_count as usize);
+            let range = start * 2..(start + count) * 2;
             geometry_changed[i] = positions[range.clone()] != prev_positions[range];
             style_changed[i] = attrs[i] != prev_attrs[i];
         }
@@ -385,7 +403,7 @@ const AXIS_STEP: f32 = 0.01;
 
 /// Read access to the world transforms of deformers evaluated so far.
 struct World<'a> {
-    model: &'a CompiledModel,
+    model: &'a CompiledModel<'a>,
     warp_world: &'a [f32],
     rot_world: &'a [Affine],
 }
@@ -396,8 +414,9 @@ impl World<'_> {
             ParentRef::None => p,
             ParentRef::Warp(i) => {
                 let def = &self.model.warps[i];
-                let grid = &self.warp_world[def.point_start..def.point_start + def.point_count * 2];
-                warp_point(grid, def.rows, def.columns, p)
+                let start = def.point_start as usize;
+                let grid = &self.warp_world[start..start + def.point_count as usize * 2];
+                warp_point(grid, def.rows as usize, def.columns as usize, p)
             }
             ParentRef::Rotation(i) => self.rot_world[i].apply(p),
         }
@@ -435,7 +454,7 @@ fn parent_opacity(parent: ParentRef, warp_opacity: &[f32], rot_opacity: &[f32]) 
 /// the keys stick to the end key.
 fn locate(keys: &[f32], value: f32) -> (usize, f32) {
     let last = keys.len() - 1;
-    if last == 0 || value <= keys[0] {
+    if last == 0 || value.is_nan() || value <= keys[0] {
         return (0, 0.0);
     }
     if value >= keys[last] {
@@ -447,12 +466,18 @@ fn locate(keys: &[f32], value: f32) -> (usize, f32) {
 }
 
 /// Fills `out` with the grid points that weigh in and returns how many.
-fn compute_corners(def: &BindingDef, values: &[f32], out: &mut [(usize, f32)]) -> usize {
+fn compute_corners(
+    model: &CompiledModel,
+    def: &BindingDef,
+    values: &[f32],
+    out: &mut [(usize, f32)],
+) -> usize {
     out[0] = (0, 1.0);
     let mut count = 1;
-    for axis in &def.axes {
-        let n = axis.keys.len();
-        let (i, t) = locate(&axis.keys, values[axis.parameter]);
+    for axis in model.binding_axes(def) {
+        let keys = model.axis_keys_of(axis);
+        let n = keys.len();
+        let (i, t) = locate(keys, values[axis.parameter as usize]);
         let existing = count;
         for k in 0..existing {
             let (index, weight) = out[k];
@@ -472,8 +497,9 @@ fn corner_slice<'a>(
     counts: &[usize],
     keyforms: KeyformRef,
 ) -> &'a [(usize, f32)] {
-    let def = &model.bindings[keyforms.binding];
-    &corners[def.corner_start..def.corner_start + counts[keyforms.binding]]
+    let def = &model.bindings[keyforms.binding as usize];
+    let start = def.corner_start as usize;
+    &corners[start..start + counts[keyforms.binding as usize]]
 }
 
 /// `out = sum(weight * keyform)` over the weighing grid points; keyform `k`
@@ -546,11 +572,7 @@ fn skin(inf: &Influence, bone_skin: &[Affine], p: Point) -> Point {
 }
 
 /// Reflection flags are not interpolated: the heaviest grid point wins.
-fn blend_rotation(
-    corners: &[(usize, f32)],
-    data: &[RotationKeyform],
-    first: usize,
-) -> RotationKeyform {
+fn blend_rotation(corners: &[(usize, f32)], data: &[RotationKf], first: usize) -> RotationKeyform {
     let mut out = RotationKeyform {
         origin: [0.0, 0.0],
         angle_degrees: 0.0,
@@ -569,8 +591,8 @@ fn blend_rotation(
         out.opacity += weight * kf.opacity;
         if weight > heaviest {
             heaviest = weight;
-            out.reflect_x = kf.reflect_x;
-            out.reflect_y = kf.reflect_y;
+            out.reflect_x = kf.reflect_x != 0;
+            out.reflect_y = kf.reflect_y != 0;
         }
     }
     out
@@ -581,7 +603,7 @@ fn piecewise(keys: &[f32], weights: &[f32], value: f32) -> f32 {
     let Some(last) = keys.len().checked_sub(1) else {
         return 0.0;
     };
-    if value <= keys[0] {
+    if value.is_nan() || value <= keys[0] {
         return weights[0];
     }
     if value >= keys[last] {
@@ -702,13 +724,14 @@ mod tests {
         }
     }
 
-    fn run(m: &Model, values: &[(&str, f32)]) -> (CompiledModel, Frame) {
+    fn run(m: &Model, values: &[(&str, f32)]) -> (CompiledModel<'static>, Frame) {
         let c = m.compile().unwrap();
         let mut f = Frame::new(&c);
         for &(name, value) in values {
             f.set_parameter(c.parameter_index(name).unwrap(), value);
         }
         f.evaluate(&c);
+        crate::tmod::tests::assert_roundtrip(&c);
         (c, f)
     }
 
@@ -956,11 +979,11 @@ mod tests {
             min: -180.0,
             max: 180.0,
             default: 0.0,
-            repeat: true,
+            repeat: 1,
         };
         assert!((p.apply(190.0) - -170.0).abs() < 1e-4);
         assert_eq!(p.apply(f32::NAN), 0.0);
-        let q = ParamDef { repeat: false, ..p };
+        let q = ParamDef { repeat: 0, ..p };
         assert_eq!(q.apply(190.0), 180.0);
     }
 
@@ -1082,7 +1105,7 @@ mod tests {
         let order: Vec<_> = c
             .drivers
             .iter()
-            .map(|d| c.parameter_names[d.output].as_str())
+            .map(|d| c.parameter_name(d.output as usize))
             .collect();
         assert_eq!(order, ["Mid", "Out"]);
     }

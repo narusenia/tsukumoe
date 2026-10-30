@@ -8,7 +8,8 @@ use crate::elements::Point;
 use crate::rig::BoneTransform;
 
 /// Maps a point to `[m0 x + m2 y + t0, m1 x + m3 y + t1]`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
 pub struct Affine {
     pub m: [f32; 4],
     pub t: [f32; 2],

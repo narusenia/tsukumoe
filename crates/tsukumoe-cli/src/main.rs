@@ -1,7 +1,7 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! `tsukumoe convert | validate | render | diff`. See
+//! `tsukumoe convert | generate | validate | inspect | render | diff`. See
 //! `docs/implementation/M1-core/cli.md`.
 
 use std::fs;
@@ -11,13 +11,15 @@ use std::process::ExitCode;
 use serde_json::json;
 use tsukumoe_cli::generate;
 use tsukumoe_core::eval::Frame;
+use tsukumoe_core::tmod::{self, AlignedBuf, Tmod};
 use tsukumoe_format::{Project, read_model};
 use tsukumoe_gpu::{Headless, Image, Texture};
 
 const USAGE: &str = "usage:
-  tsukumoe convert <in> <out>
+  tsukumoe convert <in> <out>      (out: a directory, .zip / .tsukumoe, or .tmod)
   tsukumoe generate <parts.json> <out>
   tsukumoe validate <project>
+  tsukumoe inspect <file.tmod>
   tsukumoe render <project> -o <png> [--param NAME=VALUE]... [--size WxH] [--view X0,Y0,X1,Y1]
   tsukumoe diff <a.png> <b.png> [--tolerance N] [-o <png>]";
 
@@ -118,9 +120,27 @@ fn convert(args: &[String]) -> Result<u8, Fail> {
     Ok(0)
 }
 
-/// A `.zip` or `.tsukumoe` path gets an archive, any other a directory.
+/// The runtime format of a project: the compiled model and its textures
+/// (`textures/*.png`, in path order).
+fn tmod_bytes(project: &Project) -> Result<Vec<u8>, Fail> {
+    let compiled = read_model(project)?
+        .compile()
+        .map_err(|e| Fail::Failed(format!("{e:?}")))?;
+    let textures: Vec<&[u8]> = project
+        .files
+        .iter()
+        .filter(|(path, _)| path.starts_with("textures/") && path.ends_with(".png"))
+        .map(|(_, bytes)| bytes.as_slice())
+        .collect();
+    Ok(tmod::write(&compiled, &textures)?)
+}
+
+/// A `.tmod` path gets the runtime format, a `.zip` or `.tsukumoe` path an
+/// archive, any other a directory.
 fn save(project: &Project, output: &str) -> Result<(), Fail> {
-    if output.ends_with(".zip") || output.ends_with(".tsukumoe") {
+    if output.ends_with(".tmod") {
+        write(output, &tmod_bytes(project)?)
+    } else if output.ends_with(".zip") || output.ends_with(".tsukumoe") {
         write(output, &project.write_zip()?)
     } else {
         Ok(project.write_dir(Path::new(output))?)
@@ -172,6 +192,51 @@ fn validate(args: &[String]) -> Result<u8, Fail> {
     };
     println!("{report}");
     Ok(code)
+}
+
+/// Summarizes a `.tmod`: version, element counts and the section table.
+fn inspect(args: &[String]) -> Result<u8, Fail> {
+    let args = Args::parse(args, &[])?;
+    let [input] = args.positional()?;
+    let buf = AlignedBuf::read_file(input)?;
+    let t = Tmod::parse(&buf)?;
+    let m = &t.model;
+    let sections: Vec<_> = t
+        .sections
+        .iter()
+        .map(|s| {
+            json!({
+                "id": s.id,
+                "name": tmod::section_name(s.id).unwrap_or("unknown"),
+                "required": s.required,
+                "offset": s.offset,
+                "length": s.length,
+                "count": s.count,
+            })
+        })
+        .collect();
+    println!(
+        "{}",
+        json!({
+            "version": format!("{}.{}", t.major, t.minor),
+            "bytes": buf.len(),
+            "parameters": m.parameters.len(),
+            "bindings": m.bindings.len(),
+            "drivers": m.drivers.len(),
+            "parts": m.part_parents.len(),
+            "meshes": m.meshes.len(),
+            "vertices": m.vertex_count(),
+            "warps": m.warps.len(),
+            "rotations": m.rotations.len(),
+            "bones": m.bones.len(),
+            "physics": m.physics.len(),
+            "glues": m.glues.len(),
+            "blend_shapes": m.blends.len(),
+            "textures": t.texture_count(),
+            "sections": sections,
+        })
+    );
+    Ok(0)
 }
 
 fn render(args: &[String]) -> Result<u8, Fail> {
@@ -302,6 +367,7 @@ fn main() -> ExitCode {
             "convert" => convert(rest),
             "generate" => generate(rest),
             "validate" => validate(rest),
+            "inspect" => inspect(rest),
             "render" => render(rest),
             "diff" => diff(rest),
             other => usage(format!("unknown command {other:?}")),

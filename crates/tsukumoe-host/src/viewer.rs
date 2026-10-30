@@ -67,7 +67,7 @@ pub fn fit_view(bounds: [f32; 4], width: u32, height: u32) -> [f32; 4] {
 
 /// The model and its pose, without any GPU state.
 pub struct Scene {
-    model: CompiledModel,
+    model: CompiledModel<'static>,
     frame: Frame,
     params: Vec<ParamInfo>,
     values: Vec<f32>,
@@ -81,11 +81,11 @@ impl Scene {
             .compile()
             .map_err(|e| format!("{e:?}"))?;
         let params: Vec<ParamInfo> = model
-            .parameter_names
+            .parameters
             .iter()
-            .zip(&model.parameters)
-            .map(|(name, p)| ParamInfo {
-                name: name.clone(),
+            .enumerate()
+            .map(|(i, p)| ParamInfo {
+                name: model.parameter_name(i).to_owned(),
                 min: p.min,
                 max: p.max,
                 default: p.default,

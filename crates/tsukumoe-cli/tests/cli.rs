@@ -246,3 +246,97 @@ fn generate_rejects_a_bad_table() {
     );
     assert_eq!(code(&run(&["generate", path(&table)])), 2);
 }
+
+#[test]
+fn convert_writes_a_tmod_that_inspect_summarizes() {
+    let dir = project("tmod");
+    let out = dir.with_file_name("quad.tmod");
+    assert_eq!(code(&run(&["convert", path(&dir), path(&out)])), 0);
+    let report = run(&["inspect", path(&out)]);
+    assert_eq!(
+        code(&report),
+        0,
+        "{}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(v["version"], "1.0");
+    assert_eq!(v["meshes"], 1);
+    assert_eq!(v["vertices"], 4);
+    assert_eq!(v["parameters"], 1);
+    assert_eq!(v["textures"], 1);
+    assert_eq!(v["bytes"], fs::metadata(&out).unwrap().len());
+    assert_eq!(v["sections"].as_array().unwrap().len(), 44);
+
+    // Same project, same bytes.
+    let again = dir.with_file_name("again.tmod");
+    assert_eq!(code(&run(&["convert", path(&dir), path(&again)])), 0);
+    assert_eq!(fs::read(&out).unwrap(), fs::read(&again).unwrap());
+
+    assert_eq!(code(&run(&["inspect", "/does/not/exist.tmod"])), 1);
+    let junk = dir.with_file_name("junk.tmod");
+    fs::write(
+        &junk,
+        b"not a tmod file at all, but long enough to have a header",
+    )
+    .unwrap();
+    assert_eq!(code(&run(&["inspect", path(&junk)])), 1);
+    assert_eq!(code(&run(&["inspect"])), 2);
+}
+
+/// `docs/specifications/samples/quad.tmod` is the file `convert` makes from
+/// the quad project above; `quad.expected.json` is what a loader must read
+/// and evaluate (REQ-FMT-006). Regenerate with `TSUKUMOE_UPDATE_SAMPLES=1`.
+#[test]
+fn the_specification_sample_is_current() {
+    use tsukumoe_core::eval::Frame;
+    use tsukumoe_core::tmod::{AlignedBuf, Tmod};
+
+    let dir = project("sample");
+    let out = dir.with_file_name("quad.tmod");
+    assert_eq!(code(&run(&["convert", path(&dir), path(&out)])), 0);
+    let bytes = fs::read(&out).unwrap();
+
+    let buf = AlignedBuf::from_bytes(&bytes);
+    let t = Tmod::parse(&buf).unwrap();
+    let m = &t.model;
+    let mut frame = Frame::new(m);
+    let cases: Vec<_> = [0.0f32, 0.5, 1.0]
+        .iter()
+        .map(|&p| {
+            frame.set_parameter(0, p);
+            frame.evaluate(m);
+            serde_json::json!({ "P": p, "positions": frame.positions() })
+        })
+        .collect();
+    let expected = serde_json::json!({
+        "file": "quad.tmod",
+        "version": "1.0",
+        "parameters": [{ "name": m.parameter_name(0), "min": m.parameters[0].min,
+            "max": m.parameters[0].max, "default": m.parameters[0].default }],
+        "meshes": [{ "name": m.mesh_name(0), "vertices": m.meshes[0].vertex_count,
+            "indices": &m.mesh_indices[..], "uvs": &m.mesh_uvs[..] }],
+        "textures": t.texture_count(),
+        "evaluations": cases,
+    });
+    let mut json = serde_json::to_string_pretty(&expected).unwrap();
+    json.push('\n');
+
+    let samples =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/specifications/samples");
+    if std::env::var_os("TSUKUMOE_UPDATE_SAMPLES").is_some() {
+        fs::create_dir_all(&samples).unwrap();
+        fs::write(samples.join("quad.tmod"), &bytes).unwrap();
+        fs::write(samples.join("quad.expected.json"), &json).unwrap();
+    }
+    assert_eq!(
+        fs::read(samples.join("quad.tmod")).expect("run with TSUKUMOE_UPDATE_SAMPLES=1"),
+        bytes,
+        "quad.tmod is stale; run with TSUKUMOE_UPDATE_SAMPLES=1"
+    );
+    assert_eq!(
+        fs::read_to_string(samples.join("quad.expected.json")).unwrap(),
+        json,
+        "quad.expected.json is stale; run with TSUKUMOE_UPDATE_SAMPLES=1"
+    );
+}
