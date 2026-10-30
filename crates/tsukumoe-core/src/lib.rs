@@ -24,4 +24,5 @@ pub mod playback;
 pub mod rig;
 pub mod simulate;
 pub mod table;
+pub mod tmod;
 pub mod validate;
