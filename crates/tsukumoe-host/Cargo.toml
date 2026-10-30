@@ -1,0 +1,23 @@
+[package]
+name = "tsukumoe-host"
+description = "Tsukumoe viewer and streaming host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tsukumoe-core.workspace = true
+tsukumoe-format.workspace = true
+tsukumoe-gpu.workspace = true
+tsukumoe-ui.workspace = true
+wgpu.workspace = true
+wgpui.workspace = true
+
+[[bin]]
+name = "tsukumoe-host"
+path = "src/main.rs"
+
+[lints]
+workspace = true

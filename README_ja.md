@@ -4,7 +4,7 @@
 
 Live2D Cubism の代替を目指す、オープンな 2D リグ・アニメーション基盤。高速なランタイム SDK とエディタを作る。
 
-**状態: 開発初期（M1）。core（評価・物理・描画リスト）とプロジェクト形式（JSON Schema 付き）まで実装済み。wgpu 参照レンダラ（ヘッドレス）と CLI（`tsukumoe convert | validate | render | diff | generate`）も実装済み。アプリとしてはまだ使えない。**
+**状態: 開発初期（M1）。core（評価・物理・描画リスト）とプロジェクト形式（JSON Schema 付き）まで実装済み。wgpu 参照レンダラ（ヘッドレス）と CLI（`tsukumoe convert | validate | render | diff | generate`）と、パラメータスライダ付きの最小ビューア（`tsukumoe-host <project>`）も実装済み。アプリとしてはまだ使えない。**
 
 ## 目標
 

@@ -302,15 +302,37 @@ impl Renderer {
         {
             return Err(Error::BadTarget);
         }
+        let target_view = target.create_view(&Default::default());
+        self.render_to_view(
+            device,
+            queue,
+            list,
+            view,
+            &target_view,
+            (target.width(), target.height()),
+        )
+    }
+
+    /// Like [`Renderer::render`], into a view the caller owns, such as the back
+    /// buffer of a UI surface. A view does not expose its texture's format or
+    /// usage, so the caller must pass an `Rgba8Unorm` texture with
+    /// `RENDER_ATTACHMENT`, `size` wide and high.
+    pub fn render_to_view(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &DrawList,
+        view: [f32; 4],
+        target_view: &wgpu::TextureView,
+        size: (u32, u32),
+    ) -> Result<(), Error> {
         // Check every texture first so a failure leaves the target alone.
         for d in list.drawables() {
             if self.textures.get(d.texture as usize).is_none() {
                 return Err(Error::MissingTexture(d.texture));
             }
         }
-        let size = (target.width(), target.height());
         self.ensure_mask(device, size);
-        let target_view = target.create_view(&Default::default());
 
         let vertex = |data: &[f32]| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -391,7 +413,7 @@ impl Renderer {
         drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &target_view,
+                view: target_view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -478,7 +500,7 @@ impl Renderer {
             };
             pass(
                 &mut encoder,
-                &target_view,
+                target_view,
                 false,
                 &self.pipelines.main[mode][usize::from(d.double_sided)],
                 &[&params, texture, &mask.bind],

@@ -6172,6 +6172,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukumoe-host"
+version = "0.1.0"
+dependencies = [
+ "tsukumoe-core",
+ "tsukumoe-format",
+ "tsukumoe-gpu",
+ "tsukumoe-ui",
+ "wgpu",
+ "wgpui",
+]
+
+[[package]]
 name = "tsukumoe-ui"
 version = "0.1.0"
 dependencies = [

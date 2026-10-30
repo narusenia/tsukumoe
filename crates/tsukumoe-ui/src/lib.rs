@@ -18,3 +18,4 @@ pub use panel::panel;
 pub use slider::{slider, slider_state};
 pub use switch::switch;
 pub use theme::{Colors, Metrics, Mode, Theme, init, set_mode, set_theme};
+pub use wgpui_base::slider::{SliderEvent, SliderState, SliderValue};
