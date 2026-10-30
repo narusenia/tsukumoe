@@ -24,11 +24,11 @@ description = "Workspace test suite"
 run = "cargo test --workspace"
 
 [tasks.wasm]
-description = "Check tsukumoe-core builds for wasm32"
-run = "cargo build -p tsukumoe-core --target wasm32-unknown-unknown"
+description = "Check tsukumoe-core and tsukumoe-runtime build for wasm32"
+run = "cargo build -p tsukumoe-core -p tsukumoe-runtime --target wasm32-unknown-unknown"
 
 [tasks.deps]
-description = "Crate dependency rules (UI-free crates, tsukumoe-core purity)"
+description = "Crate dependency rules (UI-free crates, tsukumoe-core purity, tsukumoe-runtime scope)"
 run = "bash scripts/check-deps.sh"
 
 [tasks.check]
