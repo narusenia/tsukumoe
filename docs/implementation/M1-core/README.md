@@ -16,3 +16,4 @@
 | M1-10 | `seimei-cli`: 形式変換・検証・ヘッドレスレンダ・画像差分 | AI-002 | M | M1-08, M1-09 | 未着手 |
 | M1-11 | `seimei-host` の芽: パラメータスライダ付きビューア（gpui-pre + gpui-kit） | TRK-003, UI-001, UI-002 | M | M1-09 | 未着手 |
 | M1-12 | criterion ベンチマークと CI での回帰検知 | PERF-002, PERF-009 | S | M1-03 | 未着手 |
+| M1-13 | 基準モデルの生成 CLI（パーツ表 → Seimei 形式 JSON、ADR-0017） | PERF-001 | M | M1-08, M1-10 | 未着手 |

@@ -1,3 +1,40 @@
+# `mise run check` is the canonical verification entry point; CI and the
+# lefthook pre-commit hook run the same tasks.
+
 [tools]
-rust = "1.99"
+rust = { version = "1.99", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown", profile = "minimal" }
 "github:indexable-inc/blaze" = "latest"
+lefthook = "2.1.5"
+jq = "1.8"
+
+[tasks.fmt]
+description = "Check formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks."fmt:fix"]
+description = "Apply formatting"
+run = "cargo fmt --all"
+
+[tasks.clippy]
+description = "Clippy with warnings denied"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Workspace test suite"
+run = "cargo test --workspace"
+
+[tasks.wasm]
+description = "Check seimei-core builds for wasm32"
+run = "cargo build -p seimei-core --target wasm32-unknown-unknown"
+
+[tasks.deps]
+description = "Crate dependency rules (GPUI-free crates, seimei-core purity)"
+run = "bash scripts/check-deps.sh"
+
+[tasks.check]
+description = "Full verification (fmt + clippy + deps + wasm + test)"
+depends = ["fmt", "clippy", "deps", "wasm", "test"]
+
+[tasks."hooks:install"]
+description = "Install lefthook git hooks"
+run = "lefthook install"
