@@ -13,9 +13,9 @@ use tsukumoe_ui::{
     SliderEvent, SliderState, Theme, Variant, button, hint, label, panel, slider, slider_state,
 };
 use wgpui::{
-    App, AppContext, Application, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement, Styled, TitlebarOptions, WgpuSurfaceHandle, Window,
-    WindowOptions, div, px, wgpu_surface,
+    App, AppContext, Application, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    KeyDownEvent, KeyUpEvent, MouseMoveEvent, ParentElement, Render, StatefulInteractiveElement,
+    Styled, TitlebarOptions, WgpuSurfaceHandle, Window, WindowOptions, div, px, wgpu_surface,
 };
 
 use crate::viewer::{Viewer, open_project};
@@ -25,11 +25,14 @@ use crate::viewer::{Viewer, open_project};
 const MAX_DT: f32 = 0.1;
 const SIDEBAR_WIDTH: f32 = 300.0;
 const SURFACE_SIZE: u32 = 512;
+/// Pointer travel, in pixels, that moves a parameter across its whole range.
+const DRAG_PIXELS: f32 = 400.0;
 
 /// The window's content: the viewer, or why there is none.
 struct Host {
     name: String,
     running: Result<Running, String>,
+    focus: FocusHandle,
 }
 
 struct Running {
@@ -38,6 +41,9 @@ struct Running {
     sliders: Vec<Entity<SliderState>>,
     last_frame: Instant,
     error: Option<String>,
+    /// Space is held: moving the pointer over the model drives parameters.
+    drive: bool,
+    last_pointer: Option<(f32, f32)>,
 }
 
 impl Running {
@@ -68,6 +74,8 @@ impl Running {
             sliders,
             last_frame: Instant::now(),
             error: None,
+            drive: false,
+            last_pointer: None,
         }
     }
 
@@ -99,6 +107,7 @@ impl Render for Host {
         let t = Theme::get(cx);
         let this = cx.entity();
         let name = self.name.clone();
+        let focus = self.focus.clone();
         let running = match &mut self.running {
             Ok(running) => running,
             Err(e) => {
@@ -143,9 +152,10 @@ impl Render for Host {
             })
             .collect();
 
+        let reset_target = this.clone();
         let reset =
             button("reset", "Reset", Variant::Secondary, cx).on_click(move |_, window, cx| {
-                this.update(cx, |host, cx| {
+                reset_target.update(cx, |host, cx| {
                     let Ok(running) = &mut host.running else {
                         return;
                     };
@@ -174,7 +184,11 @@ impl Render for Host {
                     .child(label(name, cx))
                     .child(reset),
             )
-            .child(hint(format!("{} parameters", rows.len()), cx));
+            .child(hint(format!("{} parameters", rows.len()), cx))
+            .child(hint(
+                "Hold Space and move the mouse over the model: the first two parameters",
+                cx,
+            ));
         if let Some(e) = &running.error {
             sidebar = sidebar.child(hint(e.clone(), cx));
         }
@@ -188,8 +202,56 @@ impl Render for Host {
                 .children(rows),
         );
 
+        let set_drive = |this: &Entity<Host>, on: bool| {
+            let this = this.clone();
+            move |event: &dyn std::any::Any, _: &mut Window, cx: &mut App| {
+                let key = if let Some(e) = event.downcast_ref::<KeyDownEvent>() {
+                    &e.keystroke.key
+                } else if let Some(e) = event.downcast_ref::<KeyUpEvent>() {
+                    &e.keystroke.key
+                } else {
+                    return;
+                };
+                if key == "space" {
+                    this.update(cx, |host, _| {
+                        if let Ok(r) = &mut host.running {
+                            r.drive = on;
+                        }
+                    });
+                }
+            }
+        };
+        let (key_down, key_up) = (set_drive(&this, true), set_drive(&this, false));
+        let leave = this.clone();
+        let drag = move |event: &MouseMoveEvent, window: &mut Window, cx: &mut App| {
+            this.update(cx, |host, cx| {
+                let Ok(r) = &mut host.running else {
+                    return;
+                };
+                let pos = (f32::from(event.position.x), f32::from(event.position.y));
+                let last = r.last_pointer.replace(pos);
+                let (true, Some(last)) = (r.drive, last) else {
+                    return;
+                };
+                // Right is +x and up is +y, as on a slider and in the model.
+                for (index, delta) in [(0, pos.0 - last.0), (1, last.1 - pos.1)] {
+                    let Some(p) = r.viewer.scene.parameters().get(index) else {
+                        continue;
+                    };
+                    let value = r.viewer.scene.value(index) + delta / DRAG_PIXELS * (p.max - p.min);
+                    r.viewer.scene.set_parameter(index, value);
+                    let value = r.viewer.scene.value(index);
+                    r.sliders[index].update(cx, |s, cx| s.set_value(value, window, cx));
+                }
+                cx.notify();
+            });
+        };
+
         div()
             .size_full()
+            .track_focus(&focus)
+            .on_key_down(move |e, w, cx| key_down(e, w, cx))
+            .on_key_up(move |e, w, cx| key_up(e, w, cx))
             .flex()
             .gap(t.metrics.pad)
             .p(t.metrics.pad)
@@ -197,8 +259,20 @@ impl Render for Host {
             .child(sidebar)
             .child(
                 div()
+                    .id("viewport")
                     .flex_1()
                     .relative()
+                    .on_mouse_move(drag)
+                    // Leaving the model ends the drag, so coming back elsewhere does not jump.
+                    .on_hover(move |hovered, _, cx| {
+                        if !*hovered {
+                            leave.update(cx, |host, _| {
+                                if let Ok(r) = &mut host.running {
+                                    r.last_pointer = None;
+                                }
+                            });
+                        }
+                    })
                     .rounded(t.metrics.radius)
                     .overflow_hidden()
                     .child(wgpu_surface(running.surface.clone()).absolute().inset_0()),
@@ -236,7 +310,13 @@ pub fn run(path: PathBuf) -> Result<(), String> {
                 if let Err(e) = &running {
                     *reported.borrow_mut() = Some(e.clone());
                 }
-                Host { name, running }
+                let focus = cx.focus_handle();
+                window.focus(&focus, cx);
+                Host {
+                    name,
+                    running,
+                    focus,
+                }
             })
         });
         if let Err(e) = opened {
