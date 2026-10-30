@@ -1424,6 +1424,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukumoe-cli"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tsukumoe-core",
+ "tsukumoe-format",
+ "tsukumoe-gpu",
+]
+
+[[package]]
 name = "tsukumoe-core"
 version = "0.1.0"
 dependencies = [
