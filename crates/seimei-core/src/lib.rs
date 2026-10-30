@@ -11,6 +11,7 @@ pub mod command;
 pub mod compiled;
 pub mod driver;
 pub mod elements;
+pub mod eval;
 pub mod history;
 pub mod keyform;
 pub mod model;
