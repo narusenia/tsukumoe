@@ -92,10 +92,10 @@ Tsukumoe は Live2D Cubism の代替となる 2D リグ・アニメーション�
 | REQ-EDIT-005 | 物理の設定 | Must | Draft |
 | REQ-EDIT-006 | モーションと表情の編集 | Must | Draft |
 | REQ-EDIT-007 | 書き出し | Must | Draft |
-| REQ-UI-001 | wgpui を UI の土台に採用 | Must | Draft |
-| REQ-UI-002 | wgpui 系と wgpu の同一版固定 | Must | Draft |
-| REQ-UI-003 | ランタイム系クレートの GPUI 非依存 | Must | Draft |
-| REQ-UI-004 | UI 部品は gpui-base の上に自前実装 | Should | Draft |
+| REQ-UI-001 | egui を UI の土台に採用 | Must | Draft |
+| REQ-UI-002 | egui 系と wgpu の同一版固定 | Must | Draft |
+| REQ-UI-003 | ランタイム系クレートの UI 非依存 | Must | Draft |
+| REQ-UI-004 | UI 部品とテーマを自前で持つ | Should | Draft |
 | REQ-PERF-001 | 基準モデルの定義と同梱 | Must | Draft |
 | REQ-PERF-002 | ネイティブの評価時間 | Must | Draft |
 | REQ-PERF-003 | WASM の評価時間 | Must | Draft |
