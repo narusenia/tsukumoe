@@ -1,100 +1,13 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ModelFile",
-  "description": "`model.json`",
-  "type": "object",
-  "properties": {
-    "bindings": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/BindingDto"
-      }
-    },
-    "blend_shapes": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/BlendShapeDto"
-      }
-    },
-    "bones": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/BoneDto"
-      }
-    },
-    "drivers": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/DriverDto"
-      }
-    },
-    "glues": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/GlueDto"
-      }
-    },
-    "meshes": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/MeshDto"
-      }
-    },
-    "parameters": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/ParameterDto"
-      }
-    },
-    "parts": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/PartDto"
-      }
-    },
-    "pose": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PoseDto"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "rotations": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/RotationDto"
-      }
-    },
-    "warps": {
-      "type": "array",
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/WarpDto"
-      }
-    }
-  },
   "$defs": {
     "AxisDto": {
-      "type": "object",
       "properties": {
         "keys": {
-          "type": "array",
           "items": {
-            "type": "number",
-            "format": "float"
-          }
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
         },
         "parameter": {
           "description": "Parameter name.",
@@ -104,52 +17,52 @@
       "required": [
         "parameter",
         "keys"
-      ]
+      ],
+      "type": "object"
     },
     "BindingDto": {
       "description": "The parameters and key positions a set of keyforms is laid out on.",
-      "type": "object",
       "properties": {
         "axes": {
-          "type": "array",
           "items": {
             "$ref": "#/$defs/AxisDto"
-          }
+          },
+          "type": "array"
         }
       },
       "required": [
         "axes"
-      ]
+      ],
+      "type": "object"
     },
     "BlendModeDto": {
-      "type": "string",
       "enum": [
         "normal",
         "additive",
         "multiply"
-      ]
+      ],
+      "type": "string"
     },
     "BlendShapeDto": {
-      "type": "object",
       "properties": {
         "deltas": {
-          "type": "array",
           "items": {
-            "type": "array",
             "items": {
-              "type": "number",
-              "format": "float"
+              "format": "float",
+              "type": "number"
             },
             "maxItems": 2,
-            "minItems": 2
-          }
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         },
         "keys": {
-          "type": "array",
           "items": {
-            "type": "number",
-            "format": "float"
-          }
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
         },
         "name": {
           "type": "string"
@@ -161,11 +74,11 @@
           "$ref": "#/$defs/BlendTargetDto"
         },
         "weights": {
-          "type": "array",
           "items": {
-            "type": "number",
-            "format": "float"
-          }
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -175,46 +88,46 @@
         "keys",
         "weights",
         "deltas"
-      ]
+      ],
+      "type": "object"
     },
     "BlendTargetDto": {
       "oneOf": [
         {
-          "type": "object",
           "properties": {
             "name": {
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "mesh"
+              "const": "mesh",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "name"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "name": {
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "warp"
+              "const": "warp",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "name"
-          ]
+          ],
+          "type": "object"
         }
       ]
     },
     "BoneDto": {
-      "type": "object",
       "properties": {
         "base": {
           "$ref": "#/$defs/BoneTransformDto"
@@ -242,82 +155,82 @@
       "required": [
         "name",
         "base"
-      ]
+      ],
+      "type": "object"
     },
     "BoneTransformDto": {
-      "type": "object",
       "properties": {
         "rotation_degrees": {
-          "type": "number",
+          "default": 0.0,
           "format": "float",
-          "default": 0.0
+          "type": "number"
         },
         "scale": {
-          "type": "array",
           "default": [
             1.0,
             1.0
           ],
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 2,
-          "minItems": 2
+          "minItems": 2,
+          "type": "array"
         },
         "translation": {
-          "type": "array",
           "default": [
             0.0,
             0.0
           ],
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 2,
-          "minItems": 2
+          "minItems": 2,
+          "type": "array"
         }
-      }
+      },
+      "type": "object"
     },
     "DeformerRefDto": {
       "oneOf": [
         {
-          "type": "object",
           "properties": {
             "name": {
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "warp"
+              "const": "warp",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "name"
-          ]
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
           "properties": {
             "name": {
               "type": "string"
             },
             "type": {
-              "type": "string",
-              "const": "rotation"
+              "const": "rotation",
+              "type": "string"
             }
           },
           "required": [
             "type",
             "name"
-          ]
+          ],
+          "type": "object"
         }
       ]
     },
     "DriverDto": {
-      "type": "object",
       "properties": {
         "expression": {
           "type": "string"
@@ -334,15 +247,15 @@
         "name",
         "output",
         "expression"
-      ]
+      ],
+      "type": "object"
     },
     "GlueDto": {
-      "type": "object",
       "properties": {
         "intensity": {
-          "type": "number",
+          "default": 1.0,
           "format": "float",
-          "default": 1.0
+          "type": "number"
         },
         "keyforms": {
           "anyOf": [
@@ -364,10 +277,10 @@
           "type": "string"
         },
         "nodes": {
-          "type": "array",
           "items": {
             "$ref": "#/$defs/GlueNodeDto"
-          }
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -375,150 +288,149 @@
         "mesh_a",
         "mesh_b",
         "nodes"
-      ]
+      ],
+      "type": "object"
     },
     "GlueNodeDto": {
-      "type": "object",
       "properties": {
         "index_a": {
-          "type": "integer",
           "format": "uint32",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "index_b": {
-          "type": "integer",
           "format": "uint32",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "weight": {
           "description": "Share of the movement taken by `a`; `b` takes the rest.",
-          "type": "number",
-          "format": "float"
+          "format": "float",
+          "type": "number"
         }
       },
       "required": [
         "index_a",
         "index_b",
         "weight"
-      ]
+      ],
+      "type": "object"
     },
     "GridDto": {
       "description": "Keyforms of one element, row-major over the binding's axes.",
-      "type": "object",
       "properties": {
         "binding": {
           "description": "Index into `bindings`.",
-          "type": "integer",
           "format": "uint",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "keyforms": {
-          "type": "array",
           "items": {
             "$ref": "#/$defs/BoneTransformDto"
-          }
+          },
+          "type": "array"
         }
       },
       "required": [
         "binding",
         "keyforms"
-      ]
+      ],
+      "type": "object"
     },
     "GridDto2": {
       "description": "Keyforms of one element, row-major over the binding's axes.",
-      "type": "object",
       "properties": {
         "binding": {
           "description": "Index into `bindings`.",
-          "type": "integer",
           "format": "uint",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "keyforms": {
-          "type": "array",
           "items": {
             "$ref": "#/$defs/WarpKeyformDto"
-          }
+          },
+          "type": "array"
         }
       },
       "required": [
         "binding",
         "keyforms"
-      ]
+      ],
+      "type": "object"
     },
     "GridDto3": {
       "description": "Keyforms of one element, row-major over the binding's axes.",
-      "type": "object",
       "properties": {
         "binding": {
           "description": "Index into `bindings`.",
-          "type": "integer",
           "format": "uint",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "keyforms": {
-          "type": "array",
           "items": {
             "$ref": "#/$defs/RotationKeyformDto"
-          }
+          },
+          "type": "array"
         }
       },
       "required": [
         "binding",
         "keyforms"
-      ]
+      ],
+      "type": "object"
     },
     "GridDto4": {
       "description": "Keyforms of one element, row-major over the binding's axes.",
-      "type": "object",
       "properties": {
         "binding": {
           "description": "Index into `bindings`.",
-          "type": "integer",
           "format": "uint",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "keyforms": {
-          "type": "array",
           "items": {
             "$ref": "#/$defs/MeshKeyformDto"
-          }
+          },
+          "type": "array"
         }
       },
       "required": [
         "binding",
         "keyforms"
-      ]
+      ],
+      "type": "object"
     },
     "GridDto5": {
       "description": "Keyforms of one element, row-major over the binding's axes.",
-      "type": "object",
       "properties": {
         "binding": {
           "description": "Index into `bindings`.",
-          "type": "integer",
           "format": "uint",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "keyforms": {
-          "type": "array",
           "items": {
-            "type": "number",
-            "format": "float"
-          }
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
         }
       },
       "required": [
         "binding",
         "keyforms"
-      ]
+      ],
+      "type": "object"
     },
     "InfluenceDto": {
       "description": "Up to four bones moving one vertex. Unused slots are `null` with weight 0.",
-      "type": "object",
       "properties": {
         "bones": {
-          "type": "array",
           "items": {
             "type": [
               "string",
@@ -526,55 +438,56 @@
             ]
           },
           "maxItems": 4,
-          "minItems": 4
+          "minItems": 4,
+          "type": "array"
         },
         "weights": {
-          "type": "array",
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 4,
-          "minItems": 4
+          "minItems": 4,
+          "type": "array"
         }
       },
       "required": [
         "bones",
         "weights"
-      ]
+      ],
+      "type": "object"
     },
     "MeshDto": {
-      "type": "object",
       "properties": {
         "blend_mode": {
           "$ref": "#/$defs/BlendModeDto",
           "default": "normal"
         },
         "double_sided": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "draw_order": {
-          "type": "number",
+          "default": 500.0,
           "format": "float",
-          "default": 500.0
+          "type": "number"
         },
         "indices": {
           "description": "Triangle list.",
-          "type": "array",
           "items": {
-            "type": "integer",
             "format": "uint32",
-            "minimum": 0
-          }
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
         },
         "influences": {
-          "description": "Empty, or one entry per vertex.",
-          "type": "array",
           "default": [],
+          "description": "Empty, or one entry per vertex.",
           "items": {
             "$ref": "#/$defs/InfluenceDto"
-          }
+          },
+          "type": "array"
         },
         "keyforms": {
           "anyOf": [
@@ -587,38 +500,38 @@
           ]
         },
         "mask_inverted": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "masks": {
-          "description": "Names of the meshes clipping this one.",
-          "type": "array",
           "default": [],
+          "description": "Names of the meshes clipping this one.",
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
         },
         "multiply_color": {
-          "type": "array",
           "default": [
             1.0,
             1.0,
             1.0
           ],
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 3,
-          "minItems": 3
+          "minItems": 3,
+          "type": "array"
         },
         "name": {
           "type": "string"
         },
         "opacity": {
-          "type": "number",
+          "default": 1.0,
           "format": "float",
-          "default": 1.0
+          "type": "number"
         },
         "parent": {
           "anyOf": [
@@ -634,48 +547,48 @@
           "type": "string"
         },
         "positions": {
-          "type": "array",
           "items": {
-            "type": "array",
             "items": {
-              "type": "number",
-              "format": "float"
+              "format": "float",
+              "type": "number"
             },
             "maxItems": 2,
-            "minItems": 2
-          }
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         },
         "screen_color": {
-          "type": "array",
           "default": [
             0.0,
             0.0,
             0.0
           ],
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 3,
-          "minItems": 3
+          "minItems": 3,
+          "type": "array"
         },
         "texture": {
-          "type": "integer",
-          "format": "uint32",
           "default": 0,
-          "minimum": 0
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "uvs": {
-          "type": "array",
           "items": {
-            "type": "array",
             "items": {
-              "type": "number",
-              "format": "float"
+              "format": "float",
+              "type": "number"
             },
             "maxItems": 2,
-            "minItems": 2
-          }
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -684,76 +597,76 @@
         "positions",
         "uvs",
         "indices"
-      ]
+      ],
+      "type": "object"
     },
     "MeshKeyformDto": {
-      "type": "object",
       "properties": {
         "draw_order": {
-          "type": "number",
+          "default": 500.0,
           "format": "float",
-          "default": 500.0
+          "type": "number"
         },
         "multiply_color": {
-          "type": "array",
           "default": [
             1.0,
             1.0,
             1.0
           ],
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 3,
-          "minItems": 3
+          "minItems": 3,
+          "type": "array"
         },
         "opacity": {
-          "type": "number",
+          "default": 1.0,
           "format": "float",
-          "default": 1.0
+          "type": "number"
         },
         "positions": {
-          "type": "array",
           "items": {
-            "type": "array",
             "items": {
-              "type": "number",
-              "format": "float"
+              "format": "float",
+              "type": "number"
             },
             "maxItems": 2,
-            "minItems": 2
-          }
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         },
         "screen_color": {
-          "type": "array",
           "default": [
             0.0,
             0.0,
             0.0
           ],
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 3,
-          "minItems": 3
+          "minItems": 3,
+          "type": "array"
         }
       },
       "required": [
         "positions"
-      ]
+      ],
+      "type": "object"
     },
     "ParameterDto": {
-      "type": "object",
       "properties": {
         "default": {
-          "type": "number",
-          "format": "float"
+          "format": "float",
+          "type": "number"
         },
         "display_name": {
-          "type": "string",
-          "default": ""
+          "default": "",
+          "type": "string"
         },
         "group": {
           "type": [
@@ -762,19 +675,19 @@
           ]
         },
         "max": {
-          "type": "number",
-          "format": "float"
+          "format": "float",
+          "type": "number"
         },
         "min": {
-          "type": "number",
-          "format": "float"
+          "format": "float",
+          "type": "number"
         },
         "name": {
           "type": "string"
         },
         "repeat": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
@@ -782,18 +695,18 @@
         "min",
         "max",
         "default"
-      ]
+      ],
+      "type": "object"
     },
     "PartDto": {
-      "type": "object",
       "properties": {
         "name": {
           "type": "string"
         },
         "opacity": {
-          "type": "number",
+          "default": 1.0,
           "format": "float",
-          "default": 1.0
+          "type": "number"
         },
         "parent": {
           "type": [
@@ -802,45 +715,45 @@
           ]
         },
         "visible": {
-          "type": "boolean",
-          "default": true
+          "default": true,
+          "type": "boolean"
         }
       },
       "required": [
         "name"
-      ]
+      ],
+      "type": "object"
     },
     "PoseDto": {
-      "type": "object",
       "properties": {
         "fade_in": {
-          "type": "number",
+          "default": 0.0,
           "format": "float",
-          "default": 0.0
+          "type": "number"
         },
         "groups": {
-          "type": "array",
           "items": {
-            "type": "array",
             "items": {
               "$ref": "#/$defs/PoseEntryDto"
-            }
-          }
+            },
+            "type": "array"
+          },
+          "type": "array"
         }
       },
       "required": [
         "groups"
-      ]
+      ],
+      "type": "object"
     },
     "PoseEntryDto": {
-      "type": "object",
       "properties": {
         "linked": {
-          "type": "array",
           "default": [],
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
         },
         "part": {
           "type": "string"
@@ -848,10 +761,10 @@
       },
       "required": [
         "part"
-      ]
+      ],
+      "type": "object"
     },
     "RotationDto": {
-      "type": "object",
       "properties": {
         "base": {
           "$ref": "#/$defs/RotationKeyformDto"
@@ -887,73 +800,73 @@
         "name",
         "part",
         "base"
-      ]
+      ],
+      "type": "object"
     },
     "RotationKeyformDto": {
-      "type": "object",
       "properties": {
         "angle_degrees": {
-          "type": "number",
+          "default": 0.0,
           "format": "float",
-          "default": 0.0
+          "type": "number"
         },
         "opacity": {
-          "type": "number",
+          "default": 1.0,
           "format": "float",
-          "default": 1.0
+          "type": "number"
         },
         "origin": {
-          "type": "array",
           "default": [
             0.0,
             0.0
           ],
           "items": {
-            "type": "number",
-            "format": "float"
+            "format": "float",
+            "type": "number"
           },
           "maxItems": 2,
-          "minItems": 2
+          "minItems": 2,
+          "type": "array"
         },
         "reflect_x": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "reflect_y": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "scale": {
-          "type": "number",
+          "default": 1.0,
           "format": "float",
-          "default": 1.0
+          "type": "number"
         }
-      }
+      },
+      "type": "object"
     },
     "WarpDto": {
-      "type": "object",
       "properties": {
         "base_points": {
           "description": "`(rows + 1) * (columns + 1)` control points, row by row.",
-          "type": "array",
           "items": {
-            "type": "array",
             "items": {
-              "type": "number",
-              "format": "float"
+              "format": "float",
+              "type": "number"
             },
             "maxItems": 2,
-            "minItems": 2
-          }
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         },
         "bezier": {
-          "type": "boolean",
-          "default": false
+          "default": false,
+          "type": "boolean"
         },
         "columns": {
-          "type": "integer",
           "format": "uint32",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         },
         "keyforms": {
           "anyOf": [
@@ -982,9 +895,9 @@
           "type": "string"
         },
         "rows": {
-          "type": "integer",
           "format": "uint32",
-          "minimum": 0
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
@@ -993,32 +906,119 @@
         "rows",
         "columns",
         "base_points"
-      ]
+      ],
+      "type": "object"
     },
     "WarpKeyformDto": {
-      "type": "object",
       "properties": {
         "opacity": {
-          "type": "number",
+          "default": 1.0,
           "format": "float",
-          "default": 1.0
+          "type": "number"
         },
         "points": {
-          "type": "array",
           "items": {
-            "type": "array",
             "items": {
-              "type": "number",
-              "format": "float"
+              "format": "float",
+              "type": "number"
             },
             "maxItems": 2,
-            "minItems": 2
-          }
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         }
       },
       "required": [
         "points"
-      ]
+      ],
+      "type": "object"
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`model.json`",
+  "properties": {
+    "bindings": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BindingDto"
+      },
+      "type": "array"
+    },
+    "blend_shapes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BlendShapeDto"
+      },
+      "type": "array"
+    },
+    "bones": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/BoneDto"
+      },
+      "type": "array"
+    },
+    "drivers": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DriverDto"
+      },
+      "type": "array"
+    },
+    "glues": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/GlueDto"
+      },
+      "type": "array"
+    },
+    "meshes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MeshDto"
+      },
+      "type": "array"
+    },
+    "parameters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ParameterDto"
+      },
+      "type": "array"
+    },
+    "parts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PartDto"
+      },
+      "type": "array"
+    },
+    "pose": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PoseDto"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rotations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RotationDto"
+      },
+      "type": "array"
+    },
+    "warps": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/WarpDto"
+      },
+      "type": "array"
+    }
+  },
+  "title": "ModelFile",
+  "type": "object"
 }

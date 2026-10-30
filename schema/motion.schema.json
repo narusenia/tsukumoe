@@ -1,36 +1,212 @@
 {
+  "$defs": {
+    "CurveDto": {
+      "properties": {
+        "fade_in": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "fade_out": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "segments": {
+          "items": {
+            "$ref": "#/$defs/SegmentDto"
+          },
+          "type": "array"
+        },
+        "start": {
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "target": {
+          "$ref": "#/$defs/CurveTargetDto"
+        }
+      },
+      "required": [
+        "target",
+        "start",
+        "segments"
+      ],
+      "type": "object"
+    },
+    "CurveTargetDto": {
+      "oneOf": [
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "parameter",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "part_opacity",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SegmentDto": {
+      "oneOf": [
+        {
+          "properties": {
+            "point": {
+              "items": {
+                "format": "float",
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "type": {
+              "const": "linear",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "point"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Two control points, then the end point.",
+          "properties": {
+            "points": {
+              "items": {
+                "items": {
+                  "format": "float",
+                  "type": "number"
+                },
+                "maxItems": 2,
+                "minItems": 2,
+                "type": "array"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "type": {
+              "const": "bezier",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "points"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "point": {
+              "items": {
+                "format": "float",
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "type": {
+              "const": "stepped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "point"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "point": {
+              "items": {
+                "format": "float",
+                "type": "number"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "type": {
+              "const": "inverse_stepped",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "point"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "MotionFile",
   "description": "`motions/*.json`",
-  "type": "object",
   "properties": {
     "curves": {
-      "type": "array",
       "items": {
         "$ref": "#/$defs/CurveDto"
-      }
+      },
+      "type": "array"
     },
     "duration": {
-      "type": "number",
-      "format": "float"
+      "format": "float",
+      "type": "number"
     },
     "fade_in": {
-      "type": "number",
+      "default": 0.0,
       "format": "float",
-      "default": 0.0
+      "type": "number"
     },
     "fade_out": {
-      "type": "number",
+      "default": 0.0,
       "format": "float",
-      "default": 0.0
+      "type": "number"
     },
     "fps": {
-      "type": "number",
-      "format": "float"
+      "format": "float",
+      "type": "number"
     },
     "loop": {
-      "type": "boolean",
-      "default": false
+      "default": false,
+      "type": "boolean"
     },
     "name": {
       "type": "string"
@@ -42,182 +218,6 @@
     "fps",
     "curves"
   ],
-  "$defs": {
-    "CurveDto": {
-      "type": "object",
-      "properties": {
-        "fade_in": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "float"
-        },
-        "fade_out": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "float"
-        },
-        "segments": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/SegmentDto"
-          }
-        },
-        "start": {
-          "type": "array",
-          "items": {
-            "type": "number",
-            "format": "float"
-          },
-          "maxItems": 2,
-          "minItems": 2
-        },
-        "target": {
-          "$ref": "#/$defs/CurveTargetDto"
-        }
-      },
-      "required": [
-        "target",
-        "start",
-        "segments"
-      ]
-    },
-    "CurveTargetDto": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "name": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "const": "parameter"
-            }
-          },
-          "required": [
-            "type",
-            "name"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "name": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "const": "part_opacity"
-            }
-          },
-          "required": [
-            "type",
-            "name"
-          ]
-        }
-      ]
-    },
-    "SegmentDto": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "point": {
-              "type": "array",
-              "items": {
-                "type": "number",
-                "format": "float"
-              },
-              "maxItems": 2,
-              "minItems": 2
-            },
-            "type": {
-              "type": "string",
-              "const": "linear"
-            }
-          },
-          "required": [
-            "type",
-            "point"
-          ]
-        },
-        {
-          "description": "Two control points, then the end point.",
-          "type": "object",
-          "properties": {
-            "points": {
-              "type": "array",
-              "items": {
-                "type": "array",
-                "items": {
-                  "type": "number",
-                  "format": "float"
-                },
-                "maxItems": 2,
-                "minItems": 2
-              },
-              "maxItems": 3,
-              "minItems": 3
-            },
-            "type": {
-              "type": "string",
-              "const": "bezier"
-            }
-          },
-          "required": [
-            "type",
-            "points"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "point": {
-              "type": "array",
-              "items": {
-                "type": "number",
-                "format": "float"
-              },
-              "maxItems": 2,
-              "minItems": 2
-            },
-            "type": {
-              "type": "string",
-              "const": "stepped"
-            }
-          },
-          "required": [
-            "type",
-            "point"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "point": {
-              "type": "array",
-              "items": {
-                "type": "number",
-                "format": "float"
-              },
-              "maxItems": 2,
-              "minItems": 2
-            },
-            "type": {
-              "type": "string",
-              "const": "inverse_stepped"
-            }
-          },
-          "required": [
-            "type",
-            "point"
-          ]
-        }
-      ]
-    }
-  }
+  "title": "MotionFile",
+  "type": "object"
 }

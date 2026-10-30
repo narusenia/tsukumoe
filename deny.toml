@@ -9,7 +9,13 @@ allow = [
   "Zlib",
   "Unicode-3.0",
   "CC0-1.0",
+  "BSL-1.0",
+  "NCSA",
 ]
+
+[advisories]
+# wgpui pulls in unmaintained crates we cannot replace; check only our own dependencies.
+unmaintained = "workspace"
 
 [bans]
 multiple-versions = "warn"

@@ -120,16 +120,16 @@ impl Renderer {
         let mask_pipeline_layout = pipeline_layout(&[Some(&params_layout), Some(&texture_layout)]);
 
         let vertex_buffers = [
-            wgpu::VertexBufferLayout {
+            Some(wgpu::VertexBufferLayout {
                 array_stride: 8,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &wgpu::vertex_attr_array![0 => Float32x2],
-            },
-            wgpu::VertexBufferLayout {
+            }),
+            Some(wgpu::VertexBufferLayout {
                 array_stride: 8,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &wgpu::vertex_attr_array![1 => Float32x2],
-            },
+            }),
         ];
         let make = |layout: &wgpu::PipelineLayout,
                     fragment: &str,

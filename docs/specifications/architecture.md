@@ -10,6 +10,8 @@ Tsukumoe は「GPU も UI も知らない評価コア」を中心に置き、そ
 ```
              tsukumoe-app (editor)     tsukumoe-host (streaming)        [GPUI]
                     │                       │
+                    └───── tsukumoe-ui ─────┘
+                    │                       │
    ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  GPUI 境界
                     ▼                       ▼
 tsukumoe-cli ──► tsukumoe-ai     tsukumoe-tracking
@@ -35,13 +37,14 @@ tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsuk
 | `tsukumoe-tracking` | 入力アダプタ・標準パラメータマッピング | なし | M4 |
 | `tsukumoe-ai` | 推論プロバイダ抽象・リップシンク・リグ支援 | なし | M4 / M6 |
 | `tsukumoe-cli` | 変換・レンダ・検証・MCP サーバ | なし | M1〜 |
+| `tsukumoe-ui` | デザイントークンと UI 部品（`wgpui-base` の上）、gallery | あり | M1 |
 | `tsukumoe-host` | 透過ウィンドウ・Spout2 / Syphon・仮想カメラ | あり | M1（ビューア）→ M4 |
-| `tsukumoe-app` | エディタ。UI 部品も最初はここに置く | あり | M5 |
+| `tsukumoe-app` | エディタ | あり | M5 |
 
 ## 依存規則
 
 - 下位のクレートは上位のクレートに依存しない。`tsukumoe-core` は workspace 内のどのクレートにも依存しない
-- GPUI 境界より下のクレートは `gpui` 系に依存しない（CI で `cargo tree` 検査）
+- GPUI 境界より下のクレートは `gpui` / `wgpui` 系に依存しない（CI で `cargo tree` 検査）
 - `tsukumoe-core` は `wgpu` にも依存しない。`wasm32-unknown-unknown` でビルドできる状態を保つ
 - `tsukumoe-runtime` は編集機能（コマンド・undo）を含まない。core の評価部分を feature で切り出して使う
 - moc3 関連コードは `tsukumoe-compat` の `moc3` feature に閉じる（REQ-COMPAT-003）
@@ -61,9 +64,9 @@ params ─► drivers ─► physics ─► keyform interp ─► skinning ─�
 
 ## GPU と UI
 
-- UI: `gpui-pre` + `gpui-kit`（fork なし、ADR-0003）
-- `gpui-pre` / 兄弟クレート / `gpui-kit` は同じ Zed リビジョンに対応する版に固定し、同時に更新する
-- `wgpu` は `gpui-pre-wgpu` と同じ版。ビューポートは GPUI から device を受け取り `tsukumoe-gpu` で描く
+- UI: `wgpui` + `wgpui-base`（[ADR-0025](../adr/0025-ui-wgpui.md)）。部品は `tsukumoe-ui` に自前で作る（[ADR-0026](../adr/0026-ui-crate.md)）
+- `wgpui` / `wgpui-base` は同時に更新する
+- `wgpu` は `wgpui` と同じ版（30）。ビューポートは `WgpuSurface` の device を受け取り `tsukumoe-gpu` で描く
 - Unity は `tsukumoe-ffi` で評価し、Unity のシェーダで描く。描画規則は `rendering.md`
 
 ## 拡張点

@@ -1,44 +1,14 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ExpressionFile",
-  "description": "`expressions/*.json`",
-  "type": "object",
-  "properties": {
-    "fade_in": {
-      "type": "number",
-      "format": "float",
-      "default": 0.0
-    },
-    "fade_out": {
-      "type": "number",
-      "format": "float",
-      "default": 0.0
-    },
-    "name": {
-      "type": "string"
-    },
-    "parameters": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/ExpressionParameterDto"
-      }
-    }
-  },
-  "required": [
-    "name",
-    "parameters"
-  ],
   "$defs": {
     "ExpressionBlendDto": {
-      "type": "string",
       "enum": [
         "add",
         "multiply",
         "overwrite"
-      ]
+      ],
+      "type": "string"
     },
     "ExpressionParameterDto": {
-      "type": "object",
       "properties": {
         "blend": {
           "$ref": "#/$defs/ExpressionBlendDto"
@@ -47,15 +17,45 @@
           "type": "string"
         },
         "value": {
-          "type": "number",
-          "format": "float"
+          "format": "float",
+          "type": "number"
         }
       },
       "required": [
         "parameter",
         "blend",
         "value"
-      ]
+      ],
+      "type": "object"
     }
-  }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "`expressions/*.json`",
+  "properties": {
+    "fade_in": {
+      "default": 0.0,
+      "format": "float",
+      "type": "number"
+    },
+    "fade_out": {
+      "default": 0.0,
+      "format": "float",
+      "type": "number"
+    },
+    "name": {
+      "type": "string"
+    },
+    "parameters": {
+      "items": {
+        "$ref": "#/$defs/ExpressionParameterDto"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "parameters"
+  ],
+  "title": "ExpressionFile",
+  "type": "object"
 }

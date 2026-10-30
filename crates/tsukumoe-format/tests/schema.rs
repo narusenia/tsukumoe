@@ -15,8 +15,24 @@ fn schema_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema")
 }
 
+/// Sorts object keys, so the text does not change when another crate in the
+/// build turns on serde_json's `preserve_order`.
+fn sorted(value: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::Object(map) => {
+            let sorted: std::collections::BTreeMap<_, _> =
+                map.into_iter().map(|(k, v)| (k, sorted(v))).collect();
+            Value::Object(sorted.into_iter().collect())
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sorted).collect()),
+        other => other,
+    }
+}
+
 fn check<T: JsonSchema>(file: &str) {
-    let mut text = serde_json::to_string_pretty(&schema_for!(T)).unwrap();
+    let value = serde_json::to_value(schema_for!(T)).unwrap();
+    let mut text = serde_json::to_string_pretty(&sorted(value)).unwrap();
     text.push('\n');
     let path = schema_dir().join(file);
     if std::env::var_os("TSUKUMOE_UPDATE_SCHEMA").is_some() {
