@@ -1,0 +1,2 @@
+schema/*.json text eol=lf
+crates/tsukumoe-format/tests/fixtures/** text eol=lf
