@@ -1,0 +1,2 @@
+{ "model": "fixture.tmod", "size": [512, 512], "view": [0, 0, 1, 1],
+  "steps": [ { "expression": "half_q", "dt": 0.1, "repeat": 3 } ] }

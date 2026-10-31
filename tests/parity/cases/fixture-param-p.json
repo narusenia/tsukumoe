@@ -1,0 +1,2 @@
+{ "model": "fixture.tmod", "size": [512, 512], "view": [0, 0, 1, 1],
+  "steps": [ { "params": { "P": 0.5, "Q": -0.5 }, "dt": 0 } ] }

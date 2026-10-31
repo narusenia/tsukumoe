@@ -1,0 +1,2 @@
+{ "model": "reference.tmod", "size": [512, 160], "view": [0, 0, 73.6, 23],
+  "steps": [ { "dt": 0 } ] }
