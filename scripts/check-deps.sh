@@ -7,6 +7,7 @@
 #    editing model or its commands
 #  - tsukumoe-ffi depends on tsukumoe-runtime and tsukumoe-core only (dev
 #    dependencies such as cbindgen and cc are not looked at)
+#  - tsukumoe-wasm depends on tsukumoe-runtime, tsukumoe-gpu and tsukumoe-core only
 set -euo pipefail
 
 tree() { cargo tree -p "$1" --edges normal,build --prefix none; }
@@ -36,7 +37,12 @@ if tree tsukumoe-ffi | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(ffi|runtime
   echo "error: tsukumoe-ffi must depend on tsukumoe-runtime and tsukumoe-core only" >&2
   fail=1
 fi
-# `unsafe` lives in tsukumoe-ffi only. The one exception is the allocation
+if tree tsukumoe-wasm | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(wasm|runtime|gpu|core)( |$)'; then
+  echo "error: tsukumoe-wasm must depend on tsukumoe-runtime, tsukumoe-gpu and tsukumoe-core only" >&2
+  fail=1
+fi
+# `unsafe` lives in tsukumoe-ffi only (wasm-bindgen's generated code is not
+# written by us). The one exception is the allocation
 # counter in the evaluator's tests (it proves a frame does not allocate).
 if grep -rnE '\bunsafe[[:space:]]+(impl|fn|trait|extern|\{)' crates --include='*.rs' | grep -vE '^crates/tsukumoe-ffi/|^crates/tsukumoe-core/src/eval\.rs:'; then
   echo "error: unsafe code outside tsukumoe-ffi" >&2
