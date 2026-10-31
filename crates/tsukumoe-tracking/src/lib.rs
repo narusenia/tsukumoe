@@ -13,6 +13,7 @@ pub mod defaults;
 pub mod euler;
 pub mod frame;
 pub mod osc;
+pub mod overrides;
 pub mod post;
 pub mod rule;
 pub mod udp;
@@ -20,6 +21,7 @@ pub mod vmc;
 
 pub use defaults::default_rules;
 pub use frame::{ARKIT_COUNT, ARKIT_NAMES, TrackingFrame, arkit_index};
+pub use overrides::{Mode, Overrides, json_schema};
 pub use post::{PostConfig, Postprocess};
 pub use rule::{MappingError, Rule, Term};
 pub use udp::{TrackingAdapter, VmcReceiver};
