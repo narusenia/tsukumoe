@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tsukumoe parity (browser)</title>
+<!-- Plays every case of tests/parity/cases and POSTs each frame as premultiplied
+     RGBA8 to the local server (tests/parity/web-server.mjs):
+     ?backend=webgl2|webgpu|auto -->
+<body style="background:#333;color:#eee;font:12px monospace">
+<pre id="out">running</pre>
+<div id="stage"></div>
+<script type="module">
+import { createPlayer } from "/pkg/dist/index.js";
+const backend = new URLSearchParams(location.search).get("backend") ?? "auto";
+const get = async (url) => (await fetch(url)).arrayBuffer();
+const log = [];
+try {
+  const names = await (await fetch("/cases/index.json")).json();
+  const backends = new Set();
+  for (const file of names) {
+    const c = await (await fetch(`/cases/${file}`)).json();
+    const [w, h] = c.size;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    document.getElementById("stage").replaceChildren(canvas);
+    const player = await createPlayer(canvas, new Uint8Array(await get(`/models/${c.model}`)), { backend });
+    backends.add(player.backend);
+    const m = player.model;
+    for (const s of c.steps) {
+      for (const [name, value] of Object.entries(s.params ?? {})) {
+        const i = m.parameterIndex(name);
+        if (i === undefined) throw new Error(`no parameter ${name}`);
+        m.setParameter(i, value);
+      }
+      if (s.motion !== undefined) m.playMotion(s.motion, 0, "normal");
+      if (s.expression !== undefined) m.playExpression(s.expression);
+      for (let k = 0; k < (s.repeat ?? 1); k++) player.update(s.dt);
+    }
+    player.setView(...c.view);
+    const rgba = await player.readPixels(w, h);
+    const name = file.replace(/\.json$/, "");
+    const r = await fetch(`/rgba/${name}`, { method: "POST", body: rgba });
+    if (!r.ok) throw new Error(`POST ${name}: ${r.status}`);
+    log.push(`${name} ${w}x${h} ${rgba.length}`);
+    player.free();
+  }
+  window.__result = { ok: true, backends: [...backends], cases: log.length };
+} catch (e) {
+  window.__result = { ok: false, error: String(e), cases: log.length };
+}
+document.getElementById("out").textContent = JSON.stringify(window.__result) + "\n" + log.join("\n");
+await fetch("/done", { method: "POST", body: JSON.stringify(window.__result) });
+</script>
