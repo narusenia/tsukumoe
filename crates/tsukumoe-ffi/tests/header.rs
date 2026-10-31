@@ -18,6 +18,9 @@ fn the_header_matches_the_exported_api() {
         .generate()
         .expect("cbindgen failed")
         .write(&mut generated);
+    // Doc comments come from the sources, which a Windows checkout may have
+    // with CRLF; the committed header is LF.
+    generated.retain(|&b| b != b'\r');
     let path = dir.join("include/tsukumoe.h");
     if std::env::var_os("TSUKUMOE_UPDATE_HEADER").is_some() {
         fs::write(&path, &generated).unwrap();
