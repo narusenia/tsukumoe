@@ -8,7 +8,7 @@ mod headless;
 mod renderer;
 
 pub use headless::{Diff, Headless, Image};
-pub use renderer::{OUTPUT_FORMAT, Renderer, Texture};
+pub use renderer::{DrawOptions, OUTPUT_FORMAT, Renderer, Texture};
 
 #[derive(Debug)]
 pub enum Error {

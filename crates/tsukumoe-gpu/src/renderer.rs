@@ -53,6 +53,19 @@ struct Mask {
     bind: wgpu::BindGroup,
 }
 
+/// How [`Renderer::render_to_view_with`] differs from [`Renderer::render_to_view`].
+#[derive(Clone, Copy)]
+pub struct DrawOptions {
+    /// Clear the target first; `false` draws over what is there.
+    pub clear: bool,
+}
+
+impl Default for DrawOptions {
+    fn default() -> Self {
+        Self { clear: true }
+    }
+}
+
 /// Draws a draw list into any `Rgba8Unorm` texture of a device the caller owns.
 pub struct Renderer {
     pipelines: Pipelines,
@@ -326,6 +339,29 @@ impl Renderer {
         target_view: &wgpu::TextureView,
         size: (u32, u32),
     ) -> Result<(), Error> {
+        self.render_to_view_with(
+            device,
+            queue,
+            list,
+            view,
+            target_view,
+            size,
+            DrawOptions::default(),
+        )
+    }
+
+    /// [`Renderer::render_to_view`] that can keep the target's contents.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_to_view_with(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &DrawList,
+        view: [f32; 4],
+        target_view: &wgpu::TextureView,
+        size: (u32, u32),
+        options: DrawOptions,
+    ) -> Result<(), Error> {
         // Check every texture first so a failure leaves the target alone.
         for d in list.drawables() {
             if self.textures.get(d.texture as usize).is_none() {
@@ -416,7 +452,11 @@ impl Renderer {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    load: if options.clear {
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
                     store: wgpu::StoreOp::Store,
                 },
             })],
