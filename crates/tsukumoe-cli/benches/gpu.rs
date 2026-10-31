@@ -7,10 +7,13 @@
 //!
 //! - `gpu_reference_render_1080p`: the wait for the GPU after submitting one
 //!   model at 1920x1080 (an upper bound of its GPU time; Metal's timestamp
-//!   queries are not usable, see `Headless::render_frame`).
+//!   queries are not usable, see `Headless::wait`).
 //! - `frame_reference_x50_1080p` / `_p99`: wall time of one frame of 50
 //!   models, from `advance` (drivers and physics included) to the GPU being
-//!   done with the 1080p image.
+//!   done with the 1080p image. The models are evaluated one by one.
+//! - `frame_reference_x50_1080p_parallel` / `_p99`: the same, with the
+//!   evaluation spread over `min(cores, MAX_THREADS)` threads. Drawing and
+//!   submitting stay on one thread.
 
 use std::time::{Duration, Instant};
 
@@ -23,6 +26,9 @@ const HEIGHT: u32 = 1080;
 const MODELS: usize = 50;
 const COLUMNS: usize = 10;
 const ROWS: usize = MODELS / COLUMNS;
+/// The most threads the parallel frame uses; more only adds start-up cost
+/// for 50 models of 0.15 ms each.
+const MAX_THREADS: usize = 8;
 
 fn percentile(sorted: &[Duration], p: f64) -> Duration {
     sorted[((sorted.len() - 1) as f64 * p).round() as usize]
@@ -127,44 +133,81 @@ fn main() {
             ]
         })
         .collect();
-    let (mut total, mut eval, mut gpu_time) = (Vec::new(), Vec::new(), Vec::new());
+    // One frame per call: every model is evaluated (on `threads` threads, or
+    // one by one with its draw submitted right away when `None`), then the
+    // models are drawn on this thread, which is the only one that submits.
     let mut t = 0.0_f32;
-    for i in 0..330 {
-        let start = Instant::now();
-        t = (t + 0.013) % 1.0;
-        let mut update = Duration::ZERO;
-        for (k, f) in frames.iter_mut().enumerate() {
-            // Each model is submitted as soon as it is evaluated, so the GPU
-            // draws one while the CPU evaluates the next.
-            let began = Instant::now();
-            pose(f, (t + k as f32 / MODELS as f32) % 1.0);
-            f.advance(&compiled, 1.0 / 60.0);
-            update += began.elapsed();
-            gpu.draw(&f.draw_list(&compiled), views[k], k == 0, WIDTH, HEIGHT)
-                .unwrap();
+    let mut run = |threads: Option<usize>, gpu: &mut Headless| {
+        let (mut total, mut eval, mut wait) = (Vec::new(), Vec::new(), Vec::new());
+        for i in 0..330 {
+            let start = Instant::now();
+            t = (t + 0.013) % 1.0;
+            let mut update = Duration::ZERO;
+            let phase = |k: usize| (t + k as f32 / MODELS as f32) % 1.0;
+            match threads {
+                None => {
+                    for (k, f) in frames.iter_mut().enumerate() {
+                        // The GPU draws one model while the CPU evaluates the next.
+                        let began = Instant::now();
+                        pose(f, phase(k));
+                        f.advance(&compiled, 1.0 / 60.0);
+                        update += began.elapsed();
+                        gpu.draw(&f.draw_list(&compiled), views[k], k == 0, WIDTH, HEIGHT)
+                            .unwrap();
+                    }
+                }
+                Some(threads) => {
+                    let per = MODELS.div_ceil(threads);
+                    std::thread::scope(|scope| {
+                        for (c, chunk) in frames.chunks_mut(per).enumerate() {
+                            let (compiled, pose) = (&compiled, &pose);
+                            scope.spawn(move || {
+                                for (j, f) in chunk.iter_mut().enumerate() {
+                                    pose(f, phase(c * per + j));
+                                    f.advance(compiled, 1.0 / 60.0);
+                                }
+                            });
+                        }
+                    });
+                    update = start.elapsed();
+                    for (k, f) in frames.iter().enumerate() {
+                        gpu.draw(&f.draw_list(&compiled), views[k], k == 0, WIDTH, HEIGHT)
+                            .unwrap();
+                    }
+                }
+            }
+            let waited = gpu.wait().unwrap();
+            if i >= 30 {
+                total.push(start.elapsed());
+                eval.push(update);
+                wait.push(waited);
+            }
         }
-        let wait = gpu.wait().unwrap();
-        let all = start.elapsed();
-        let evaluated = update;
-        if i >= 30 {
-            total.push(all);
-            eval.push(evaluated);
-            gpu_time.push(wait);
+        for v in [&mut total, &mut eval, &mut wait] {
+            v.sort();
         }
+        (total, eval, wait)
+    };
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = cores.min(MAX_THREADS);
+    for (label, mode, name) in [
+        ("1 thread", None, "frame_reference_x50_1080p"),
+        (
+            &*format!("{threads} threads of {cores} cores"),
+            Some(threads),
+            "frame_reference_x50_1080p_parallel",
+        ),
+    ] {
+        let (total, eval, wait) = run(mode, &mut gpu);
+        println!(
+            "PERF-006 frame of {MODELS} models at 1080p, update on {label}: median {:.3} ms, p99 {:.3} ms (update {:.3} ms, final GPU wait {:.3} ms median; {} frames)",
+            ms(percentile(&total, 0.5)),
+            ms(percentile(&total, 0.99)),
+            ms(percentile(&eval, 0.5)),
+            ms(percentile(&wait, 0.5)),
+            total.len()
+        );
+        record(name, percentile(&total, 0.5));
+        record(&format!("{name}_p99"), percentile(&total, 0.99));
     }
-    for v in [&mut total, &mut eval, &mut gpu_time] {
-        v.sort();
-    }
-    println!(
-        "PERF-006 frame of {MODELS} models at 1080p: median {:.3} ms, p99 {:.3} ms (update {:.3} ms, final GPU wait {:.3} ms median; {} frames)",
-        ms(percentile(&total, 0.5)),
-        ms(percentile(&total, 0.99)),
-        ms(percentile(&eval, 0.5)),
-        gpu_time
-            .first()
-            .map_or(f64::NAN, |_| ms(percentile(&gpu_time, 0.5))),
-        total.len()
-    );
-    record("frame_reference_x50_1080p", percentile(&total, 0.5));
-    record("frame_reference_x50_1080p_p99", percentile(&total, 0.99));
 }

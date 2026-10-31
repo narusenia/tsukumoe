@@ -10,5 +10,7 @@
   "reference_parse": 300000,
   "gpu_reference_render_1080p": 1000000,
   "frame_reference_x50_1080p": 20000000,
-  "frame_reference_x50_1080p_p99": 22000000
+  "frame_reference_x50_1080p_p99": 22000000,
+  "frame_reference_x50_1080p_parallel": 20000000,
+  "frame_reference_x50_1080p_parallel_p99": 26000000
 }
