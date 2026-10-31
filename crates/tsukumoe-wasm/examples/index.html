@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tsukumoe-wasm stage 1 check</title>
+<body style="background:#444;color:#eee;font:12px monospace">
+<!-- ?model=ref|quad|mask  &webgl=1 forces WebGL2  &simd=0 uses the build without SIMD
+     &compare=1 compares with <model>.rgba from the native_render example -->
+<canvas id="c" width="512" height="512" style="background:#888;display:block"></canvas>
+<pre id="out">running</pre>
+<script type="module">
+const q = new URLSearchParams(location.search);
+const model = q.get("model") ?? "quad";
+const variant = q.get("simd") === "0" ? "nosimd" : "simd";
+const forceWebgl = q.get("webgl") === "1";
+const result = { model, variant, forceWebgl };
+const mark = (name) => (result[name] = +performance.now().toFixed(1));
+try {
+  const glue = await import(`./${variant}/tsukumoe.js`);
+  mark("t_glue_loaded");
+  const [wasmBytes, tmod] = await Promise.all([
+    fetch(`./${variant}/tsukumoe_bg.opt.wasm`).then((r) => r.arrayBuffer()),
+    fetch(`./${model}.tmod`).then((r) => r.arrayBuffer()),
+  ]);
+  mark("t_fetched");
+  await glue.default({ module_or_path: wasmBytes });
+  mark("t_wasm_ready");
+  const canvas = document.getElementById("c");
+  const player = await glue.Player.create(canvas, new Uint8Array(tmod), forceWebgl);
+  mark("t_player_created");
+  result.backend = player.backend();
+  const names = ["parse_png", "instance", "adapter", "device", "renderer", "textures"];
+  const tm = player.timings();
+  result.create_ms = Object.fromEntries(names.map((k, i) => [k, +tm[i].toFixed(1)]));
+  // Square view around the model so a 512x512 target is not distorted.
+  const b = Array.from(player.bounds());
+  const side = Math.max(b[2] - b[0], b[3] - b[1]);
+  const cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  const view = [cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2].map(Math.fround);
+  result.view = view.join(",");
+  player.set_view(...view);
+  player.render();
+  mark("t_first_render_submitted");
+  await new Promise((r) => requestAnimationFrame(r));
+  mark("t_first_frame_presented");
+
+  // Pixel check: off-screen target, premultiplied RGBA8, same as native_render.
+  const got = await player.read_pixels(512, 512);
+  let nonzero = 0;
+  for (let i = 3; i < got.length; i += 4) nonzero += got[i] ? 1 : 0;
+  result.nonzero_alpha_pixels = nonzero;
+  if (q.get("compare") === "1") {
+    const want = new Uint8Array(await (await fetch(`./${model}.rgba`)).arrayBuffer());
+    let max = 0, over2 = 0, sum = 0;
+    for (let i = 0; i < got.length; i += 4) {
+      let worst = 0;
+      for (let k = 0; k < 4; k++) worst = Math.max(worst, Math.abs(got[i + k] - want[i + k]));
+      max = Math.max(max, worst); over2 += worst > 2 ? 1 : 0; sum += worst;
+    }
+    result.diff = { len_match: got.length === want.length, max, pixels_over_2: over2, mean: +(sum / (got.length / 4)).toFixed(4) };
+  }
+
+  // Evaluation time: update() only, then update() + render() submission.
+  const N = 300;
+  for (let i = 0; i < 30; i++) player.update(1 / 60);
+  let t = performance.now();
+  for (let i = 0; i < N; i++) player.update(1 / 60);
+  result.update_ms = +((performance.now() - t) / N).toFixed(4);
+  t = performance.now();
+  for (let i = 0; i < 60; i++) { player.update(1 / 60); player.render(); }
+  result.update_render_submit_ms = +((performance.now() - t) / 60).toFixed(4);
+  result.ok = true;
+} catch (e) {
+  result.error = String(e);
+}
+window.__result = result;
+document.getElementById("out").textContent = JSON.stringify(result, null, 1);
+</script>
