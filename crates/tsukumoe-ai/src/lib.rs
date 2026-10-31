@@ -15,6 +15,7 @@ pub mod provider;
 pub mod registry;
 pub mod spec;
 pub mod store;
+pub mod wav;
 
 pub use error::AiError;
 pub use provider::{Disclosure, Locality, Provider, Tensor};
