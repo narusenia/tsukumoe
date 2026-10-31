@@ -4,3 +4,4 @@
 //! The pieces of `tsukumoe` that tests and benchmarks reuse.
 
 pub mod generate;
+pub mod parity;
