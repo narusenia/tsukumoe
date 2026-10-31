@@ -2,7 +2,7 @@
 
 - REQ: REQ-TRK-001
 - 単位: M4-01
-- 状態: 未着手
+- 状態: 完了
 - 依存: なし
 - クレート: `tsukumoe-tracking`（新設。`tsukumoe-core` / `tsukumoe-runtime` に依存しない。UI・GPU に依存しない。`wasm32-unknown-unknown` ではビルドできなくてよい（UDP ソケットを使うため）が、共通入力型・正規化・スムージングは I/O を持たない層に分ける）
 
@@ -37,20 +37,20 @@
 
 ## 受入条件
 
-- [ ] 共通入力型（ARKit 52 + 頭部姿勢）が定義され、VMC アダプタがそれに正規化して出力する
-- [ ] 入力が途切れると既定姿勢へ滑らかに戻り、再開すると追従に戻る
-- [ ] スムージングと感度を項目ごとに設定できる
-- [ ] 不正なパケットで受信が止まらず、パニックしない
-- [ ] `tsukumoe-core` / `tsukumoe-runtime` に依存しない
+- [x] 共通入力型（ARKit 52 + 頭部姿勢）が定義され、VMC アダプタがそれに正規化して出力する
+- [x] 入力が途切れると既定姿勢へ滑らかに戻り、再開すると追従に戻る
+- [x] スムージングと感度を項目ごとに設定できる
+- [x] 不正なパケットで受信が止まらず、パニックしない
+- [x] `tsukumoe-core` / `tsukumoe-runtime` に依存しない
 
 ## 決めたこと
 
 - 初回は共通入力型 + VMC のみ。iFacialMocap・MediaPipe は後続
 - OSC は自前実装（依存なし）
-
-## 決めること（着手時）
-
-- ARKit 52 の項目の添字順（Apple のドキュメント順か、アルファベット順か）
-- VRM 標準名 → ARKit 名の対応表の中身（`A` → `jawOpen` 等）。M4-02 の既定マッピングと重なるので、そちらの設計と合わせる
-- 受信の公開 API: ポーリング（`latest()`）のみか、コールバックも持つか
-- 仕様書を `docs/specifications/` に足すか（`tracking.md`）、この計画書にとどめるか
+- ARKit 52 の添字順: 識別子（camelCase）のバイト順アルファベット順。`ARKIT_NAMES` の固定テーブルで、名前引きは ASCII 大文字小文字を区別しない（Perfect Sync の `JawOpen` も受ける）
+- VRM 標準名 → ARKit 名: VMC アダプタ内の小さい固定表。`A`→`jawOpen`、`I`→`mouthStretchLeft`/`Right`、`U`→`mouthPucker`、`E`→`mouthSmileLeft`/`Right`、`O`→`mouthFunnel`、`Blink`→`eyeBlinkLeft`/`Right`、`BlinkL`→`eyeBlinkLeft`、`BlinkR`→`eyeBlinkRight`。それ以外は捨てて `unmapped` に数える。M4-02 の既定マッピングは別途設計する
+- 公開 API: ポーリングのみ（`TrackingAdapter::latest()`、取り出すと空になる）。コールバックは持たない
+- 仕様書: `docs/specifications/` には足さず、この計画書にとどめる
+- `Root/Pos` の位置を `head_position` とする。`Bone/Pos` の `Head` は回転のみ採る（位置は無視）。`Blend/Val` は `Blend/Apply` まで保留、骨・ルートは受信時に即反映
+- 不正入力の上限: パケット 65536 バイト、1 メッセージ 64 引数、1 パケット 1024 メッセージ、bundle の入れ子 4 段。クォータニオンはノルムが 1 から 0.05 を超えて外れたら捨てる
+- 後処理は時刻（秒）を引数に取る純粋な層（`Postprocess::push` / `sample`）。受信スレッドは後処理を持たず、呼び出し側が `latest()` の結果を `push` する
