@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/tsukumoe-core", "crates/tsukumoe-runtime", "crates/tsukumoe-ffi", "crates/tsukumoe-format", "crates/tsukumoe-gpu", "crates/tsukumoe-cli", "crates/tsukumoe-ui", "crates/tsukumoe-host", "crates/tsukumoe-i18n"]
+members = ["crates/tsukumoe-core", "crates/tsukumoe-runtime", "crates/tsukumoe-ffi", "crates/tsukumoe-format", "crates/tsukumoe-gpu", "crates/tsukumoe-cli", "crates/tsukumoe-ui", "crates/tsukumoe-host", "crates/tsukumoe-i18n", "crates/tsukumoe-wasm"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,6 +17,7 @@ tsukumoe-format = { path = "crates/tsukumoe-format", version = "0.1.0" }
 tsukumoe-gpu = { path = "crates/tsukumoe-gpu", version = "0.1.0" }
 tsukumoe-i18n = { path = "crates/tsukumoe-i18n", version = "0.1.0" }
 tsukumoe-ui = { path = "crates/tsukumoe-ui", version = "0.1.0" }
+tsukumoe-wasm = { path = "crates/tsukumoe-wasm", version = "0.1.0" }
 tsukumoe-host = { path = "crates/tsukumoe-host", version = "0.1.0" }
 
 serde = { version = "1", features = ["derive"] }
@@ -38,3 +39,12 @@ jsonschema = { version = "0.33", default-features = false }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+
+# `cargo build --profile wasm`: the npm package's size-first build (the
+# distributed wasm must stay under 1 MB gzipped, see docs/implementation/M3-runtime/wasm.md).
+[profile.wasm]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"

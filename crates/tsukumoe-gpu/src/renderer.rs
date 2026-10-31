@@ -399,15 +399,14 @@ impl Renderer {
             for (i, g) in groups.iter().enumerate() {
                 pass.set_bind_group(i as u32, Some(*g), &[]);
             }
-            pass.set_vertex_buffer(0, positions.slice(..));
-            pass.set_vertex_buffer(1, uvs.slice(..));
+            // The vertex offset goes into the buffer binding rather than into
+            // `draw_indexed`'s base vertex, which WebGL2 does not have.
+            let offset = d.vertex_start as u64 * 8;
+            pass.set_vertex_buffer(0, positions.slice(offset..));
+            pass.set_vertex_buffer(1, uvs.slice(offset..));
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             let first = d.index_start as u32;
-            pass.draw_indexed(
-                first..first + d.indices.len() as u32,
-                d.vertex_start as i32,
-                0..1,
-            );
+            pass.draw_indexed(first..first + d.indices.len() as u32, 0, 0..1);
         };
         // An empty pass clears the target even when nothing is drawn.
         drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

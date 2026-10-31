@@ -1,3 +1,6 @@
 /target
 .DS_Store
 .openidea/
+/packages/tsukumoe-web/node_modules
+/packages/tsukumoe-web/dist
+/packages/tsukumoe-web/src/wasm
