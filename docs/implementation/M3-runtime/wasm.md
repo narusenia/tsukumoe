@@ -2,7 +2,7 @@
 
 - REQ: REQ-RT-003（受入条件。PERF-003 の WASM 評価時間は M3-07）
 - 単位: M3-04
-- 状態: 段階 1 完了（結果は下記。段階 2 に進める判断は利用者待ち）
+- 状態: 実装済み（CI での実行確認が残る）
 - 依存: M3-02
 - クレート: `tsukumoe-wasm`（新設。`wasm-bindgen`）、npm パッケージ `packages/tsukumoe-web/`
 
@@ -73,9 +73,33 @@
 
 ## 受入条件
 
-- [ ] WASM SIMD を有効にしたビルドを提供する
-- [ ] WebGPU 非対応のブラウザで WebGL2 経路で表示できる
-- [ ] 描画リストを JS 側の独自レンダラからも参照できる
-- [ ] 配布 wasm が gzip で 1MB 以内
-- [ ] TypeScript の型が付いている
-- [ ] CI で、ビルドと Node のテストが回る
+- [x] WASM SIMD を有効にしたビルドを提供する
+- [x] WebGPU 非対応のブラウザで WebGL2 経路で表示できる
+- [x] 描画リストを JS 側の独自レンダラからも参照できる
+- [x] 配布 wasm が gzip で 1MB 以内
+- [x] TypeScript の型が付いている
+- [ ] CI で、ビルドと Node のテストが回る（`ci.yml` に `web` ジョブを足した。実行は push 後に確認する）
+
+## 段階 2 の結果
+
+実装:
+
+- `crates/tsukumoe-wasm`: `Model`（再生側。グラフィクス無しで Node でも動く）と `Screen`（canvas への描画）。`Model` が描画リストを `positions` などへのメモリ上の位置として渡し、メッシュごとの属性は 20 個の数値の表（`meshTable`）で渡す。JS の仕様は `docs/specifications/web-api.md`
+- `packages/tsukumoe-web`（`@tsukumoe/web`、`private`）: `createPlayer`、`Model`、`Player`、`DrawList`（型付き配列。プロパティを読むたびに現在の `memory.buffer` から view を作るので、`memory.grow` 後も安全）。SIMD 有り・無しの 2 つの wasm と、`WebAssembly.validate` による実行時の選択。README（英語）に使い方と描画リスト参照の例
+- ビルド: `mise run web:build`（`scripts/build-web.sh`: wasm 2 種のビルド、`wasm-bindgen`、`wasm-opt -Oz`、TypeScript、サイズ検査）。成果物は `.gitignore`。Cargo の `wasm` profile（`opt-level=z`、LTO fat、`codegen-units=1`、`panic=abort`）を使う
+- テスト: `mise run web:test`（`tsc --noEmit` と `node:test` 9 件。パラメータ、モーション、表情、自動動作、描画リストの配列、`memory.grow` 後の view、SIMD 有り・無しの一致、壊れたファイル）。フィクスチャ `test/fixture.tmod` は `examples/web_fixture.rs` が作る
+- WebGPU の canvas の透過: `CompositeAlphaMode::PreMultiplied` を明示して直した（wgpu の web 側は `Opaque` しか報告しないが、設定は受け付ける）
+- adapter が取れない場合: WebGPU の adapter と device を canvas に触れる前に取るようにし、取れなければ同じ canvas で WebGL2 に進む（canvas の作り直しは不要）
+
+測定（Chrome、パッケージの入口から。基準モデルとフィクスチャ（マスク付き）を `readPixels` で読み戻し、native の出力と数値比較）:
+
+| 項目 | 結果 |
+|---|---|
+| WebGPU の表示（透過つき）、基準モデル・フィクスチャ | 表示された。native との差は最大 0/255 |
+| WebGL2 強制の表示、基準モデル・フィクスチャ（SIMD 無しも） | 表示された。差は最大 0/255 |
+| `navigator.gpu` を隠した `auto` | WebGL2 に落ちて表示された。差 0 |
+| 配布 wasm の gzip -9 | SIMD 有り 809,466 バイト、SIMD 無し 811,011 バイト（上限 1,048,576） |
+| 最初の描画まで（ページ内、基準モデル） | WebGPU 約 98 ms、WebGL2 約 116 ms |
+
+残り: CI の `web` ジョブは未実行。PixiJS など実在の独自レンダラとの接続は試していない（描画リストの配列と属性の読み出しまで Node で検査した）。
+
