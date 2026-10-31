@@ -44,6 +44,21 @@ fn benches(c: &mut Criterion) {
             black_box((list.positions(), list.order()));
         })
     });
+    // REQ-PERF-006's update half: 50 models, each at its own phase.
+    let mut crowd: Vec<Frame> = (0..50).map(|_| Frame::new(&compiled)).collect();
+    c.bench_function("reference_advance_x50", |b| {
+        b.iter(|| {
+            t = (t + 0.013) % 1.0;
+            for (k, f) in crowd.iter_mut().enumerate() {
+                let phase = (t + k as f32 / 50.0) % 1.0;
+                for (i, v) in f.parameters_mut().iter_mut().enumerate() {
+                    *v = if i % 2 == 0 { phase } else { 1.0 - phase };
+                }
+                f.advance(&compiled, 1.0 / 60.0);
+                black_box(f.draw_list(&compiled).positions());
+            }
+        })
+    });
     c.bench_function("reference_advance_16ms", |b| {
         b.iter(|| {
             sweep(&mut frame);

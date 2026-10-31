@@ -30,5 +30,13 @@ tsukumoe-runtime.workspace = true
 name = "reference"
 harness = false
 
+[[bench]]
+name = "load"
+harness = false
+
+[[bench]]
+name = "gpu"
+harness = false
+
 [lints]
 workspace = true

@@ -53,7 +53,25 @@ jobs:
         with:
           install_args: rust jq
       - uses: Swatinem/rust-cache@v2
+      # main's medians are kept in the Actions cache; a pull request is
+      # compared with the latest of them (a more than 10% slowdown fails).
+      - uses: actions/cache/restore@v4
+        if: github.event_name == 'pull_request'
+        with:
+          path: target/bench-baseline.json
+          key: bench-baseline-none
+          restore-keys: bench-baseline-
       - run: mise run bench
+        env:
+          BENCH_BASELINE: target/bench-baseline.json
+          BENCH_CEILING_SCALE: "4"
+      - run: cp target/bench-results.json target/bench-baseline.json
+        if: github.event_name == 'push'
+      - uses: actions/cache/save@v4
+        if: github.event_name == 'push'
+        with:
+          path: target/bench-baseline.json
+          key: bench-baseline-${{ github.sha }}
 
   web:
     name: web (ubuntu-latest)

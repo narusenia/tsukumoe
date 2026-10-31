@@ -40,6 +40,65 @@ struct Params {
     pad: [u32; 2],
 }
 
+/// A buffer reused by every draw call, grown when the data outgrows it. A
+/// write lands before the next submit and after the earlier ones, so the
+/// next call may overwrite what the last one drew from.
+struct Scratch {
+    buffer: Option<wgpu::Buffer>,
+    usage: wgpu::BufferUsages,
+    /// What the buffer holds, kept only for data that rarely changes (UVs and
+    /// indices are the same for every frame of a model).
+    held: Option<Vec<u8>>,
+}
+
+impl Scratch {
+    fn new(usage: wgpu::BufferUsages, keep: bool) -> Self {
+        Self {
+            buffer: None,
+            usage: usage | wgpu::BufferUsages::COPY_DST,
+            held: keep.then(Vec::new),
+        }
+    }
+
+    fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u8]) -> &wgpu::Buffer {
+        let len = data.len() as u64;
+        if self.buffer.as_ref().is_none_or(|b| b.size() < len) {
+            self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: len.next_power_of_two().max(256),
+                usage: self.usage,
+                mapped_at_creation: false,
+            }));
+            self.held.as_mut().map(Vec::clear);
+        }
+        let buffer = self.buffer.as_ref().expect("buffer made above");
+        match &mut self.held {
+            Some(held) if held.as_slice() == data => {}
+            held => {
+                if let Some(held) = held {
+                    held.clear();
+                    held.extend_from_slice(data);
+                }
+                queue.write_buffer(buffer, 0, data);
+            }
+        }
+        buffer
+    }
+}
+
+/// The spacing of per-drawable uniform slots: the largest offset alignment
+/// any backend asks for.
+const UNIFORM_STRIDE: usize = 256;
+
+/// What a render pass has bound so far (addresses, only compared).
+#[derive(Default)]
+struct Bound {
+    pipeline: usize,
+    texture: usize,
+    /// The index buffer and the mask group, which no draw of a pass changes.
+    fixed: bool,
+}
+
 struct Pipelines {
     /// `[blend mode][double sided]`
     main: [[wgpu::RenderPipeline; 2]; 3],
@@ -53,6 +112,19 @@ struct Mask {
     bind: wgpu::BindGroup,
 }
 
+/// How [`Renderer::render_to_view_with`] differs from [`Renderer::render_to_view`].
+#[derive(Clone, Copy)]
+pub struct DrawOptions {
+    /// Clear the target first; `false` draws over what is there.
+    pub clear: bool,
+}
+
+impl Default for DrawOptions {
+    fn default() -> Self {
+        Self { clear: true }
+    }
+}
+
 /// Draws a draw list into any `Rgba8Unorm` texture of a device the caller owns.
 pub struct Renderer {
     pipelines: Pipelines,
@@ -62,6 +134,10 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     textures: Vec<wgpu::BindGroup>,
     mask: Option<Mask>,
+    positions: Scratch,
+    uvs: Scratch,
+    indices: Scratch,
+    uniforms: Scratch,
 }
 
 impl Renderer {
@@ -71,8 +147,8 @@ impl Renderer {
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
+                has_dynamic_offset: true,
+                min_binding_size: wgpu::BufferSize::new(size_of::<Params>() as u64),
             },
             count: None,
         };
@@ -218,6 +294,10 @@ impl Renderer {
             sampler,
             textures: Vec::new(),
             mask: None,
+            positions: Scratch::new(wgpu::BufferUsages::VERTEX, false),
+            uvs: Scratch::new(wgpu::BufferUsages::VERTEX, true),
+            indices: Scratch::new(wgpu::BufferUsages::INDEX, true),
+            uniforms: Scratch::new(wgpu::BufferUsages::UNIFORM, false),
         }
     }
 
@@ -326,6 +406,29 @@ impl Renderer {
         target_view: &wgpu::TextureView,
         size: (u32, u32),
     ) -> Result<(), Error> {
+        self.render_to_view_with(
+            device,
+            queue,
+            list,
+            view,
+            target_view,
+            size,
+            DrawOptions::default(),
+        )
+    }
+
+    /// [`Renderer::render_to_view`] that can keep the target's contents.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_to_view_with(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        list: &DrawList,
+        view: [f32; 4],
+        target_view: &wgpu::TextureView,
+        size: (u32, u32),
+        options: DrawOptions,
+    ) -> Result<(), Error> {
         // Check every texture first so a failure leaves the target alone.
         for d in list.drawables() {
             if self.textures.get(d.texture as usize).is_none() {
@@ -334,103 +437,161 @@ impl Renderer {
         }
         self.ensure_mask(device, size);
 
-        let vertex = |data: &[f32]| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(data),
-                usage: wgpu::BufferUsages::VERTEX,
-            })
-        };
-        let positions = vertex(list.positions());
-        let uvs = vertex(list.uvs());
-        let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(list.indices()),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let positions = self
+            .positions
+            .write(device, queue, bytemuck::cast_slice(list.positions()));
+        let uvs = self
+            .uvs
+            .write(device, queue, bytemuck::cast_slice(list.uvs()));
+        let indices = self
+            .indices
+            .write(device, queue, bytemuck::cast_slice(list.indices()));
         let view_params = [
             view[0],
             view[1],
             1.0 / (view[2] - view[0]),
             1.0 / (view[3] - view[1]),
         ];
-        let params_bind = |p: Params| {
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::bytes_of(&p),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.params_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding(),
-                }],
-            })
+        // Every drawable's parameters go into one buffer, a slot each at a
+        // dynamic offset, rather than a buffer and a bind group each. Slot 0
+        // is for the mask passes.
+        let slot = |n: usize| (n * UNIFORM_STRIDE) as u32;
+        let order = list.order();
+        let mut uniforms = vec![0u8; UNIFORM_STRIDE * (order.len() + 1)];
+        let mut put = |n: usize, p: Params| {
+            uniforms[n * UNIFORM_STRIDE..][..size_of::<Params>()]
+                .copy_from_slice(bytemuck::bytes_of(&p));
         };
+        put(
+            0,
+            Params {
+                view: view_params,
+                multiply: [1.0; 4],
+                screen: [0.0; 4],
+                opacity: 1.0,
+                mask_mode: 0,
+                pad: [0; 2],
+            },
+        );
+        for (i, &mesh) in order.iter().enumerate() {
+            let d = list.drawable(mesh as usize);
+            if d.opacity <= 0.0 || d.indices.is_empty() {
+                continue;
+            }
+            put(
+                i + 1,
+                Params {
+                    view: view_params,
+                    multiply: [
+                        d.multiply_color[0],
+                        d.multiply_color[1],
+                        d.multiply_color[2],
+                        1.0,
+                    ],
+                    screen: [d.screen_color[0], d.screen_color[1], d.screen_color[2], 0.0],
+                    opacity: d.opacity,
+                    mask_mode: match (!d.masks.is_empty(), d.mask_inverted) {
+                        (false, _) => 0,
+                        (true, false) => 1,
+                        (true, true) => 2,
+                    },
+                    pad: [0; 2],
+                },
+            );
+        }
+        let uniform_buffer = self.uniforms.write(device, queue, &uniforms);
+        let params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: uniform_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(size_of::<Params>() as u64),
+                }),
+            }],
+        });
         let mask = self.mask.as_ref().expect("mask ensured above");
 
         let mut encoder = device.create_command_encoder(&Default::default());
-        let pass = |encoder: &mut wgpu::CommandEncoder,
-                    view: &wgpu::TextureView,
-                    clear: bool,
+        let begin_pass =
+            |encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, clear: bool| {
+                encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: if clear {
+                                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                                } else {
+                                    wgpu::LoadOp::Load
+                                },
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        ..Default::default()
+                    })
+                    .forget_lifetime()
+            };
+        // `bound` remembers what the pass already has, so a draw only sets
+        // what differs from the one before.
+        let draw = |pass: &mut wgpu::RenderPass<'_>,
+                    bound: &mut Bound,
                     pipeline: &wgpu::RenderPipeline,
+                    offset: u32,
                     groups: &[&wgpu::BindGroup],
                     d: &Drawable| {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear {
-                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(pipeline);
-            for (i, g) in groups.iter().enumerate() {
-                pass.set_bind_group(i as u32, Some(*g), &[]);
+            let key = |r: &dyn std::any::Any| r as *const _ as *const () as usize;
+            if bound.pipeline != key(pipeline) {
+                pass.set_pipeline(pipeline);
+                bound.pipeline = key(pipeline);
+            }
+            pass.set_bind_group(0, Some(&params), &[offset]);
+            if bound.texture != key(groups[0]) {
+                pass.set_bind_group(1, Some(groups[0]), &[]);
+                bound.texture = key(groups[0]);
+            }
+            if let (Some(g), false) = (groups.get(1), bound.fixed) {
+                pass.set_bind_group(2, Some(*g), &[]);
+            }
+            if !bound.fixed {
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                bound.fixed = true;
             }
             // The vertex offset goes into the buffer binding rather than into
             // `draw_indexed`'s base vertex, which WebGL2 does not have.
             let offset = d.vertex_start as u64 * 8;
             pass.set_vertex_buffer(0, positions.slice(offset..));
             pass.set_vertex_buffer(1, uvs.slice(offset..));
-            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             let first = d.index_start as u32;
             pass.draw_indexed(first..first + d.indices.len() as u32, 0, 0..1);
         };
-        // An empty pass clears the target even when nothing is drawn.
-        drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target_view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        }));
-
-        for &mesh in list.order() {
+        let drawn = |mesh: u32| {
             let d = list.drawable(mesh as usize);
-            if d.opacity <= 0.0 || d.indices.is_empty() {
+            d.opacity > 0.0 && !d.indices.is_empty()
+        };
+        // Nothing drawn: an empty pass still clears the target.
+        if !list.order().iter().any(|&m| drawn(m)) {
+            drop(begin_pass(&mut encoder, target_view, options.clear));
+        }
+
+        // Drawables that need no mask share one pass; a masked one ends it,
+        // because its mask is drawn by passes of its own.
+        let mut clear = options.clear;
+        let mut main: Option<(wgpu::RenderPass<'static>, Bound)> = None;
+        for (position, &mesh) in order.iter().enumerate() {
+            let d = list.drawable(mesh as usize);
+            if !drawn(mesh) {
                 continue;
             }
             let texture = &self.textures[d.texture as usize];
             let masked = !d.masks.is_empty();
             if masked {
+                main = None;
                 let mut first = true;
                 for &m in d.masks {
                     let md = list.drawable(m as usize);
@@ -440,72 +601,43 @@ impl Renderer {
                     if md.indices.is_empty() {
                         continue;
                     }
-                    let params = params_bind(Params {
-                        view: view_params,
-                        multiply: [1.0; 4],
-                        screen: [0.0; 4],
-                        opacity: 1.0,
-                        mask_mode: 0,
-                        pad: [0; 2],
-                    });
-                    pass(
-                        &mut encoder,
-                        &mask.view,
-                        first,
+                    let mut pass = begin_pass(&mut encoder, &mask.view, first);
+                    draw(
+                        &mut pass,
+                        &mut Bound::default(),
                         &self.pipelines.mask[usize::from(md.double_sided)],
-                        &[&params, mask_texture],
+                        slot(0),
+                        &[mask_texture],
                         &md,
                     );
                     first = false;
                 }
                 if first {
                     // No mask mesh has triangles: the mask value is 0 everywhere.
-                    drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &mask.view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        ..Default::default()
-                    }));
+                    drop(begin_pass(&mut encoder, &mask.view, true));
                 }
             }
-            let params = params_bind(Params {
-                view: view_params,
-                multiply: [
-                    d.multiply_color[0],
-                    d.multiply_color[1],
-                    d.multiply_color[2],
-                    1.0,
-                ],
-                screen: [d.screen_color[0], d.screen_color[1], d.screen_color[2], 0.0],
-                opacity: d.opacity,
-                mask_mode: match (masked, d.mask_inverted) {
-                    (false, _) => 0,
-                    (true, false) => 1,
-                    (true, true) => 2,
-                },
-                pad: [0; 2],
-            });
             let mode = match d.blend_mode {
                 BlendMode::Normal => 0,
                 BlendMode::Additive => 1,
                 BlendMode::Multiply => 2,
             };
-            pass(
-                &mut encoder,
-                target_view,
-                false,
+            let (pass, bound) = main.get_or_insert_with(|| {
+                (
+                    begin_pass(&mut encoder, target_view, std::mem::take(&mut clear)),
+                    Bound::default(),
+                )
+            });
+            draw(
+                pass,
+                bound,
                 &self.pipelines.main[mode][usize::from(d.double_sided)],
-                &[&params, texture, &mask.bind],
+                slot(position + 1),
+                &[texture, &mask.bind],
                 &d,
             );
         }
+        drop(main);
         queue.submit([encoder.finish()]);
         Ok(())
     }

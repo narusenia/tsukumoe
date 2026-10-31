@@ -1,8 +1,16 @@
 {
-  "compile": 400000,
-  "evaluate": 750000,
-  "evaluate_draw_list": 750000,
-  "advance_16ms": 750000,
-  "reference_evaluate": 1100000,
-  "reference_advance_16ms": 1100000
+  "compile": 330000,
+  "evaluate": 160000,
+  "evaluate_draw_list": 160000,
+  "advance_16ms": 160000,
+  "reference_evaluate": 300000,
+  "reference_advance_16ms": 300000,
+  "reference_advance_x50": 15000000,
+  "reference_load": 750000,
+  "reference_parse": 300000,
+  "gpu_reference_render_1080p": 1000000,
+  "frame_reference_x50_1080p": 20000000,
+  "frame_reference_x50_1080p_p99": 22000000,
+  "frame_reference_x50_1080p_parallel": 20000000,
+  "frame_reference_x50_1080p_parallel_p99": 26000000
 }
