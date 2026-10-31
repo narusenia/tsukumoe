@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod defaults;
 pub mod euler;
 pub mod frame;
 pub mod osc;
@@ -17,6 +18,7 @@ pub mod rule;
 pub mod udp;
 pub mod vmc;
 
+pub use defaults::default_rules;
 pub use frame::{ARKIT_COUNT, ARKIT_NAMES, TrackingFrame, arkit_index};
 pub use post::{PostConfig, Postprocess};
 pub use rule::{MappingError, Rule, Term};
