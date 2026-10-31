@@ -5,6 +5,8 @@
 //!
 //! I/O-free layers: [`frame`] (common input type), [`osc`] (parser), [`vmc`]
 //! (message decoding) and [`post`] (smoothing, sensitivity, dropout recovery).
+//! Mapping to model parameters: [`euler`], [`rule`], [`defaults`],
+//! [`overrides`] and [`mapper`].
 //! The socket layer is [`udp`].
 
 #![forbid(unsafe_code)]
@@ -12,6 +14,7 @@
 pub mod defaults;
 pub mod euler;
 pub mod frame;
+pub mod mapper;
 pub mod osc;
 pub mod overrides;
 pub mod post;
@@ -21,6 +24,7 @@ pub mod vmc;
 
 pub use defaults::default_rules;
 pub use frame::{ARKIT_COUNT, ARKIT_NAMES, TrackingFrame, arkit_index};
+pub use mapper::Mapper;
 pub use overrides::{Mode, Overrides, json_schema};
 pub use post::{PostConfig, Postprocess};
 pub use rule::{MappingError, Rule, Term};
