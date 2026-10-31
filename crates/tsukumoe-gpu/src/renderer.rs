@@ -40,6 +40,38 @@ struct Params {
     pad: [u32; 2],
 }
 
+/// A buffer reused by every draw call, grown when the data outgrows it. A
+/// write lands before the next submit and after the earlier ones, so the
+/// next call may overwrite what the last one drew from.
+struct Scratch {
+    buffer: Option<wgpu::Buffer>,
+    usage: wgpu::BufferUsages,
+}
+
+impl Scratch {
+    fn new(usage: wgpu::BufferUsages) -> Self {
+        Self {
+            buffer: None,
+            usage: usage | wgpu::BufferUsages::COPY_DST,
+        }
+    }
+
+    fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, data: &[u8]) -> &wgpu::Buffer {
+        let len = data.len() as u64;
+        if self.buffer.as_ref().is_none_or(|b| b.size() < len) {
+            self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: len.next_power_of_two().max(256),
+                usage: self.usage,
+                mapped_at_creation: false,
+            }));
+        }
+        let buffer = self.buffer.as_ref().expect("buffer made above");
+        queue.write_buffer(buffer, 0, data);
+        buffer
+    }
+}
+
 /// The spacing of per-drawable uniform slots: the largest offset alignment
 /// any backend asks for.
 const UNIFORM_STRIDE: usize = 256;
@@ -79,6 +111,10 @@ pub struct Renderer {
     sampler: wgpu::Sampler,
     textures: Vec<wgpu::BindGroup>,
     mask: Option<Mask>,
+    positions: Scratch,
+    uvs: Scratch,
+    indices: Scratch,
+    uniforms: Scratch,
 }
 
 impl Renderer {
@@ -235,6 +271,10 @@ impl Renderer {
             sampler,
             textures: Vec::new(),
             mask: None,
+            positions: Scratch::new(wgpu::BufferUsages::VERTEX),
+            uvs: Scratch::new(wgpu::BufferUsages::VERTEX),
+            indices: Scratch::new(wgpu::BufferUsages::INDEX),
+            uniforms: Scratch::new(wgpu::BufferUsages::UNIFORM),
         }
     }
 
@@ -374,20 +414,15 @@ impl Renderer {
         }
         self.ensure_mask(device, size);
 
-        let vertex = |data: &[f32]| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(data),
-                usage: wgpu::BufferUsages::VERTEX,
-            })
-        };
-        let positions = vertex(list.positions());
-        let uvs = vertex(list.uvs());
-        let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: bytemuck::cast_slice(list.indices()),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let positions = self
+            .positions
+            .write(device, queue, bytemuck::cast_slice(list.positions()));
+        let uvs = self
+            .uvs
+            .write(device, queue, bytemuck::cast_slice(list.uvs()));
+        let indices = self
+            .indices
+            .write(device, queue, bytemuck::cast_slice(list.indices()));
         let view_params = [
             view[0],
             view[1],
@@ -441,18 +476,14 @@ impl Renderer {
                 },
             );
         }
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: None,
-            contents: &uniforms,
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let uniform_buffer = self.uniforms.write(device, queue, &uniforms);
         let params = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.params_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &uniform_buffer,
+                    buffer: uniform_buffer,
                     offset: 0,
                     size: wgpu::BufferSize::new(size_of::<Params>() as u64),
                 }),
