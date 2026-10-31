@@ -3531,6 +3531,7 @@ dependencies = [
  "tsukumoe-format",
  "tsukumoe-gpu",
  "tsukumoe-runtime",
+ "tsukumoe-tracking",
 ]
 
 [[package]]

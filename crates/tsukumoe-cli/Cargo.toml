@@ -25,6 +25,7 @@ serde_json.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 tsukumoe-runtime.workspace = true
+tsukumoe-tracking.workspace = true
 
 [[bench]]
 name = "reference"
