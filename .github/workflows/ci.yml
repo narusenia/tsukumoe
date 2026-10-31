@@ -55,6 +55,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: mise run bench
 
+  web:
+    name: web (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The wasm-bindgen CLI and binaryen versions are pinned in mise.toml.
+      - uses: jdx/mise-action@v2
+        with:
+          install_args: rust jq node github:wasm-bindgen/wasm-bindgen github:WebAssembly/binaryen
+      - uses: Swatinem/rust-cache@v2
+      # Builds the wasm with and without SIMD, fails when one is over 1 MiB gzipped.
+      - run: mise run web:build
+      - run: mise run web:test
+
   deny:
     name: cargo deny
     runs-on: ubuntu-latest
