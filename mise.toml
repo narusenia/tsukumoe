@@ -55,3 +55,11 @@ run = "bash scripts/build-web.sh"
 description = "Type-check and test packages/tsukumoe-web (run web:build first)"
 dir = "packages/tsukumoe-web"
 run = ["npm run typecheck", "npm test"]
+
+[tasks."web:parity"]
+description = "Native versus WASM draw lists for every parity case (run web:build first)"
+run = "bash tests/parity/native-vs-wasm.sh target/parity"
+
+[tasks."web:parity-images"]
+description = "Native versus WASM draw lists and images (starts a local server; open the printed URL in Chrome; run web:build first)"
+run = "PARITY_IMAGES=1 bash tests/parity/native-vs-wasm.sh target/parity"
