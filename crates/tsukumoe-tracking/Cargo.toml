@@ -1,0 +1,11 @@
+[package]
+name = "tsukumoe-tracking"
+description = "Tracking input adapters for Tsukumoe: ARKit-style frames, VMC/OSC receiver, smoothing and dropout recovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
