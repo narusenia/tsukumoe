@@ -54,3 +54,5 @@ Results are clamped to `[0, 1]`.
 
 - Pixels: each channel of each pixel differs by at most 2/255 from the reference.
 - Draw-list numbers (positions, UVs, opacity, colours): at most 1e-4 absolute.
+
+The comparator is `tsukumoe parity <a> <b>` (`tsukumoe-cli`), which exits non-zero beyond these tolerances; the capture files it reads are specified in `draw-list.md` ("Capture format").
