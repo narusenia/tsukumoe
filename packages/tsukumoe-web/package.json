@@ -1,0 +1,33 @@
+{
+  "name": "@tsukumoe/web",
+  "version": "0.1.0",
+  "description": "Tsukumoe runtime and renderer for the browser (WebAssembly, WebGPU with a WebGL2 fallback)",
+  "license": "Apache-2.0 OR MIT",
+  "repository": "https://github.com/narusenia/tsukumoe",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT"
+  ],
+  "scripts": {
+    "build:ts": "tsc -p tsconfig.json && node scripts/copy-wasm.mjs",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node --test \"test/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}

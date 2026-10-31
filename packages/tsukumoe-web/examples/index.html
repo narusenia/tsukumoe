@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>@tsukumoe/web example</title>
+<!-- A check page, not part of the package. Serve the package directory (after
+     `mise run web:build`) and a folder with <model>.tmod next to it:
+     ?model=ref  &backend=webgl2|webgpu|auto  &simd=0
+     &compare=1 also compares a read-back of the frame with <model>.rgba
+     (premultiplied RGBA8, written by the native_render example). -->
+<body style="background:#333;color:#eee;font:12px monospace">
+<div style="width:512px;height:512px;background:repeating-conic-gradient(#999 0 25%,#bbb 0 50%) 0 0/32px 32px">
+  <canvas id="c" width="512" height="512" style="display:block"></canvas>
+</div>
+<pre id="out">running</pre>
+<script type="module">
+import { createPlayer } from "./dist/index.js";
+const q = new URLSearchParams(location.search);
+const model = q.get("model") ?? "quad";
+const result = { model, backend_option: q.get("backend") ?? "auto" };
+const t0 = performance.now();
+try {
+  const tmod = new Uint8Array(await (await fetch(`./${model}.tmod`)).arrayBuffer());
+  const player = await createPlayer(document.getElementById("c"), tmod, {
+    backend: q.get("backend") ?? "auto",
+    simd: q.get("simd") === "0" ? false : undefined,
+  });
+  result.backend = player.backend;
+  result.create_ms = Object.fromEntries(Object.entries(player.timings).map(([k, v]) => [k, +v.toFixed(1)]));
+  player.update(0);
+  player.render();
+  result.first_render_ms = +(performance.now() - t0).toFixed(1);
+  result.view = "(fit to canvas)";
+  const d = player.model.drawList;
+  result.meshes = d.meshCount;
+  result.vertices = d.vertexCount;
+  const got = await player.readPixels(512, 512);
+  let nonzero = 0;
+  for (let i = 3; i < got.length; i += 4) nonzero += got[i] ? 1 : 0;
+  result.nonzero_alpha_pixels = nonzero;
+  if (q.get("compare") === "1") {
+    const want = new Uint8Array(await (await fetch(`./${model}.rgba`)).arrayBuffer());
+    let max = 0, over2 = 0;
+    for (let i = 0; i < got.length; i += 4) {
+      let worst = 0;
+      for (let k = 0; k < 4; k++) worst = Math.max(worst, Math.abs(got[i + k] - want[i + k]));
+      max = Math.max(max, worst); over2 += worst > 2 ? 1 : 0;
+    }
+    result.diff = { max, pixels_over_2: over2 };
+  }
+  result.ok = true;
+} catch (e) {
+  result.error = String(e);
+}
+window.__result = result;
+document.getElementById("out").textContent = JSON.stringify(result, null, 1);
+</script>
