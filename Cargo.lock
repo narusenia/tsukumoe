@@ -3531,6 +3531,7 @@ dependencies = [
  "tsukumoe-format",
  "tsukumoe-gpu",
  "tsukumoe-runtime",
+ "tsukumoe-tracking",
 ]
 
 [[package]]
@@ -3610,6 +3611,11 @@ dependencies = [
 [[package]]
 name = "tsukumoe-tracking"
 version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "tsukumoe-ui"
