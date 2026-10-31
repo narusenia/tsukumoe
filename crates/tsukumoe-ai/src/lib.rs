@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod formant;
 pub mod hash;
 pub mod provider;
 pub mod registry;
