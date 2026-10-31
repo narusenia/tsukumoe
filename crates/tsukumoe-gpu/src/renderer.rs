@@ -46,13 +46,17 @@ struct Params {
 struct Scratch {
     buffer: Option<wgpu::Buffer>,
     usage: wgpu::BufferUsages,
+    /// What the buffer holds, kept only for data that rarely changes (UVs and
+    /// indices are the same for every frame of a model).
+    held: Option<Vec<u8>>,
 }
 
 impl Scratch {
-    fn new(usage: wgpu::BufferUsages) -> Self {
+    fn new(usage: wgpu::BufferUsages, keep: bool) -> Self {
         Self {
             buffer: None,
             usage: usage | wgpu::BufferUsages::COPY_DST,
+            held: keep.then(Vec::new),
         }
     }
 
@@ -65,9 +69,19 @@ impl Scratch {
                 usage: self.usage,
                 mapped_at_creation: false,
             }));
+            self.held.as_mut().map(Vec::clear);
         }
         let buffer = self.buffer.as_ref().expect("buffer made above");
-        queue.write_buffer(buffer, 0, data);
+        match &mut self.held {
+            Some(held) if held.as_slice() == data => {}
+            held => {
+                if let Some(held) = held {
+                    held.clear();
+                    held.extend_from_slice(data);
+                }
+                queue.write_buffer(buffer, 0, data);
+            }
+        }
         buffer
     }
 }
@@ -271,10 +285,10 @@ impl Renderer {
             sampler,
             textures: Vec::new(),
             mask: None,
-            positions: Scratch::new(wgpu::BufferUsages::VERTEX),
-            uvs: Scratch::new(wgpu::BufferUsages::VERTEX),
-            indices: Scratch::new(wgpu::BufferUsages::INDEX),
-            uniforms: Scratch::new(wgpu::BufferUsages::UNIFORM),
+            positions: Scratch::new(wgpu::BufferUsages::VERTEX, false),
+            uvs: Scratch::new(wgpu::BufferUsages::VERTEX, true),
+            indices: Scratch::new(wgpu::BufferUsages::INDEX, true),
+            uniforms: Scratch::new(wgpu::BufferUsages::UNIFORM, false),
         }
     }
 
