@@ -10,4 +10,4 @@
 | M3-04 | [`tsukumoe-wasm` と npm パッケージ（WebGPU / WebGL2）](wasm.md) | RT-003 | M | M3-02 | 実装済み（CI 待ち） |
 | M3-05 | Unity パッケージ（別 repo） | RT-004 | L | M3-03 | 未着手 |
 | M3-06 | 環境間の出力一致テスト | RT-007 | M | M3-04, M3-05 | 未着手 |
-| M3-07 | [性能目標の達成](performance.md)と Cubism SDK 比較（手元。比較は M2 の後） | PERF-002〜007 | L | M3-01 | 未着手 |
+| M3-07 | [性能目標の達成](performance.md)と Cubism SDK 比較（手元。比較は M2 の後） | PERF-002〜007 | L | M3-01 | 実施済み（PERF-006 は僅差で未達、PERF-007 は保留） |
