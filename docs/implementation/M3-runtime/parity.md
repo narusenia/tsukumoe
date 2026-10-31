@@ -2,7 +2,7 @@
 
 - REQ: REQ-RT-007
 - 単位: M3-06
-- 状態: 計画中
+- 状態: 実装中（手順 1〜2 完了）
 - 依存: M3-04（WASM）、M3-05（Unity）
 
 ## 目的
@@ -19,8 +19,8 @@
 
 ## 進め方
 
-1. native の書き出し（画像と描画リスト JSON）を example で作り、ケース定義（`.tmod` と `update` の dt 列）を `tests/parity/` に置く
-2. 比較器を作る
+1. （完了）native の書き出し（画像と描画リスト JSON）を example で作り、ケース定義（`.tmod` と `update` の dt 列）を `tests/parity/` に置く。実装: `crates/tsukumoe-cli/examples/parity_export.rs`、モデルは `parity_fixture.rs`（パラメータ・モーション・表情・物理が動く fixture）と基準モデル、一括実行は `tests/parity/export.sh <out-dir>`
+2. （完了）比較器を作る。実装: `tsukumoe parity <a> <b>`（`crates/tsukumoe-cli/src/parity.rs`）
 3. WASM: Node で描画リスト JSON を出し、比較する。画像は Chrome の検証ページから出して比較する（手順を `mise run web:parity` にまとめる）
 4. Unity: `TsukumoeCapture` に dt 列を渡せるようにし、全ケースの出力を比較する。golden を `tsukumoe-unity` に取り込む手順を `scripts/` に書く
 5. CI に native 対 WASM（描画リスト）と golden 一致のジョブを足す
@@ -33,10 +33,11 @@
 
 - [ ] 描画リストの数値差が 1e-4 以内（native 対 WASM、native 対 Unity）
 - [ ] 最終画像の画素差が 2/255 以内（同上、全ケース）
-- [ ] 許容を超えたとき、比較器が非 0 で終了し、差の大きい画素・数値を報告する
+- [x] 許容を超えたとき、比較器が非 0 で終了し、差の大きい画素・数値を報告する
 - [ ] CI で native 対 WASM の描画リストと golden が比較される
 
-## 未確定
+## 確定したこと（旧「未確定」）
 
-- 描画リスト JSON の形式（`TsukumoeCapture` の形をそのまま仕様にするか）
-- ケースの数（時刻・パラメータの組）
+- 描画リスト JSON の形式: `TsukumoeCapture` の形をそのまま使う。`docs/specifications/draw-list.md` の「Capture format」で固定した
+- ケースの数: 11（fixture 6、基準モデル 5。`tests/parity/cases/`）。fixture は `web_fixture` ではなく parity 専用の `parity_fixture`（binding 付き）を使う
+- 物理: 基準モデルの物理出力はどのメッシュにも結び付いておらず、重み（`weight / 100`）も小さいので、描画リストに出ない。物理は `parity_fixture` の `fixture-physics` で確かめる。基準モデルの `reference-physics-settle` は dt 列の例として残す（`generate` の変更は M3-06 の範囲外）

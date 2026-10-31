@@ -9,5 +9,5 @@
 | M3-03 | [`tsukumoe-ffi`（C ABI・cbindgen・C サンプル）](ffi.md) | RT-002 | M | M3-02 | 実装済み（CI 待ち） |
 | M3-04 | [`tsukumoe-wasm` と npm パッケージ（WebGPU / WebGL2）](wasm.md) | RT-003 | M | M3-02 | 実装済み（CI 待ち） |
 | M3-05 | [Unity パッケージ（別 repo）](unity.md) | RT-004 | L | M3-03 | 実装済み（Windows・性能は未確認） |
-| M3-06 | [環境間の出力一致テスト](parity.md) | RT-007 | M | M3-04, M3-05 | 計画中 |
+| M3-06 | [環境間の出力一致テスト](parity.md) | RT-007 | M | M3-04, M3-05 | 実装中（native の書き出しと比較器まで） |
 | M3-07 | [性能目標の達成](performance.md)と Cubism SDK 比較（手元。比較は M2 の後） | PERF-002〜007 | L | M3-01 | 完了（PERF-006 は評価を並列にする前提で合格、PERF-007 は保留） |
