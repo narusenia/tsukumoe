@@ -13,6 +13,7 @@
 //!                "dt": 0.1, "repeat": 3 } ] }
 //! ```
 //!
+//! The model is loaded and `update(0)` is called once before the first step.
 //! Each step applies `params` (kept until set again), starts `motion` (layer 0,
 //! normal priority) and `expression`, then calls `update(dt)` `repeat` times
 //! (default 1). The same list of calls must be made in every environment.
@@ -58,6 +59,9 @@ fn main() {
     let bytes = std::fs::read(std::path::Path::new(models).join(&case.model)).unwrap();
 
     let mut runtime = Runtime::from_bytes(&bytes).unwrap();
+    // Loading evaluates the default frame once in every environment (the WASM
+    // `Model` does it in its constructor); physics starts from that frame.
+    runtime.update(0.0);
     for step in &case.steps {
         for (name, &value) in &step.params {
             let i = runtime
