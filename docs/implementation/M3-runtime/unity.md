@@ -2,7 +2,7 @@
 
 - REQ: REQ-RT-004（受入条件。出力一致の判定は M3-06）
 - 単位: M3-05
-- 状態: 段階 1 完了、段階 2 実施中
+- 状態: 実装済み（Windows と性能が未確認）
 - 依存: M3-03（`tsukumoe-ffi`）
 - リポジトリ: 別 repo `tsukumoe-unity`（`~/ghq/local/tsukumoe-unity`。GitHub での公開は後で決める）。UPM パッケージ名 `com.tsukumoe.unity`
 
@@ -61,17 +61,27 @@ Unity で `.tmod` を再生し、描画する。評価は `tsukumoe-ffi` のネ�
 
 未確認: 時計回りのメッシュの背面カリング（fixture に無い）、URP のカメラ経路、Windows、スタンドアロン、フレーム時間。
 
+## 段階 2 の結果
+
+実装（`tsukumoe-unity`）: ABI の全ラップ（`TsukumoeModel`）、`TsukumoeRenderer`、`.tmod` の ScriptedImporter、`TsukumoeCapture`（画素と描画リスト JSON の書き出し）、`Samples~/Basic`、README、ライセンス。URP 17.3.0 とテストフレームワーク 1.6.0 を検証プロジェクトに追加した。
+
+- **URP への組み込み**: `ScriptableRendererFeature` は使わない。モデルを RT に描き、quad に貼る。URP の通常のカメラで表示でき、描画はパイプラインに依存しない（Built-in / HDRP は未テストのためサポート外）
+- シェーダは `Resources/` に置く（プレイヤービルドに含めるため）
+- 検証（macOS arm64、Metal）: EditMode 7 件・PlayMode 3 件が通る（PlayMode は URP カメラ経由と、native の画像との比較を含む）。macOS スタンドアロンをビルドして batchmode で実行し、native との最大差 0/255
+
+未確認: Windows（ビルドスクリプトも macOS のみ）、フレーム時間（描画ごとに `MaterialPropertyBlock` を確保している）、時計回りメッシュの背面カリング、Built-in / HDRP。
+
 ## 範囲外
 
 - Built-in / HDRP、iOS / Android / WebGL / Linux、環境間の一致の判定（M3-06）、Asset Store・OpenUPM への公開、Unity 上での編集
 
 ## 受入条件
 
-- [ ] 対応 Unity バージョンと URP のみを対象とすることを README と仕様に書いた
-- [ ] 基準モデルとマスク付きモデルが Unity 上で wgpu 参照レンダラと 2/255 以内で一致する（段階 1 で測定、M3-06 で CI 化）
+- [x] 対応 Unity バージョンと URP のみを対象とすることを README と仕様に書いた
+- [x] 基準モデルとマスク付きモデルが Unity 上で wgpu 参照レンダラと 2/255 以内で一致する（M3-06 で CI 化）
 - [ ] Windows / macOS のエディタとスタンドアロンで動く（Windows の実機確認は手元に環境がなければ未確認と明記）
-- [ ] ABI の major 不一致をロード時に検出する
-- [ ] EditMode / PlayMode のテストが batchmode で通る
+- [x] ABI の major 不一致をロード時に検出する
+- [x] EditMode / PlayMode のテストが batchmode で通る
 
 ## 未確定
 
