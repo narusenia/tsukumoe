@@ -2,22 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! WebAssembly build of the runtime and the wgpu renderer, for the browser.
-//! This is the stage 1 surface (load, parameters, update, draw, pixel
-//! readback); the packaged API comes with the npm package.
+//! [`Model`] is the playback side (no graphics, so it runs in Node too);
+//! [`Screen`] draws a model into a canvas. The npm package
+//! `packages/tsukumoe-web` wraps both; `docs/specifications/web-api.md` is
+//! the contract.
 
 #![cfg(target_arch = "wasm32")]
+
+mod model;
 
 use std::cell::Cell;
 use std::rc::Rc;
 
-use tsukumoe_core::tmod::{AlignedBuf, Tmod};
 use tsukumoe_gpu::{OUTPUT_FORMAT, Renderer, Texture};
-use tsukumoe_runtime::Runtime;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-fn err(e: impl std::fmt::Display) -> JsValue {
-    JsValue::from_str(&e.to_string())
+/// A JS `Error` with the message of `e`.
+pub(crate) fn err(e: impl std::fmt::Display) -> JsValue {
+    js_sys::Error::new(&e.to_string()).into()
 }
 
 fn now() -> f64 {
@@ -36,171 +39,235 @@ async fn yield_task() {
     let _ = JsFuture::from(promise).await;
 }
 
-/// A model on a canvas.
-#[wasm_bindgen]
-pub struct Player {
-    runtime: Runtime<'static>,
+/// Which graphics API to use.
+#[derive(Clone, Copy, PartialEq)]
+enum Choice {
+    Auto,
+    WebGpu,
+    WebGl2,
+}
+
+struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    backend: String,
+    /// Milliseconds: instance, adapter, device.
+    timings: [f64; 3],
+}
+
+/// WebGPU first: its adapter is requested before the canvas is touched, so a
+/// browser that has `navigator.gpu` but no adapter leaves the canvas free for
+/// WebGL2.
+async fn open_webgpu(canvas: &web_sys::HtmlCanvasElement) -> Result<Gpu, JsValue> {
+    let t0 = now();
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    desc.backends = wgpu::Backends::BROWSER_WEBGPU;
+    let instance = wgpu::Instance::new(desc);
+    let t_instance = now();
+    let adapter = instance
+        .request_adapter(&Default::default())
+        .await
+        .map_err(err)?;
+    let t_adapter = now();
+    let (device, queue) = adapter
+        .request_device(&Default::default())
+        .await
+        .map_err(err)?;
+    let t_device = now();
+    let surface = instance
+        .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
+        .map_err(err)?;
+    let caps = surface.get_capabilities(&adapter);
+    if !caps.formats.contains(&OUTPUT_FORMAT) {
+        return Err(err(format!(
+            "surface formats {:?} lack Rgba8Unorm",
+            caps.formats
+        )));
+    }
+    Ok(Gpu {
+        config: surface_config(canvas, wgpu::CompositeAlphaMode::PreMultiplied),
+        device,
+        queue,
+        surface,
+        backend: format!("{:?}", adapter.get_info().backend),
+        timings: [
+            t_instance - t0,
+            t_adapter - t_instance,
+            t_device - t_adapter,
+        ],
+    })
+}
+
+async fn open_webgl2(canvas: &web_sys::HtmlCanvasElement) -> Result<Gpu, JsValue> {
+    let t0 = now();
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    desc.backends = wgpu::Backends::GL;
+    let instance = wgpu::Instance::new(desc);
+    let t_instance = now();
+    let surface = instance
+        .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
+        .map_err(err)?;
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        })
+        .await
+        .map_err(err)?;
+    let t_adapter = now();
+    // WebGL2 has lower limits than the desktop defaults.
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                .using_resolution(adapter.limits()),
+            ..Default::default()
+        })
+        .await
+        .map_err(err)?;
+    let t_device = now();
+    let caps = surface.get_capabilities(&adapter);
+    if !caps.formats.contains(&OUTPUT_FORMAT) {
+        return Err(err(format!(
+            "surface formats {:?} lack Rgba8Unorm",
+            caps.formats
+        )));
+    }
+    let alpha = if caps
+        .alpha_modes
+        .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+    {
+        wgpu::CompositeAlphaMode::PreMultiplied
+    } else {
+        caps.alpha_modes[0]
+    };
+    Ok(Gpu {
+        config: surface_config(canvas, alpha),
+        device,
+        queue,
+        surface,
+        backend: format!("{:?}", adapter.get_info().backend),
+        timings: [
+            t_instance - t0,
+            t_adapter - t_instance,
+            t_device - t_adapter,
+        ],
+    })
+}
+
+fn surface_config(
+    canvas: &web_sys::HtmlCanvasElement,
+    alpha_mode: wgpu::CompositeAlphaMode,
+) -> wgpu::SurfaceConfiguration {
+    wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format: OUTPUT_FORMAT,
+        width: canvas.width().max(1),
+        height: canvas.height().max(1),
+        present_mode: wgpu::PresentMode::Fifo,
+        desired_maximum_frame_latency: 2,
+        alpha_mode,
+        color_space: Default::default(),
+        view_formats: vec![],
+    }
+}
+
+use model::Model;
+
+/// A canvas with a graphics device, drawing a [`Model`].
+#[wasm_bindgen]
+pub struct Screen {
+    canvas: web_sys::HtmlCanvasElement,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     view: [f32; 4],
     backend: String,
-    /// Milliseconds: instance, adapter, device, renderer, textures.
+    /// Milliseconds: PNG decode, instance, adapter, device, renderer
+    /// (pipelines), texture upload.
     timings: Vec<f64>,
 }
 
 #[wasm_bindgen]
-impl Player {
-    /// Loads `tmod` and prepares `canvas`. WebGPU is used when the browser has
-    /// it; `force_webgl` selects WebGL2 instead.
+impl Screen {
+    /// Prepares `canvas` for drawing `model`. `backend` is `"auto"` (WebGPU,
+    /// else WebGL2), `"webgpu"` or `"webgl2"`. WebGPU is tried before the
+    /// canvas is touched, so on failure with `"auto"` WebGL2 gets the same
+    /// canvas; a failure is reported with a message.
     pub async fn create(
         canvas: web_sys::HtmlCanvasElement,
-        tmod: &[u8],
-        force_webgl: bool,
-    ) -> Result<Player, JsValue> {
+        model: &Model,
+        backend: &str,
+    ) -> Result<Screen, JsValue> {
+        let choice = match backend {
+            "auto" => Choice::Auto,
+            "webgpu" => Choice::WebGpu,
+            "webgl2" => Choice::WebGl2,
+            other => return Err(err(format!("unknown backend {other:?}"))),
+        };
         let t0 = now();
-        let buf = AlignedBuf::from_bytes(tmod);
-        let parsed = Tmod::parse(&buf).map_err(err)?;
-        let textures = (0..parsed.texture_count())
-            .map(|i| {
-                let png = parsed.texture(i).ok_or("texture outside the data")?;
-                Texture::from_png(png).map_err(|e| e.to_string())
-            })
+        let textures = (0..model.texture_count())
+            .map(|i| Texture::from_png(&model.texture_png(i).unwrap_or_default()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(err)?;
-        let runtime = Runtime::from_bytes(tmod).map_err(err)?;
-        let t_load = now();
+        let t_decode = now() - t0;
 
-        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        desc.backends = if force_webgl {
-            wgpu::Backends::GL
-        } else {
-            wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL
-        };
-        let instance = wgpu::util::new_instance_with_webgpu_detection(desc).await;
-        let t_instance = now();
-        let surface = instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
-            .map_err(err)?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                compatible_surface: Some(&surface),
-                ..Default::default()
-            })
-            .await
-            .map_err(err)?;
-        let t_adapter = now();
-        let backend = format!("{:?}", adapter.get_info().backend);
-        // WebGL2 has lower limits than the desktop defaults.
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                    .using_resolution(adapter.limits()),
-                ..Default::default()
-            })
-            .await
-            .map_err(err)?;
-        let t_device = now();
-
-        let caps = surface.get_capabilities(&adapter);
-        if !caps.formats.contains(&OUTPUT_FORMAT) {
-            return Err(err(format!(
-                "surface formats {:?} lack Rgba8Unorm",
-                caps.formats
-            )));
-        }
-        let alpha_mode = if caps
-            .alpha_modes
-            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
-        {
-            wgpu::CompositeAlphaMode::PreMultiplied
-        } else {
-            caps.alpha_modes[0]
-        };
-        surface.configure(
-            &device,
-            &wgpu::SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format: OUTPUT_FORMAT,
-                width: canvas.width().max(1),
-                height: canvas.height().max(1),
-                present_mode: wgpu::PresentMode::Fifo,
-                desired_maximum_frame_latency: 2,
-                alpha_mode,
-                color_space: Default::default(),
-                view_formats: vec![],
+        let gpu = match choice {
+            Choice::WebGl2 => open_webgl2(&canvas).await?,
+            Choice::WebGpu => open_webgpu(&canvas).await?,
+            Choice::Auto => match open_webgpu(&canvas).await {
+                Ok(g) => g,
+                Err(_) => open_webgl2(&canvas).await?,
             },
-        );
-
-        let mut renderer = Renderer::new(&device);
-        let t_renderer = now();
-        renderer
-            .set_textures(&device, &queue, &textures)
-            .map_err(err)?;
-        let t_textures = now();
-
-        let mut player = Player {
-            runtime,
+        };
+        let Gpu {
             device,
             queue,
             surface,
+            config,
+            backend,
+            timings: [t_instance, t_adapter, t_device],
+        } = gpu;
+        surface.configure(&device, &config);
+
+        let t = now();
+        let mut renderer = Renderer::new(&device);
+        let t_renderer = now() - t;
+        let t = now();
+        renderer
+            .set_textures(&device, &queue, &textures)
+            .map_err(err)?;
+        let t_textures = now() - t;
+
+        let mut screen = Screen {
+            canvas,
+            device,
+            queue,
+            surface,
+            config,
             renderer,
             view: [0.0, 0.0, 1.0, 1.0],
             backend,
             timings: vec![
-                t_load - t0,
-                t_instance - t_load,
-                t_adapter - t_instance,
-                t_device - t_adapter,
-                t_renderer - t_device,
-                t_textures - t_renderer,
+                t_decode, t_instance, t_adapter, t_device, t_renderer, t_textures,
             ],
         };
-        player.runtime.update(0.0);
-        player.view = player.bounds_array();
-        Ok(player)
+        screen.fit_view(model);
+        Ok(screen)
     }
 
-    /// `wgpu` backend in use, e.g. `BrowserWebGpu` or `Gl`.
+    /// `wgpu` backend in use: `BrowserWebGpu` or `Gl`.
     pub fn backend(&self) -> String {
         self.backend.clone()
     }
 
-    /// Milliseconds spent in: parse and PNG decode, instance (with WebGPU
-    /// detection), adapter, device, renderer (pipelines), texture upload.
+    /// Milliseconds spent in: PNG decode, instance, adapter, device, renderer
+    /// (pipelines), texture upload.
     pub fn timings(&self) -> Vec<f64> {
         self.timings.clone()
-    }
-
-    /// Returns false when the model has no such parameter.
-    pub fn set_parameter(&mut self, name: &str, value: f32) -> bool {
-        self.runtime
-            .parameter_index(name)
-            .is_some_and(|i| self.runtime.set_parameter(i, value))
-    }
-
-    pub fn update(&mut self, dt: f32) {
-        self.runtime.update(dt);
-    }
-
-    /// The bounding box `[x0, y0, x1, y1]` of the current draw list.
-    pub fn bounds(&self) -> Vec<f32> {
-        self.bounds_array().to_vec()
-    }
-
-    fn bounds_array(&self) -> [f32; 4] {
-        let list = self.runtime.draw_list();
-        let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-        for p in list.positions().as_chunks::<2>().0 {
-            b = [
-                b[0].min(p[0]),
-                b[1].min(p[1]),
-                b[2].max(p[0]),
-                b[3].max(p[1]),
-            ];
-        }
-        b
     }
 
     /// The drawing-space rectangle shown, `[x0, y0, x1, y1]`.
@@ -208,11 +275,42 @@ impl Player {
         self.view = [x0, y0, x1, y1];
     }
 
+    /// Fits the view to the model, centred, with the canvas's aspect ratio.
+    pub fn fit_view(&mut self, model: &Model) {
+        let b = model.bounds_array();
+        let aspect = self.config.width as f32 / self.config.height as f32;
+        let (w, h) = (b[2] - b[0], b[3] - b[1]);
+        let (w, h) = if w / h.max(f32::MIN_POSITIVE) > aspect {
+            (w, w / aspect)
+        } else {
+            (h * aspect, h)
+        };
+        let (cx, cy) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+        self.view = [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0];
+    }
+
+    /// Sets the size of the canvas (in pixels) and of the surface.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.canvas.set_width(width.max(1));
+        self.canvas.set_height(height.max(1));
+        self.config.width = width.max(1);
+        self.config.height = height.max(1);
+        self.surface.configure(&self.device, &self.config);
+    }
+
     /// Draws the last update into the canvas.
-    pub fn render(&mut self) -> Result<(), JsValue> {
+    pub fn render(&mut self, model: &Model) -> Result<(), JsValue> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f)
             | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            // Nothing to draw into right now; the next frame will do.
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.config);
+                return Ok(());
+            }
             other => return Err(err(format!("surface texture: {other:?}"))),
         };
         let view = frame.texture.create_view(&Default::default());
@@ -221,7 +319,7 @@ impl Player {
             .render_to_view(
                 &self.device,
                 &self.queue,
-                &self.runtime.draw_list(),
+                &model.runtime.draw_list(),
                 self.view,
                 &view,
                 size,
@@ -234,9 +332,14 @@ impl Player {
     /// Draws the last update into an off-screen `width` x `height` target and
     /// returns its premultiplied RGBA8 pixels, rows top to bottom (the same
     /// layout as `tsukumoe_gpu::Image`). `width * 4` must be a multiple of 256.
-    pub async fn read_pixels(&mut self, width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+    pub async fn read_pixels(
+        &mut self,
+        model: &Model,
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<u8>, JsValue> {
         let row = width * 4;
-        if row % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT != 0 {
+        if !row.is_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) {
             return Err(err("width * 4 must be a multiple of 256"));
         }
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -257,7 +360,7 @@ impl Player {
             .render(
                 &self.device,
                 &self.queue,
-                &self.runtime.draw_list(),
+                &model.runtime.draw_list(),
                 self.view,
                 &target,
             )
