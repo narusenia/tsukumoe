@@ -11,6 +11,8 @@
 
 pub mod error;
 pub mod provider;
+pub mod spec;
 
 pub use error::AiError;
 pub use provider::{Disclosure, Locality, Provider, Tensor};
+pub use spec::{License, LicenseNotice, ModelSpec, parse_manifest};
