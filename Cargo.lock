@@ -3542,6 +3542,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukumoe-tracking"
+version = "0.1.0"
+
+[[package]]
 name = "tsukumoe-ui"
 version = "0.1.0"
 dependencies = [
