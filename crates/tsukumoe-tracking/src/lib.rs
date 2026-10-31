@@ -10,5 +10,6 @@
 #![forbid(unsafe_code)]
 
 pub mod frame;
+pub mod osc;
 
 pub use frame::{ARKIT_COUNT, ARKIT_NAMES, TrackingFrame, arkit_index};
