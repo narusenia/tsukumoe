@@ -2,7 +2,7 @@
 
 - REQ: REQ-RT-003（受入条件。PERF-003 の WASM 評価時間は M3-07）
 - 単位: M3-04
-- 状態: 段階 1 実装済み・ブラウザ検証は未実施（拡張が未接続だった）
+- 状態: 段階 1 完了（結果は下記。段階 2 に進める判断は利用者待ち）
 - 依存: M3-02
 - クレート: `tsukumoe-wasm`（新設。`wasm-bindgen`）、npm パッケージ `packages/tsukumoe-web/`
 
@@ -42,10 +42,23 @@
 - 既定の release（`opt-level=3`、LTO なし）は wasm-opt 後で 1,161,811 バイトとなり、予算（1MB）を超える。段階 2 でサイズ向けの profile を決める必要がある（`opt-level=s` は SIMD 有りで 881,920）
 - 基準モデル（`assets/reference-model`）にマスクは無い（`mesh_masks` が 0 件）。マスクの確認用に `examples/mask_model.rs` で通常・反転・アルファ傾斜つきのモデルを作る
 
-未実施（ブラウザ拡張が接続できず、ブラウザ操作が 3 回失敗した）:
+ブラウザ検証（Chrome、macOS arm64、`http://127.0.0.1` の静的サーバ、基準モデルは `generate` の出力、マスクは `examples/mask_model.rs` のモデル、描画は 512x512、画素は `read_pixels` で読み戻した premultiplied RGBA8 と、`native_render`（`Headless`）の出力を**数値で**比較。スクリーンショットも見た）:
 
-- WebGPU / WebGL2 での表示、マスクの native との差（2/255 以内）、起動時間、1 フレームの評価時間
-- 手順: `build.sh` でビルド → 静的サーバ → `index.html?model=mask&compare=1`（`&webgl=1` で WebGL2 強制、`&simd=0` で SIMD 無し）
+| 項目 | WebGPU | WebGL2 強制 |
+|---|---|---|
+| 表示 | 表示された | 表示された |
+| native との差（マスクモデル） | 最大 0/255、2 超の画素 0 | 最大 0/255、2 超の画素 0 |
+| native との差（基準モデル） | 最大 0/255、2 超の画素 0 | 最大 0/255、2 超の画素 0 |
+| 最初の描画の提出まで（ページ開始から、基準モデル） | 約 51〜98 ms | 約 77 ms |
+| 同、マスクモデル | 約 56〜65 ms | 約 208 ms |
+
+- 起動の内訳（ms、基準モデル）: WebGPU は instance 2.5、adapter 0.2、device 0.6、renderer（パイプライン）0.2 など。WebGL2 は adapter 7.7、renderer 4.2。マスクモデルの初回 WebGL2 だけ adapter 21.3、renderer 110.4（GL のシェーダ変換と推定。基準モデルの 2 回目以降は 4.2 で、キャッシュが効いたと見られる）。wasm の取得とコンパイルは数十 ms 以内
+- 1 フレームの `update`（基準モデル、`opt-level=z`）: SIMD 有り 0.313 ms、SIMD 無し 0.317 ms（差なし。評価器が自動ベクトル化されていない）。`opt-level=3`（LTO、SIMD 有り）は 0.214 ms で約 32% 速いが、gzip は wasm-opt 後 1,070,327 バイトで予算を僅かに超える。`update` と描画の提出で 1.4〜2.6 ms
+- 配布一式（JS グルー + wasm、`opt-level=z`、gzip -9）: SIMD 有り 821,257 バイト、SIMD 無し 823,080 バイト（グルーだけで gzip 20,142 バイト）
+- 検証ページの `update` の 1 回の測定は 300 回の平均で、タイマ分解能は 0.1 ms。タブが背景のとき `requestAnimationFrame` が遅れる（最初の測定で 2.9 秒かかった）ため、「最初の描画の提出まで」を起動時間とした
+- WebGPU の canvas は、透明部分が黒で合成された（`alpha_mode` が premultiplied にならなかったと見られる。画素の読み戻しは正しく、表示だけの問題）。WebGL2 は背景が透けて正しい。段階 2 で `CompositeAlphaMode` を確かめる
+
+結論: 画像差・起動時間とも許容内。サイズは `opt-level=s` か `z` の profile で予算内（配布一式で約 0.82 MB）。段階 2 に進める。
 
 ### 段階 2: パッケージ化
 
