@@ -425,3 +425,26 @@ fn the_specification_sample_is_current() {
         "quad.expected.json is stale; run with TSUKUMOE_UPDATE_SAMPLES=1"
     );
 }
+
+#[test]
+fn parity_exits_non_zero_beyond_the_tolerance() {
+    let dir = scratch("parity");
+    let json = r#"{"drawables":[{"mesh":0,"texture":0,"blend_mode":0,"double_sided":false,
+        "mask_inverted":false,"masks":[],"opacity":1,"draw_order":500,
+        "multiply_color":[1,1,1],"screen_color":[0,0,0],"positions":[0,0],"uvs":[0,0]}]}"#;
+    for (name, pixel, x) in [("a", 10u8, "0"), ("b", 12, "0.00005"), ("c", 14, "0.01")] {
+        fs::write(dir.join(format!("{name}.rgba")), [pixel; 4]).unwrap();
+        fs::write(
+            dir.join(format!("{name}.json")),
+            json.replace("[0,0],\"uvs\"", &format!("[{x},0],\"uvs\"")),
+        )
+        .unwrap();
+    }
+    let p = |n: &str| path(&dir.join(n)).to_string();
+    assert_eq!(code(&run(&["parity", &p("a"), &p("b")])), 0);
+    let o = run(&["parity", &p("a"), &p("c")]);
+    assert_eq!(code(&o), 1);
+    let report = String::from_utf8(o.stdout).unwrap();
+    assert!(report.contains("drawables[0].positions[0]"), "{report}");
+    assert!(report.contains("\"over\": 1"), "{report}");
+}
