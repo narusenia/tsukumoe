@@ -12,6 +12,7 @@
 pub mod error;
 pub mod formant;
 pub mod hash;
+pub mod lipsync;
 pub mod provider;
 pub mod registry;
 pub mod spec;
@@ -19,6 +20,7 @@ pub mod store;
 pub mod wav;
 
 pub use error::AiError;
+pub use lipsync::{Lipsync, LipsyncConfig, MouthFrame};
 pub use provider::{Disclosure, Locality, Provider, Tensor};
 pub use registry::ProviderRegistry;
 pub use spec::{License, LicenseNotice, ModelSpec, parse_manifest};
