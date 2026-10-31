@@ -2,7 +2,7 @@
 
 - REQ: REQ-RT-004（受入条件。出力一致の判定は M3-06）
 - 単位: M3-05
-- 状態: 計画中
+- 状態: 段階 1 完了、段階 2 実施中
 - 依存: M3-03（`tsukumoe-ffi`）
 - リポジトリ: 別 repo `tsukumoe-unity`（`~/ghq/local/tsukumoe-unity`。GitHub での公開は後で決める）。UPM パッケージ名 `com.tsukumoe.unity`
 
@@ -41,6 +41,26 @@ Unity で `.tmod` を再生し、描画する。評価は `tsukumoe-ffi` のネ�
 - 描画リストの数値とスクリーンショットを書き出す口（M3-06 が native・WASM と比較する）
 - `package.json`、README（英語）、ライセンス表記（Apache-2.0 OR MIT）
 
+## 段階 1 の結果
+
+実装: 別 repo `tsukumoe-unity`（`package/` が UPM パッケージ、`project/` が検証用の Unity プロジェクト）。ABI ラッパ `Native.cs`・`TsukumoeModel.cs`、描画 `OffscreenRenderer.cs` とシェーダ `Drawable.shader`、batchmode の入口 `Editor/PoC.cs`、比較は `scripts/compare.py`。
+
+測定（Unity 6000.3.27f2、Metal、macOS arm64。同じ `.tmod`・同じビュー・512x512 で `native_render` と画素比較）:
+
+| モデル | 色空間 | 最大差 | 2/255 超の画素 |
+|---|---|---|---|
+| fixture（`web_fixture`: 通常・反転マスク、アルファ傾斜、opacity 0.8） | Linear | 0/255 | 0 |
+| fixture | Gamma | 0/255 | 0 |
+| 基準モデル（150 メッシュ、変形・物理） | Linear | 1/255 | 0 |
+
+決めたこと:
+- **色空間**: 非 sRGB の RenderTexture に描き、テクスチャは linear で読み込んで premultiply する。Linear・Gamma の両方で一致するので、Gamma 専用にはしない
+- **マスク**: 専用 RT に最大値ブレンド（`BlendOp Max`）で描き、`Texture2D.Load` で参照する。Render Graph に依存しない
+- **カリング**: RT への投影は Y が反転するため `Cull Front` を使う（`rendering.md` の反時計回りが表になる）
+- batchmode はライセンス認証つきで動作する（`-executeMethod`、`-nographics` なしで描画できる）
+
+未確認: 時計回りのメッシュの背面カリング（fixture に無い）、URP のカメラ経路、Windows、スタンドアロン、フレーム時間。
+
 ## 範囲外
 
 - Built-in / HDRP、iOS / Android / WebGL / Linux、環境間の一致の判定（M3-06）、Asset Store・OpenUPM への公開、Unity 上での編集
@@ -55,6 +75,5 @@ Unity で `.tmod` を再生し、描画する。評価は `tsukumoe-ffi` のネ�
 
 ## 未確定
 
-- Linear 色空間の扱い（段階 1 で決める）
-- マスクの方式、Unity 6 の Render Graph への組み込み方（`ScriptableRendererFeature` か、メッシュごとの `Graphics.DrawMesh`）
+- Unity 6 の Render Graph への組み込み方（`ScriptableRendererFeature` か、メッシュごとの `Graphics.DrawMesh`）
 - ネイティブライブラリの配布（git 管理、Release 添付、ビルドスクリプトのみ）
