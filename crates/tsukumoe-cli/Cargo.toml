@@ -16,6 +16,7 @@ name = "tsukumoe_cli"
 path = "src/lib.rs"
 
 [dependencies]
+tsukumoe-ai.workspace = true
 tsukumoe-core.workspace = true
 tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true

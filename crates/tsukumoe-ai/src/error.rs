@@ -33,6 +33,10 @@ pub enum AiError {
     UnknownFeature(String),
     /// A cloud provider was registered without a disclosure.
     MissingDisclosure,
+    /// A WAV file is malformed or unsupported.
+    Wav(String),
+    /// The lipsync analyzer rejected its configuration or sample rate.
+    Lipsync(String),
 }
 
 impl fmt::Display for AiError {
@@ -54,6 +58,8 @@ impl fmt::Display for AiError {
             Self::Io(m) => write!(f, "store I/O failed: {m}"),
             Self::UnknownFeature(n) => write!(f, "no provider registered for feature `{n}`"),
             Self::MissingDisclosure => write!(f, "cloud provider has no disclosure"),
+            Self::Wav(m) => write!(f, "invalid WAV: {m}"),
+            Self::Lipsync(m) => write!(f, "invalid lipsync setting: {m}"),
         }
     }
 }
