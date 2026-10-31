@@ -12,10 +12,12 @@
 pub mod error;
 pub mod hash;
 pub mod provider;
+pub mod registry;
 pub mod spec;
 pub mod store;
 
 pub use error::AiError;
 pub use provider::{Disclosure, Locality, Provider, Tensor};
+pub use registry::ProviderRegistry;
 pub use spec::{License, LicenseNotice, ModelSpec, parse_manifest};
 pub use store::{Fetcher, ModelStore, Status};
