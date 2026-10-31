@@ -2,7 +2,7 @@
 
 - REQ: REQ-RT-003（受入条件。PERF-003 の WASM 評価時間は M3-07）
 - 単位: M3-04
-- 状態: 計画
+- 状態: 段階 1 実装済み・ブラウザ検証は未実施（拡張が未接続だった）
 - 依存: M3-02
 - クレート: `tsukumoe-wasm`（新設。`wasm-bindgen`）、npm パッケージ `packages/tsukumoe-web/`
 
@@ -27,6 +27,25 @@
 - マスク（`textureLoad` と `gl_FragCoord` の Y 向き）が正しい。native の画像比較との差が 2/255 以内
 - gzip 後のサイズ、起動時間（wgpu の初期化とシェーダ変換）
 - 通れば段階 2、サイズか起動時間が許容外なら止めて報告（C への切り替えを相談）
+
+### 段階 1 の結果
+
+実装: `crates/tsukumoe-wasm`（`Player`: ロード、パラメータ、`update`、描画、画素の読み戻し）、検証ページと補助物は `crates/tsukumoe-wasm/examples/`（`build.sh`、`index.html`、`native_render.rs`、`mask_model.rs`）。`wasm-bindgen-cli` 0.2.130 と binaryen（wasm-opt）を `mise.toml` に固定した。`renderer.rs` の `base_vertex` は頂点バッファのオフセットに替え、native の既存テストは通る。
+
+測定済み（gzip -9 後の wasm。`opt-level=z`、`lto=fat`、`codegen-units=1`、`panic=abort`）:
+
+| 構成 | wasm-opt 前 | wasm-opt -Oz 後 |
+|---|---|---|
+| SIMD 有り | 933,096 | 801,238 |
+| SIMD 無し | 932,676 | 803,065 |
+
+- 既定の release（`opt-level=3`、LTO なし）は wasm-opt 後で 1,161,811 バイトとなり、予算（1MB）を超える。段階 2 でサイズ向けの profile を決める必要がある（`opt-level=s` は SIMD 有りで 881,920）
+- 基準モデル（`assets/reference-model`）にマスクは無い（`mesh_masks` が 0 件）。マスクの確認用に `examples/mask_model.rs` で通常・反転・アルファ傾斜つきのモデルを作る
+
+未実施（ブラウザ拡張が接続できず、ブラウザ操作が 3 回失敗した）:
+
+- WebGPU / WebGL2 での表示、マスクの native との差（2/255 以内）、起動時間、1 フレームの評価時間
+- 手順: `build.sh` でビルド → 静的サーバ → `index.html?model=mask&compare=1`（`&webgl=1` で WebGL2 強制、`&simd=0` で SIMD 無し）
 
 ### 段階 2: パッケージ化
 
