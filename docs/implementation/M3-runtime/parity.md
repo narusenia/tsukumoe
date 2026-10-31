@@ -21,7 +21,7 @@
 
 1. （完了）native の書き出し（画像と描画リスト JSON）を example で作り、ケース定義（`.tmod` と `update` の dt 列）を `tests/parity/` に置く。実装: `crates/tsukumoe-cli/examples/parity_export.rs`、モデルは `parity_fixture.rs`（パラメータ・モーション・表情・物理が動く fixture）と基準モデル、一括実行は `tests/parity/export.sh <out-dir>`
 2. （完了）比較器を作る。実装: `tsukumoe parity <a> <b>`（`crates/tsukumoe-cli/src/parity.rs`）
-3. WASM: Node で描画リスト JSON を出し、比較する。画像は Chrome の検証ページから出して比較する（手順を `mise run web:parity` にまとめる）
+3. WASM（描画リストの部分は完了、画像は未着手）: Node で描画リスト JSON を出し、比較する。実装: `packages/tsukumoe-web/test/parity-export.ts`、実行は `mise run web:parity`（`tests/parity/native-vs-wasm.sh`）。native 対 WASM の描画リストは全 11 ケースで最大差 1.8e-7（許容 1e-4）。native の書き出しは、WASM の `Model` が読み込み時に `update(0)` を 1 回呼ぶのに合わせ、最初の step の前に `update(0)` を呼ぶ（物理はこの 1 回の有無で結果が変わる）。画像は Chrome の検証ページから出して比較する（手順を `mise run web:parity` にまとめる）
 4. Unity: `TsukumoeCapture` に dt 列を渡せるようにし、全ケースの出力を比較する。golden を `tsukumoe-unity` に取り込む手順を `scripts/` に書く
 5. CI に native 対 WASM（描画リスト）と golden 一致のジョブを足す
 
