@@ -1,0 +1,2 @@
+{ "model": "reference.tmod", "size": [512, 160], "view": [0, 0, 73.6, 23],
+  "steps": [ { "params": { "ParamHead0": 0.5, "ParamHead4": 1, "ParamHair0": 0.5, "ParamHair5": 1, "ParamBody0": 0.5, "ParamBody6": 1, "ParamSkirt0": 0.5, "ParamSkirt7": 1 }, "dt": 0 } ] }

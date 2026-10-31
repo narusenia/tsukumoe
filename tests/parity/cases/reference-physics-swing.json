@@ -1,3 +1,0 @@
-{ "model": "reference.tmod", "size": [512, 160], "view": [0, 0, 73.6, 23],
-  "steps": [ { "params": { "ParamHead0": 1, "ParamHair0": 1, "ParamSkirt0": 1 }, "dt": 0.0166667, "repeat": 20 },
-              { "params": { "ParamHead0": 0, "ParamHair0": 0, "ParamSkirt0": 0 }, "dt": 0.0166667, "repeat": 8 } ] }
