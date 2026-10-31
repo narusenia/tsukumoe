@@ -6,7 +6,9 @@
      ?model=ref  &backend=webgl2|webgpu|auto  &simd=0
      &nogpu=1 hides navigator.gpu (the WebGL2 fallback of "auto")
      &compare=1 also compares a read-back of the frame with <model>.rgba
-     (premultiplied RGBA8, written by the native_render example). -->
+     (premultiplied RGBA8, written by the native_render example).
+     &bench=1 measures `update` (REQ-PERF-003): every parameter changes each
+     call, in 15 runs of 300 calls; the result has the median of the runs. -->
 <body style="background:#333;color:#eee;font:12px monospace">
 <div style="width:512px;height:512px;background:repeating-conic-gradient(#999 0 25%,#bbb 0 50%) 0 0/32px 32px">
   <canvas id="c" width="512" height="512" style="display:block"></canvas>
@@ -47,6 +49,33 @@ try {
       max = Math.max(max, worst); over2 += worst > 2 ? 1 : 0;
     }
     result.diff = { max, pixels_over_2: over2 };
+  }
+  if (q.get("bench") === "1") {
+    const m = player.model, n = m.parameters.length;
+    // Parameters move every call so nothing is cached, as in the native bench.
+    let t = 0;
+    const move = () => {
+      t = (t + 0.013) % 1;
+      for (let i = 0; i < n; i++) m.setParameter(i, i % 2 ? 1 - t : t);
+    };
+    const run = (f, calls) => {
+      const a = performance.now();
+      for (let i = 0; i < calls; i++) f();
+      return (performance.now() - a) / calls;
+    };
+    for (let i = 0; i < 200; i++) { move(); m.update(1 / 60); }
+    const both = [], moves = [];
+    for (let r = 0; r < 15; r++) {
+      both.push(run(() => { move(); m.update(1 / 60); }, 300));
+      moves.push(run(move, 300));
+    }
+    const median = (v) => [...v].sort((x, y) => x - y)[v.length >> 1];
+    result.bench = {
+      update_ms_median: +(median(both) - median(moves)).toFixed(4),
+      move_and_update_ms_median: +median(both).toFixed(4),
+      move_only_ms_median: +median(moves).toFixed(4),
+      runs_ms: both.map((v) => +v.toFixed(3)),
+    };
   }
   result.ok = true;
 } catch (e) {
