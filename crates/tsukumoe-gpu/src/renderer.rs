@@ -40,6 +40,10 @@ struct Params {
     pad: [u32; 2],
 }
 
+/// The spacing of per-drawable uniform slots: the largest offset alignment
+/// any backend asks for.
+const UNIFORM_STRIDE: usize = 256;
+
 struct Pipelines {
     /// `[blend mode][double sided]`
     main: [[wgpu::RenderPipeline; 2]; 3],
@@ -84,8 +88,8 @@ impl Renderer {
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
+                has_dynamic_offset: true,
+                min_binding_size: wgpu::BufferSize::new(size_of::<Params>() as u64),
             },
             count: None,
         };
@@ -390,21 +394,70 @@ impl Renderer {
             1.0 / (view[2] - view[0]),
             1.0 / (view[3] - view[1]),
         ];
-        let params_bind = |p: Params| {
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::bytes_of(&p),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.params_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buffer.as_entire_binding(),
-                }],
-            })
+        // Every drawable's parameters go into one buffer, a slot each at a
+        // dynamic offset, rather than a buffer and a bind group each. Slot 0
+        // is for the mask passes.
+        let slot = |n: usize| (n * UNIFORM_STRIDE) as u32;
+        let order = list.order();
+        let mut uniforms = vec![0u8; UNIFORM_STRIDE * (order.len() + 1)];
+        let mut put = |n: usize, p: Params| {
+            uniforms[n * UNIFORM_STRIDE..][..size_of::<Params>()]
+                .copy_from_slice(bytemuck::bytes_of(&p));
         };
+        put(
+            0,
+            Params {
+                view: view_params,
+                multiply: [1.0; 4],
+                screen: [0.0; 4],
+                opacity: 1.0,
+                mask_mode: 0,
+                pad: [0; 2],
+            },
+        );
+        for (i, &mesh) in order.iter().enumerate() {
+            let d = list.drawable(mesh as usize);
+            if d.opacity <= 0.0 || d.indices.is_empty() {
+                continue;
+            }
+            put(
+                i + 1,
+                Params {
+                    view: view_params,
+                    multiply: [
+                        d.multiply_color[0],
+                        d.multiply_color[1],
+                        d.multiply_color[2],
+                        1.0,
+                    ],
+                    screen: [d.screen_color[0], d.screen_color[1], d.screen_color[2], 0.0],
+                    opacity: d.opacity,
+                    mask_mode: match (!d.masks.is_empty(), d.mask_inverted) {
+                        (false, _) => 0,
+                        (true, false) => 1,
+                        (true, true) => 2,
+                    },
+                    pad: [0; 2],
+                },
+            );
+        }
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: &uniforms,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(size_of::<Params>() as u64),
+                }),
+            }],
+        });
         let mask = self.mask.as_ref().expect("mask ensured above");
 
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -432,11 +485,13 @@ impl Renderer {
             };
         let draw = |pass: &mut wgpu::RenderPass<'_>,
                     pipeline: &wgpu::RenderPipeline,
+                    offset: u32,
                     groups: &[&wgpu::BindGroup],
                     d: &Drawable| {
             pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, Some(&params), &[offset]);
             for (i, g) in groups.iter().enumerate() {
-                pass.set_bind_group(i as u32, Some(*g), &[]);
+                pass.set_bind_group(i as u32 + 1, Some(*g), &[]);
             }
             // The vertex offset goes into the buffer binding rather than into
             // `draw_indexed`'s base vertex, which WebGL2 does not have.
@@ -460,7 +515,7 @@ impl Renderer {
         // because its mask is drawn by passes of its own.
         let mut clear = options.clear;
         let mut main: Option<wgpu::RenderPass<'static>> = None;
-        for &mesh in list.order() {
+        for (position, &mesh) in order.iter().enumerate() {
             let d = list.drawable(mesh as usize);
             if !drawn(mesh) {
                 continue;
@@ -478,19 +533,12 @@ impl Renderer {
                     if md.indices.is_empty() {
                         continue;
                     }
-                    let params = params_bind(Params {
-                        view: view_params,
-                        multiply: [1.0; 4],
-                        screen: [0.0; 4],
-                        opacity: 1.0,
-                        mask_mode: 0,
-                        pad: [0; 2],
-                    });
                     let mut pass = begin_pass(&mut encoder, &mask.view, first);
                     draw(
                         &mut pass,
                         &self.pipelines.mask[usize::from(md.double_sided)],
-                        &[&params, mask_texture],
+                        slot(0),
+                        &[mask_texture],
                         &md,
                     );
                     first = false;
@@ -500,23 +548,6 @@ impl Renderer {
                     drop(begin_pass(&mut encoder, &mask.view, true));
                 }
             }
-            let params = params_bind(Params {
-                view: view_params,
-                multiply: [
-                    d.multiply_color[0],
-                    d.multiply_color[1],
-                    d.multiply_color[2],
-                    1.0,
-                ],
-                screen: [d.screen_color[0], d.screen_color[1], d.screen_color[2], 0.0],
-                opacity: d.opacity,
-                mask_mode: match (masked, d.mask_inverted) {
-                    (false, _) => 0,
-                    (true, false) => 1,
-                    (true, true) => 2,
-                },
-                pad: [0; 2],
-            });
             let mode = match d.blend_mode {
                 BlendMode::Normal => 0,
                 BlendMode::Additive => 1,
@@ -528,7 +559,8 @@ impl Renderer {
             draw(
                 pass,
                 &self.pipelines.main[mode][usize::from(d.double_sided)],
-                &[&params, texture, &mask.bind],
+                slot(position + 1),
+                &[texture, &mask.bind],
                 &d,
             );
         }
