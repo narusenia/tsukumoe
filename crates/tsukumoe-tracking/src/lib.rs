@@ -11,6 +11,7 @@
 
 pub mod frame;
 pub mod osc;
+pub mod post;
 pub mod vmc;
 
 pub use frame::{ARKIT_COUNT, ARKIT_NAMES, TrackingFrame, arkit_index};
