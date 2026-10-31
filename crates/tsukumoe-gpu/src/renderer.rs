@@ -90,6 +90,15 @@ impl Scratch {
 /// any backend asks for.
 const UNIFORM_STRIDE: usize = 256;
 
+/// What a render pass has bound so far (addresses, only compared).
+#[derive(Default)]
+struct Bound {
+    pipeline: usize,
+    texture: usize,
+    /// The index buffer and the mask group, which no draw of a pass changes.
+    fixed: bool,
+}
+
 struct Pipelines {
     /// `[blend mode][double sided]`
     main: [[wgpu::RenderPipeline; 2]; 3],
@@ -528,22 +537,36 @@ impl Renderer {
                     })
                     .forget_lifetime()
             };
+        // `bound` remembers what the pass already has, so a draw only sets
+        // what differs from the one before.
         let draw = |pass: &mut wgpu::RenderPass<'_>,
+                    bound: &mut Bound,
                     pipeline: &wgpu::RenderPipeline,
                     offset: u32,
                     groups: &[&wgpu::BindGroup],
                     d: &Drawable| {
-            pass.set_pipeline(pipeline);
+            let key = |r: &dyn std::any::Any| r as *const _ as *const () as usize;
+            if bound.pipeline != key(pipeline) {
+                pass.set_pipeline(pipeline);
+                bound.pipeline = key(pipeline);
+            }
             pass.set_bind_group(0, Some(&params), &[offset]);
-            for (i, g) in groups.iter().enumerate() {
-                pass.set_bind_group(i as u32 + 1, Some(*g), &[]);
+            if bound.texture != key(groups[0]) {
+                pass.set_bind_group(1, Some(groups[0]), &[]);
+                bound.texture = key(groups[0]);
+            }
+            if let (Some(g), false) = (groups.get(1), bound.fixed) {
+                pass.set_bind_group(2, Some(*g), &[]);
+            }
+            if !bound.fixed {
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                bound.fixed = true;
             }
             // The vertex offset goes into the buffer binding rather than into
             // `draw_indexed`'s base vertex, which WebGL2 does not have.
             let offset = d.vertex_start as u64 * 8;
             pass.set_vertex_buffer(0, positions.slice(offset..));
             pass.set_vertex_buffer(1, uvs.slice(offset..));
-            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             let first = d.index_start as u32;
             pass.draw_indexed(first..first + d.indices.len() as u32, 0, 0..1);
         };
@@ -559,7 +582,7 @@ impl Renderer {
         // Drawables that need no mask share one pass; a masked one ends it,
         // because its mask is drawn by passes of its own.
         let mut clear = options.clear;
-        let mut main: Option<wgpu::RenderPass<'static>> = None;
+        let mut main: Option<(wgpu::RenderPass<'static>, Bound)> = None;
         for (position, &mesh) in order.iter().enumerate() {
             let d = list.drawable(mesh as usize);
             if !drawn(mesh) {
@@ -581,6 +604,7 @@ impl Renderer {
                     let mut pass = begin_pass(&mut encoder, &mask.view, first);
                     draw(
                         &mut pass,
+                        &mut Bound::default(),
                         &self.pipelines.mask[usize::from(md.double_sided)],
                         slot(0),
                         &[mask_texture],
@@ -598,11 +622,15 @@ impl Renderer {
                 BlendMode::Additive => 1,
                 BlendMode::Multiply => 2,
             };
-            let pass = main.get_or_insert_with(|| {
-                begin_pass(&mut encoder, target_view, std::mem::take(&mut clear))
+            let (pass, bound) = main.get_or_insert_with(|| {
+                (
+                    begin_pass(&mut encoder, target_view, std::mem::take(&mut clear)),
+                    Bound::default(),
+                )
             });
             draw(
                 pass,
+                bound,
                 &self.pipelines.main[mode][usize::from(d.double_sided)],
                 slot(position + 1),
                 &[texture, &mask.bind],
