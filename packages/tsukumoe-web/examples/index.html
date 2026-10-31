@@ -4,6 +4,7 @@
 <!-- A check page, not part of the package. Serve the package directory (after
      `mise run web:build`) and a folder with <model>.tmod next to it:
      ?model=ref  &backend=webgl2|webgpu|auto  &simd=0
+     &nogpu=1 hides navigator.gpu (the WebGL2 fallback of "auto")
      &compare=1 also compares a read-back of the frame with <model>.rgba
      (premultiplied RGBA8, written by the native_render example). -->
 <body style="background:#333;color:#eee;font:12px monospace">
@@ -14,6 +15,7 @@
 <script type="module">
 import { createPlayer } from "./dist/index.js";
 const q = new URLSearchParams(location.search);
+if (q.get("nogpu") === "1") Object.defineProperty(navigator, "gpu", { value: undefined });
 const model = q.get("model") ?? "quad";
 const result = { model, backend_option: q.get("backend") ?? "auto" };
 const t0 = performance.now();
