@@ -1,15 +1,17 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! `tsukumoe convert | generate | validate | inspect | render | diff | parity`. See
-//! `docs/implementation/M1-core/cli.md`.
+//! `tsukumoe convert | generate | validate | inspect | render | diff | parity | lipsync`.
+//! See `docs/implementation/M1-core/cli.md` and `M4-vtuber/lipsync.md`.
 
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::json;
-use tsukumoe_cli::{generate, parity};
+use tsukumoe_ai::LipsyncConfig;
+use tsukumoe_ai::wav::{self, MAX_WAV_BYTES};
+use tsukumoe_cli::{generate, lipsync, parity};
 use tsukumoe_core::eval::Frame;
 use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
 use tsukumoe_format::{Project, read_model};
@@ -23,7 +25,10 @@ const USAGE: &str = "usage:
   tsukumoe render <project> -o <png> [--param NAME=VALUE]... [--size WxH] [--view X0,Y0,X1,Y1]
   tsukumoe diff <a.png> <b.png> [--tolerance N] [-o <png>]
   tsukumoe parity <a> <b> [--width N] [--pixel-tolerance N] [--number-tolerance X]
-      compares <a>.rgba / <a>.json with <b>.rgba / <b>.json (premultiplied RGBA8, draw-list JSON)";
+      compares <a>.rgba / <a>.json with <b>.rgba / <b>.json (premultiplied RGBA8, draw-list JSON)
+  tsukumoe lipsync <wav> -o <motion.json> [--fps N] [--tolerance X] [--config <json>] [--name NAME]
+      mouth motion (ParamMouthOpenY, ParamMouthForm) from speech; the output is a
+      project motion file (motions/<name>.json)";
 
 /// A failure: `Usage` exits 2, `Failed` exits 1.
 enum Fail {
@@ -431,6 +436,57 @@ fn parity(args: &[String]) -> Result<u8, Fail> {
     Ok(u8::from(!ok))
 }
 
+/// Speech audio to a mouth motion file. Prints a summary.
+fn lipsync(args: &[String]) -> Result<u8, Fail> {
+    let args = Args::parse(args, &["-o", "--fps", "--tolerance", "--config", "--name"])?;
+    let [input] = args.positional()?;
+    let Some(output) = args.last("-o") else {
+        return usage("lipsync needs -o <motion.json>");
+    };
+    let fps: f32 = match args.last("--fps") {
+        Some(f) => number(f, "--fps")?,
+        None => lipsync::DEFAULT_FPS,
+    };
+    let tolerance: f32 = match args.last("--tolerance") {
+        Some(t) => number(t, "--tolerance")?,
+        None => lipsync::DEFAULT_TOLERANCE,
+    };
+    let config = match args.last("--config") {
+        Some(path) => {
+            let text =
+                fs::read_to_string(path).map_err(|e| Fail::Failed(format!("{path}: {e}")))?;
+            LipsyncConfig::from_json(&text).map_err(|e| Fail::Failed(format!("{path}: {e}")))?
+        }
+        None => LipsyncConfig::default(),
+    };
+    let name = match args.last("--name") {
+        Some(n) => n.to_owned(),
+        None => Path::new(output)
+            .file_stem()
+            .map_or_else(|| "lipsync".into(), |s| s.to_string_lossy().into_owned()),
+    };
+    let fail = |e: String| Fail::Failed(format!("{input}: {e}"));
+    let size = fs::metadata(input).map_err(|e| fail(e.to_string()))?.len();
+    if size > MAX_WAV_BYTES as u64 {
+        return Err(fail("file is too large".into()));
+    }
+    let bytes = fs::read(input).map_err(|e| fail(e.to_string()))?;
+    let audio = wav::parse(&bytes).map_err(|e| fail(e.to_string()))?;
+    let motion = lipsync::motion(&audio, config, fps, tolerance, &name).map_err(fail)?;
+    write(output, &tsukumoe_format::to_json(&motion)?)?;
+    println!(
+        "{}",
+        json!({
+            "name": motion.name,
+            "duration": motion.duration,
+            "fps": motion.fps,
+            "curves": motion.curves.len(),
+            "points": motion.curves.iter().map(|c| c.segments.len() + 1).sum::<usize>(),
+        })
+    );
+    Ok(0)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
@@ -442,6 +498,7 @@ fn main() -> ExitCode {
             "render" => render(rest),
             "diff" => diff(rest),
             "parity" => parity(rest),
+            "lipsync" => lipsync(rest),
             other => usage(format!("unknown command {other:?}")),
         },
         None => usage("no command"),

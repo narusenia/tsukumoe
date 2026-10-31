@@ -3527,6 +3527,7 @@ dependencies = [
  "criterion",
  "serde",
  "serde_json",
+ "tsukumoe-ai",
  "tsukumoe-core",
  "tsukumoe-format",
  "tsukumoe-gpu",
