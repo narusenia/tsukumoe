@@ -63,3 +63,7 @@ run = "bash tests/parity/native-vs-wasm.sh target/parity"
 [tasks."web:parity-images"]
 description = "Native versus WASM draw lists and images (starts a local server; open the printed URL in Chrome; run web:build first)"
 run = "PARITY_IMAGES=1 bash tests/parity/native-vs-wasm.sh target/parity"
+
+[tasks."parity:golden"]
+description = "Native output of every parity case against tests/parity/golden (rewrite them with: bash tests/parity/golden.sh target/parity-golden --update)"
+run = "bash tests/parity/golden.sh target/parity-golden"

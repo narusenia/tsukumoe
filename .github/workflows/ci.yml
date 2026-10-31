@@ -87,6 +87,22 @@ jobs:
       - run: mise run web:build
       - run: mise run web:test
 
+  parity:
+    name: parity (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install_args: rust jq node github:wasm-bindgen/wasm-bindgen github:WebAssembly/binaryen
+      - uses: Swatinem/rust-cache@v2
+      # The native renderer needs a Vulkan adapter; lavapipe is a software one.
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+      - run: mise run web:build
+      # Native against WASM (draw lists, in Node), then native against the golden files.
+      - run: mise run web:parity
+      - run: mise run parity:golden
+
   deny:
     name: cargo deny
     runs-on: ubuntu-latest
