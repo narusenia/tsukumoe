@@ -408,29 +408,32 @@ impl Renderer {
         let mask = self.mask.as_ref().expect("mask ensured above");
 
         let mut encoder = device.create_command_encoder(&Default::default());
-        let pass = |encoder: &mut wgpu::CommandEncoder,
-                    view: &wgpu::TextureView,
-                    clear: bool,
+        let begin_pass =
+            |encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, clear: bool| {
+                encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: if clear {
+                                    wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                                } else {
+                                    wgpu::LoadOp::Load
+                                },
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        ..Default::default()
+                    })
+                    .forget_lifetime()
+            };
+        let draw = |pass: &mut wgpu::RenderPass<'_>,
                     pipeline: &wgpu::RenderPipeline,
                     groups: &[&wgpu::BindGroup],
                     d: &Drawable| {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear {
-                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
             pass.set_pipeline(pipeline);
             for (i, g) in groups.iter().enumerate() {
                 pass.set_bind_group(i as u32, Some(*g), &[]);
@@ -444,33 +447,28 @@ impl Renderer {
             let first = d.index_start as u32;
             pass.draw_indexed(first..first + d.indices.len() as u32, 0, 0..1);
         };
-        // An empty pass clears the target even when nothing is drawn.
-        drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target_view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: if options.clear {
-                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                    } else {
-                        wgpu::LoadOp::Load
-                    },
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        }));
+        let drawn = |mesh: u32| {
+            let d = list.drawable(mesh as usize);
+            d.opacity > 0.0 && !d.indices.is_empty()
+        };
+        // Nothing drawn: an empty pass still clears the target.
+        if !list.order().iter().any(|&m| drawn(m)) {
+            drop(begin_pass(&mut encoder, target_view, options.clear));
+        }
 
+        // Drawables that need no mask share one pass; a masked one ends it,
+        // because its mask is drawn by passes of its own.
+        let mut clear = options.clear;
+        let mut main: Option<wgpu::RenderPass<'static>> = None;
         for &mesh in list.order() {
             let d = list.drawable(mesh as usize);
-            if d.opacity <= 0.0 || d.indices.is_empty() {
+            if !drawn(mesh) {
                 continue;
             }
             let texture = &self.textures[d.texture as usize];
             let masked = !d.masks.is_empty();
             if masked {
+                main = None;
                 let mut first = true;
                 for &m in d.masks {
                     let md = list.drawable(m as usize);
@@ -488,10 +486,9 @@ impl Renderer {
                         mask_mode: 0,
                         pad: [0; 2],
                     });
-                    pass(
-                        &mut encoder,
-                        &mask.view,
-                        first,
+                    let mut pass = begin_pass(&mut encoder, &mask.view, first);
+                    draw(
+                        &mut pass,
                         &self.pipelines.mask[usize::from(md.double_sided)],
                         &[&params, mask_texture],
                         &md,
@@ -500,19 +497,7 @@ impl Renderer {
                 }
                 if first {
                     // No mask mesh has triangles: the mask value is 0 everywhere.
-                    drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &mask.view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        ..Default::default()
-                    }));
+                    drop(begin_pass(&mut encoder, &mask.view, true));
                 }
             }
             let params = params_bind(Params {
@@ -537,15 +522,17 @@ impl Renderer {
                 BlendMode::Additive => 1,
                 BlendMode::Multiply => 2,
             };
-            pass(
-                &mut encoder,
-                target_view,
-                false,
+            let pass = main.get_or_insert_with(|| {
+                begin_pass(&mut encoder, target_view, std::mem::take(&mut clear))
+            });
+            draw(
+                pass,
                 &self.pipelines.main[mode][usize::from(d.double_sided)],
                 &[&params, texture, &mask.bind],
                 &d,
             );
         }
+        drop(main);
         queue.submit([encoder.finish()]);
         Ok(())
     }
