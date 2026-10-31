@@ -1,7 +1,7 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! `tsukumoe convert | generate | validate | inspect | render | diff`. See
+//! `tsukumoe convert | generate | validate | inspect | render | diff | parity`. See
 //! `docs/implementation/M1-core/cli.md`.
 
 use std::fs;
@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::json;
-use tsukumoe_cli::generate;
+use tsukumoe_cli::{generate, parity};
 use tsukumoe_core::eval::Frame;
 use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
 use tsukumoe_format::{Project, read_model};
@@ -21,7 +21,9 @@ const USAGE: &str = "usage:
   tsukumoe validate <project>
   tsukumoe inspect <file.tmod>
   tsukumoe render <project> -o <png> [--param NAME=VALUE]... [--size WxH] [--view X0,Y0,X1,Y1]
-  tsukumoe diff <a.png> <b.png> [--tolerance N] [-o <png>]";
+  tsukumoe diff <a.png> <b.png> [--tolerance N] [-o <png>]
+  tsukumoe parity <a> <b> [--width N] [--pixel-tolerance N] [--number-tolerance X]
+      compares <a>.rgba / <a>.json with <b>.rgba / <b>.json (premultiplied RGBA8, draw-list JSON)";
 
 /// A failure: `Usage` exits 2, `Failed` exits 1.
 enum Fail {
@@ -367,6 +369,68 @@ fn diff(args: &[String]) -> Result<u8, Fail> {
     Ok(u8::from(!same))
 }
 
+/// Compares two parity captures (`<prefix>.rgba` and `<prefix>.json`). A file
+/// both sides lack is skipped; one that only a side has fails. Exits 1 when
+/// a tolerance is exceeded.
+fn parity(args: &[String]) -> Result<u8, Fail> {
+    let args = Args::parse(
+        args,
+        &["--width", "--pixel-tolerance", "--number-tolerance"],
+    )?;
+    let [a, b] = args.positional()?;
+    let width: Option<usize> = args
+        .last("--width")
+        .map(|w| number(w, "--width"))
+        .transpose()?;
+    let pixel_tolerance: u8 = match args.last("--pixel-tolerance") {
+        Some(t) => number(t, "--pixel-tolerance")?,
+        None => 2,
+    };
+    let number_tolerance: f32 = match args.last("--number-tolerance") {
+        Some(t) => number(t, "--number-tolerance")?,
+        None => 1e-4,
+    };
+    let read = |prefix: &str, ext: &str| -> Result<Option<Vec<u8>>, Fail> {
+        let path = format!("{prefix}.{ext}");
+        match fs::read(&path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Fail::Failed(format!("{path}: {e}"))),
+        }
+    };
+    let mut report = serde_json::Map::new();
+    let mut ok = true;
+    for ext in ["rgba", "json"] {
+        let (x, y) = (read(a, ext)?, read(b, ext)?);
+        let (x, y) = match (x, y) {
+            (Some(x), Some(y)) => (x, y),
+            (None, None) => continue,
+            _ => return Err(Fail::Failed(format!("only one side has the .{ext} file"))),
+        };
+        if ext == "rgba" {
+            let r = parity::compare_images(&x, &y, pixel_tolerance, width).map_err(Fail::Failed)?;
+            ok &= r.ok;
+            report.insert("image".into(), serde_json::to_value(r)?);
+        } else {
+            let parse = |bytes: &[u8], which: &str| {
+                serde_json::from_slice::<parity::DrawListFile>(bytes)
+                    .map_err(|e| Fail::Failed(format!("{which}.json: {e}")))
+            };
+            let r = parity::compare_draw_lists(&parse(&x, a)?, &parse(&y, b)?, number_tolerance);
+            ok &= r.ok;
+            report.insert("draw_list".into(), serde_json::to_value(r)?);
+        }
+    }
+    if report.is_empty() {
+        return Err(Fail::Failed(
+            "neither .rgba nor .json found on either side".into(),
+        ));
+    }
+    report.insert("ok".into(), ok.into());
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(u8::from(!ok))
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
@@ -377,6 +441,7 @@ fn main() -> ExitCode {
             "inspect" => inspect(rest),
             "render" => render(rest),
             "diff" => diff(rest),
+            "parity" => parity(rest),
             other => usage(format!("unknown command {other:?}")),
         },
         None => usage("no command"),

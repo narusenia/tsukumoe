@@ -1,0 +1,2 @@
+{ "model": "parity-fixture.tmod", "size": [512, 512], "view": [0, 0, 1.3, 1.3],
+  "steps": [ { "motion": "rise", "dt": 0.0166667, "repeat": 30 } ] }

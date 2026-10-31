@@ -45,3 +45,24 @@ Compared exactly (bit equality of `f32`) with the previous call of `evaluate` on
 ## Not in the draw list
 
 Visibility culling (opacity 0), mask buffer generation and texture binding belong to the renderer.
+
+## Capture format (cross-environment parity)
+
+Every environment (native, WASM, Unity) writes its draw list for comparison (`docs/implementation/M3-runtime/parity.md`) as one JSON file, next to the rendered image. The file is a snapshot of one frame, so it holds no change flags.
+
+```json
+{ "drawables": [ { "mesh": 0, "texture": 1, "blend_mode": 0, "double_sided": false,
+  "mask_inverted": false, "masks": [2], "opacity": 1.0, "draw_order": 500.0,
+  "multiply_color": [1, 1, 1], "screen_color": [0, 0, 0],
+  "positions": [0, 0, 1, 0], "uvs": [0, 1, 1, 1] } ] }
+```
+
+- `drawables` is in drawing order, back to front: element `i` is mesh `order[i]`.
+- `mesh` is the mesh index; `texture` the texture index; `blend_mode` is `0` Normal, `1` Additive, `2` Multiply; `masks` are mesh indices.
+- `opacity` is final (parents multiplied in), as in the table above; `draw_order`, `multiply_color` and `screen_color` are the evaluated values.
+- `positions` and `uvs` are this mesh's own vertices, `x, y` and `u, v` interleaved (the slice starting at `vertex_start`), in drawing space as evaluated, before any view transform.
+- Numbers are plain JSON numbers (`f32` values written so that they read back exactly); no `NaN` or infinity. Extra fields are ignored by the comparator.
+
+The image next to it is premultiplied RGBA8 with no header, top row first, row by row. Its size and view are part of the case, not of the file.
+
+Comparison (`tsukumoe parity <a> <b>`): `mesh`, `texture`, `blend_mode`, `double_sided`, `mask_inverted`, `masks`, the drawable count and the array lengths must be equal; all other numbers differ by at most 1e-4 absolute, pixels by at most 2/255 per channel (`rendering.md` section 5).
