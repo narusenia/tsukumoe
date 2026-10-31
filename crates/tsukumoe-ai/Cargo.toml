@@ -1,0 +1,16 @@
+[package]
+name = "tsukumoe-ai"
+description = "Inference provider abstraction for Tsukumoe: Provider trait, model manifest, verified weight store, cloud disclosure"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[lints]
+workspace = true
