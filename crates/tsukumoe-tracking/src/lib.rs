@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod euler;
 pub mod frame;
 pub mod osc;
 pub mod post;
