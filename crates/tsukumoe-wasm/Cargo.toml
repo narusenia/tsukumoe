@@ -1,0 +1,29 @@
+[package]
+name = "tsukumoe-wasm"
+description = "WebAssembly build of the Tsukumoe runtime and wgpu renderer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tsukumoe-core.workspace = true
+tsukumoe-runtime.workspace = true
+tsukumoe-gpu.workspace = true
+
+# Everything below is for wasm32 only; the crate is empty on other targets so
+# that `cargo build --workspace` still works.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The version must match the wasm-bindgen CLI pinned in mise.toml.
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Performance", "HtmlCanvasElement"] }
+wgpu = { workspace = true, features = ["webgl"] }
+
+[lints]
+workspace = true
