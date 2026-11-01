@@ -281,6 +281,40 @@ pub fn range_names(rows: &[Row], anchor: Option<&str>, target: &str) -> Vec<Stri
     range
 }
 
+/// The row to bring into view: the one of `selection` when it changed
+/// since the tree last saw it (a change made elsewhere). `None` when it did not
+/// change, or when the row is not among `rows` (hidden by the name filter, or not a row).
+pub fn scroll_row(
+    rows: &[Row],
+    selection: Option<&Selection>,
+    seen: Option<&Selection>,
+) -> Option<usize> {
+    let selection = selection?;
+    if Some(selection) == seen {
+        return None;
+    }
+    rows.iter().position(|r| selection_of(r) == *selection)
+}
+
+/// The scroll offset that shows row `index` of `total` (each `row_height`
+/// tall) in a panel `viewport` tall now scrolled to `offset`: `None` if the
+/// row is fully in view already, else the row centred, within the content.
+pub fn scroll_offset_for(
+    index: usize,
+    total: usize,
+    row_height: f32,
+    offset: f32,
+    viewport: f32,
+) -> Option<f32> {
+    let (top, bottom) = (index as f32 * row_height, (index + 1) as f32 * row_height);
+    if viewport > 0.0 && top >= offset && bottom <= offset + viewport {
+        return None;
+    }
+    let content = total as f32 * row_height;
+    let centred = top - (viewport - row_height).max(0.0) / 2.0;
+    Some(centred.clamp(0.0, (content - viewport).max(0.0)))
+}
+
 /// Draws the tree. Only the rows in view are built (`show_rows`), so a model
 /// with hundreds of meshes scrolls cheaply. Returns what the user asked for,
 /// to be sent through the editor's dispatcher. Meshes and deformers can be
@@ -301,101 +335,116 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         .map(|(_, n, _)| n.to_owned())
         .chain(model.rotations().iter().map(|(_, n, _)| n.to_owned()))
         .collect();
-    egui::ScrollArea::vertical().auto_shrink(false).show_rows(
-        ui,
-        row_height,
-        rows.len(),
-        |ui, range| {
-            for row in &rows[range] {
-                let selection = selection_of(row);
-                let icon = match row.kind {
-                    Kind::Part => Icon::Folder,
-                    Kind::Mesh => Icon::Image,
-                    Kind::Warp | Kind::Rotation => Icon::Settings,
-                };
-                ui.horizontal(|ui| {
-                    if row.dimmed {
-                        ui.set_opacity(0.45);
-                    }
-                    ui.add_space(row.depth as f32 * 12.0);
-                    if let Some(visible) = row.visible {
-                        let (eye, key) = if visible {
-                            (Icon::Eye, "tree-hide")
-                        } else {
-                            (Icon::EyeOff, "tree-show")
-                        };
-                        if icon_button(ui, eye, &tr(&ctx, key), Variant::Ghost).clicked() {
-                            outs.extend(toggle_command(row).map(Out::Command));
-                        }
-                    }
-                    let selected = view.is_selected(&selection);
-                    let response = selectable_row(ui, selected, Some(icon), &row.name);
-                    if response.clicked() {
-                        let modifiers = ui.input(|i| i.modifiers);
-                        match &selection {
-                            Selection::Mesh(n) if modifiers.command => view.toggle_mesh(n),
-                            Selection::Mesh(n) if modifiers.shift => {
-                                let from = view
-                                    .anchor
-                                    .clone()
-                                    .or_else(|| view.selected_meshes().last().cloned());
-                                let names = range_names(&all, from.as_deref(), n);
-                                view.select_meshes(names);
-                            }
-                            _ => view.select_only(selection),
-                        }
-                    }
-                    let Some(target) = target_of(row) else {
-                        return;
+    // A selection made elsewhere is scrolled to; one made by a click here
+    // is already in view (and `tree_seen` is brought up to date below).
+    let mut area = egui::ScrollArea::vertical().auto_shrink(false);
+    if let Some(index) = scroll_row(&all, view.selection.as_ref(), view.tree_seen.as_ref())
+        && let Some(offset) = scroll_offset_for(
+            index,
+            all.len(),
+            // `show_rows` puts the item spacing between the rows it counts.
+            row_height + ui.spacing().item_spacing.y,
+            view.tree_scroll.0,
+            view.tree_scroll.1,
+        )
+    {
+        area = area.vertical_scroll_offset(offset);
+    }
+    let scrolled = area.show_rows(ui, row_height, rows.len(), |ui, range| {
+        for row in &rows[range] {
+            let selection = selection_of(row);
+            let icon = match row.kind {
+                Kind::Part => Icon::Folder,
+                Kind::Mesh => Icon::Image,
+                Kind::Warp | Kind::Rotation => Icon::Settings,
+            };
+            ui.horizontal(|ui| {
+                if row.dimmed {
+                    ui.set_opacity(0.45);
+                }
+                ui.add_space(row.depth as f32 * 12.0);
+                if let Some(visible) = row.visible {
+                    let (eye, key) = if visible {
+                        (Icon::Eye, "tree-hide")
+                    } else {
+                        (Icon::EyeOff, "tree-show")
                     };
-                    // Drag a row onto a deformer row to hang it there.
-                    let response = response.interact(egui::Sense::click_and_drag());
-                    response.dnd_set_drag_payload(target.clone());
-                    if matches!(row.kind, Kind::Warp | Kind::Rotation) {
-                        if response.dnd_hover_payload::<Target>().is_some() {
-                            ui.painter().rect_stroke(
-                                response.rect,
-                                2.0,
-                                egui::Stroke::new(1.5, Theme::get(&ctx).colors.accent),
-                                egui::StrokeKind::Inside,
-                            );
-                        }
-                        if let Some(dropped) = response.dnd_release_payload::<Target>()
-                            && *dropped != target
-                        {
-                            outs.push(Out::Reparent((*dropped).clone(), Some(row.name.clone())));
-                        }
+                    if icon_button(ui, eye, &tr(&ctx, key), Variant::Ghost).clicked() {
+                        outs.extend(toggle_command(row).map(Out::Command));
                     }
-                    response.context_menu(|ui| {
-                        ui.menu_button(tr(&ctx, "tree-set-parent"), |ui| {
-                            for parent in deformers.iter().filter(|d| **d != row.name) {
-                                if ui.button(parent).clicked() {
-                                    outs.push(Out::Reparent(target.clone(), Some(parent.clone())));
-                                    ui.close();
-                                }
-                            }
-                        });
-                        let unparent = ui.add_enabled(
-                            row.parent.is_some(),
-                            egui::Button::new(tr(&ctx, "tree-unparent")),
-                        );
-                        if unparent.clicked() {
-                            outs.push(Out::Reparent(target.clone(), None));
-                            ui.close();
+                }
+                let selected = view.is_selected(&selection);
+                let response = selectable_row(ui, selected, Some(icon), &row.name);
+                if response.clicked() {
+                    let modifiers = ui.input(|i| i.modifiers);
+                    match &selection {
+                        Selection::Mesh(n) if modifiers.command => view.toggle_mesh(n),
+                        Selection::Mesh(n) if modifiers.shift => {
+                            let from = view
+                                .anchor
+                                .clone()
+                                .or_else(|| view.selected_meshes().last().cloned());
+                            let names = range_names(&all, from.as_deref(), n);
+                            view.select_meshes(names);
                         }
-                        if matches!(row.kind, Kind::Warp | Kind::Rotation)
-                            && ui.button(tr(&ctx, "tree-remove-deformer")).clicked()
-                        {
-                            outs.push(Out::Command(Command::RemoveDeformer {
-                                name: row.name.clone(),
-                            }));
-                            ui.close();
+                        _ => view.select_only(selection),
+                    }
+                }
+                let Some(target) = target_of(row) else {
+                    return;
+                };
+                // Drag a row onto a deformer row to hang it there.
+                let response = response.interact(egui::Sense::click_and_drag());
+                response.dnd_set_drag_payload(target.clone());
+                if matches!(row.kind, Kind::Warp | Kind::Rotation) {
+                    if response.dnd_hover_payload::<Target>().is_some() {
+                        ui.painter().rect_stroke(
+                            response.rect,
+                            2.0,
+                            egui::Stroke::new(1.5, Theme::get(&ctx).colors.accent),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if let Some(dropped) = response.dnd_release_payload::<Target>()
+                        && *dropped != target
+                    {
+                        outs.push(Out::Reparent((*dropped).clone(), Some(row.name.clone())));
+                    }
+                }
+                response.context_menu(|ui| {
+                    ui.menu_button(tr(&ctx, "tree-set-parent"), |ui| {
+                        for parent in deformers.iter().filter(|d| **d != row.name) {
+                            if ui.button(parent).clicked() {
+                                outs.push(Out::Reparent(target.clone(), Some(parent.clone())));
+                                ui.close();
+                            }
                         }
                     });
+                    let unparent = ui.add_enabled(
+                        row.parent.is_some(),
+                        egui::Button::new(tr(&ctx, "tree-unparent")),
+                    );
+                    if unparent.clicked() {
+                        outs.push(Out::Reparent(target.clone(), None));
+                        ui.close();
+                    }
+                    if matches!(row.kind, Kind::Warp | Kind::Rotation)
+                        && ui.button(tr(&ctx, "tree-remove-deformer")).clicked()
+                    {
+                        outs.push(Out::Command(Command::RemoveDeformer {
+                            name: row.name.clone(),
+                        }));
+                        ui.close();
+                    }
                 });
-            }
-        },
+            });
+        }
+    });
+    view.tree_scroll = (
+        scrolled.state.clamped_offset().y,
+        scrolled.inner_rect.height(),
     );
+    view.tree_seen = view.selection.clone();
     outs
 }
 
@@ -795,5 +844,113 @@ mod tests {
         harness.get_by_label("a2").click();
         harness.run();
         assert_eq!(harness.state().1.selected_meshes(), ["a2"]);
+    }
+
+    #[test]
+    fn the_row_to_scroll_to_follows_a_selection_made_elsewhere() {
+        let m = many_meshes();
+        let all = rows(&m, "");
+        let a2 = Selection::Mesh("a2".into());
+        let index = all.iter().position(|r| r.name == "a2").unwrap();
+        // Changed since the tree last saw it: its row.
+        assert_eq!(scroll_row(&all, Some(&a2), None), Some(index));
+        assert_eq!(
+            scroll_row(&all, Some(&a2), Some(&Selection::Mesh("b1".into()))),
+            Some(index)
+        );
+        // Unchanged (also what a click in the tree leaves behind): nothing.
+        assert_eq!(scroll_row(&all, Some(&a2), Some(&a2)), None);
+        assert_eq!(scroll_row(&all, None, Some(&a2)), None);
+        // Hidden by the filter, or not a row at all: nothing, and the filter stays.
+        let shown = rows(&m, "b");
+        assert_eq!(scroll_row(&shown, Some(&a2), None), None);
+        assert_eq!(
+            scroll_row(&all, Some(&Selection::Parameter("P".into())), None),
+            None
+        );
+    }
+
+    #[test]
+    fn the_offset_is_only_set_when_the_row_is_not_fully_in_view() {
+        let h = 26.0;
+        // 100 rows; the panel shows rows 10..20 (offset 260, 260 tall).
+        let (offset, view) = (260.0, 260.0);
+        assert_eq!(scroll_offset_for(10, 100, h, offset, view), None);
+        assert_eq!(scroll_offset_for(19, 100, h, offset, view), None);
+        // Partly cut off at the top or bottom: scrolled.
+        assert!(scroll_offset_for(9, 100, h, offset, view).is_some());
+        assert!(scroll_offset_for(20, 100, h, offset, view).is_some());
+        // Far away: the row ends up in the middle of the panel.
+        let to = scroll_offset_for(60, 100, h, offset, view).unwrap();
+        let top = 60.0 * h - to;
+        assert!(top > 0.0 && top + h < view, "{top}");
+        // Near the ends the offset stays inside the content.
+        assert_eq!(scroll_offset_for(0, 100, h, offset, view), Some(0.0));
+        let last = scroll_offset_for(99, 100, h, 0.0, view).unwrap();
+        assert!((last - (100.0 * h - view)).abs() < 1e-3);
+        // A panel not measured yet: always set.
+        assert!(scroll_offset_for(3, 100, h, 0.0, 0.0).is_some());
+    }
+
+    #[test]
+    fn a_selection_made_elsewhere_scrolls_the_big_tree_but_a_click_in_it_does_not() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut m = model();
+        for i in 0..631 {
+            m.apply(Command::AddMesh {
+                name: format!("m{i}"),
+                part: "Arm".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2],
+            })
+            .unwrap();
+        }
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(320.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, ViewState)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    show(ui, &state.0, &mut state.1);
+                },
+                (m, ViewState::default()),
+            );
+        harness.run();
+        assert!(
+            harness.query_by_label("m600").is_none(),
+            "far below the first rows"
+        );
+        // Selected in the viewport, say: the tree brings the row into view.
+        harness
+            .state_mut()
+            .1
+            .select_only(Selection::Mesh("m600".into()));
+        harness.run();
+        harness.run();
+        harness.get_by_label("m600");
+        let offset = harness.state().1.tree_scroll.0;
+        assert!(offset > 1000.0, "{offset}");
+        // A click on a row that is in view does not move the panel.
+        harness.get_by_label("m601").click();
+        harness.run();
+        harness.run();
+        assert_eq!(
+            harness.state().1.selection,
+            Some(Selection::Mesh("m601".into()))
+        );
+        assert!((harness.state().1.tree_scroll.0 - offset).abs() < 1e-3);
+        // A selection with no row (hidden by the filter) leaves the panel alone.
+        harness.state_mut().1.tree_filter = "m1".into();
+        harness.run();
+        let before = harness.state().1.tree_scroll.0;
+        harness
+            .state_mut()
+            .1
+            .select_only(Selection::Mesh("m500".into()));
+        harness.run();
+        harness.run();
+        assert_eq!(harness.state().1.tree_filter, "m1");
+        assert_eq!(harness.state().1.tree_scroll.0, before);
     }
 }

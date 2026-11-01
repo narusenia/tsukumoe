@@ -84,6 +84,11 @@ pub struct ViewState {
     others_of: Option<Selection>,
     /// Where a Shift click range starts.
     pub anchor: Option<String>,
+    /// The selection the tree last showed, to tell a change made elsewhere
+    /// (the viewport, a menu) from one made by a click on a tree row.
+    pub tree_seen: Option<Selection>,
+    /// Scroll offset and height of the tree panel as of the last frame.
+    pub tree_scroll: (f32, f32),
     pub tool: Tool,
     pub camera: Camera,
     /// Current parameter values by name; absent means the default.
