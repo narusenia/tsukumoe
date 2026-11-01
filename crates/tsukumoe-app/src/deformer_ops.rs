@@ -16,6 +16,7 @@ use tsukumoe_core::model::Model;
 use tsukumoe_core::rig::{DeformerRef, RotationKeyform};
 
 use crate::mesh_tool::Op;
+use crate::view::Selection;
 
 /// An element that can be put under a deformer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +35,8 @@ pub enum OpError {
     Flat,
     /// A deformer is flat where the conversion needs its inverse.
     Space(SpaceError),
+    /// Every deformer is in its initial shape already.
+    NoChange,
 }
 
 impl OpError {
@@ -44,6 +47,7 @@ impl OpError {
             Self::Missing(_) => "deformer-missing",
             Self::Flat => "deformer-flat-selection",
             Self::Space(_) => "deformer-flat-space",
+            Self::NoChange => "deformer-reset-nochange",
         }
     }
 }
@@ -266,6 +270,102 @@ fn batch(commands: Vec<Command>, label: String) -> Op {
     (Command::Batch { commands }, label)
 }
 
+/// The control points of an evenly spaced grid of `rows` x `columns` cells
+/// over `rect` (`[x0, y0, x1, y1]`), row by row.
+pub fn regular_grid(rect: [f32; 4], rows: u32, columns: u32) -> Vec<Point> {
+    let [x0, y0, x1, y1] = rect;
+    let mut points = Vec::with_capacity(((rows + 1) * (columns + 1)) as usize);
+    for r in 0..=rows {
+        for c in 0..=columns {
+            points.push([
+                x0 + (x1 - x0) * c as f32 / columns as f32,
+                y0 + (y1 - y0) * r as f32 / rows as f32,
+            ]);
+        }
+    }
+    points
+}
+
+/// Puts the base shape of the deformers in `items` back to its initial state:
+/// a warp's grid becomes the evenly spaced grid of its own bounding box (the
+/// cell counts stay), a rotation goes back to angle 0, scale 1 and no
+/// reflection (its origin stays). Deformers already so are left out; if all
+/// are, `NoChange`. One `Batch`, so one undo step; a deformer with keyforms
+/// makes the whole batch fail when applied, and nothing changes.
+pub fn reset(model: &Model, items: &[Selection]) -> Result<Op, OpError> {
+    let mut commands = Vec::new();
+    let mut names = Vec::new();
+    for item in items {
+        match item {
+            Selection::Warp(name) => {
+                let id = model
+                    .warps()
+                    .find(name)
+                    .ok_or_else(|| OpError::Missing(name.clone()))?;
+                let w = model.warps().get(id).expect("found above");
+                let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                for p in &w.base_points {
+                    b = [
+                        b[0].min(p[0]),
+                        b[1].min(p[1]),
+                        b[2].max(p[0]),
+                        b[3].max(p[1]),
+                    ];
+                }
+                let grid = regular_grid(b, w.rows, w.columns);
+                let same = grid.len() == w.base_points.len()
+                    && grid
+                        .iter()
+                        .zip(&w.base_points)
+                        .all(|(a, p)| (a[0] - p[0]).abs() <= 1e-6 && (a[1] - p[1]).abs() <= 1e-6);
+                if !same {
+                    commands.push(Command::SetWarpBasePoints {
+                        name: name.clone(),
+                        points: grid,
+                    });
+                    names.push(name.clone());
+                }
+            }
+            Selection::Rotation(name) => {
+                let id = model
+                    .rotations()
+                    .find(name)
+                    .ok_or_else(|| OpError::Missing(name.clone()))?;
+                let base = RotationBase::of(&model.rotations().get(id).expect("found above").base);
+                let initial = RotationBase {
+                    angle_degrees: 0.0,
+                    scale: 1.0,
+                    reflect_x: false,
+                    reflect_y: false,
+                    ..base
+                };
+                if initial != base {
+                    commands.push(Command::SetRotationBase {
+                        name: name.clone(),
+                        base: initial,
+                    });
+                    names.push(name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    let asked = items
+        .iter()
+        .any(|s| matches!(s, Selection::Warp(_) | Selection::Rotation(_)));
+    if !asked {
+        return Err(OpError::NothingSelected);
+    }
+    if commands.is_empty() {
+        return Err(OpError::NoChange);
+    }
+    let label = match names.as_slice() {
+        [one] => format!("deformer_reset: {one}"),
+        many => format!("deformer_reset: {} items", many.len()),
+    };
+    Ok(batch(commands, label))
+}
+
 /// A warp deformer of `rows` x `columns` cells around the targets (with a
 /// small margin), which become its children. One command, one undo step.
 pub fn create_warp(
@@ -280,21 +380,16 @@ pub fn create_warp(
         return Err(OpError::Flat);
     }
     let margin = 0.05;
-    let (x0, y0, x1, y1) = (
-        b[0] - w * margin,
-        b[1] - h * margin,
-        b[2] + w * margin,
-        b[3] + h * margin,
+    let points = regular_grid(
+        [
+            b[0] - w * margin,
+            b[1] - h * margin,
+            b[2] + w * margin,
+            b[3] + h * margin,
+        ],
+        rows,
+        columns,
     );
-    let mut points = Vec::with_capacity(((rows + 1) * (columns + 1)) as usize);
-    for r in 0..=rows {
-        for c in 0..=columns {
-            points.push([
-                x0 + (x1 - x0) * c as f32 / columns as f32,
-                y0 + (y1 - y0) * r as f32 / rows as f32,
-            ]);
-        }
-    }
     let name = unique_name(model, "Warp");
     let space = Space::Warp {
         grid: points
@@ -587,6 +682,234 @@ mod tests {
         assert_eq!(
             create_warp(&dot, &[mesh_target("Dot")], 2, 2),
             Err(OpError::Flat)
+        );
+    }
+
+    fn bent_warp_model() -> Model {
+        let mut m = built(vec![part(), mesh("Skin", 0.0)]);
+        let (c, _) = create_warp(&m, &[mesh_target("Skin")], 2, 3).unwrap();
+        m.apply(c).unwrap();
+        let id = m.warps().find("Warp").unwrap();
+        let mut points = m.warps().get(id).unwrap().base_points.clone();
+        points[4][0] += 0.4;
+        points[4][1] -= 0.3;
+        points[9][1] += 0.5;
+        m.apply(Command::SetWarpBasePoints {
+            name: "Warp".into(),
+            points,
+        })
+        .unwrap();
+        m
+    }
+
+    #[test]
+    fn resetting_a_warp_makes_its_grid_even_over_its_own_box_and_one_undo_brings_the_shape_back() {
+        let mut m = bent_warp_model();
+        let id = m.warps().find("Warp").unwrap();
+        let bent = m.warps().get(id).unwrap().base_points.clone();
+        let box_of = |p: &[Point]| {
+            p.iter()
+                .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, q| {
+                    [
+                        b[0].min(q[0]),
+                        b[1].min(q[1]),
+                        b[2].max(q[0]),
+                        b[3].max(q[1]),
+                    ]
+                })
+        };
+        let before_drawn = drawn(&m);
+        let (command, label) = reset(&m, &[Selection::Warp("Warp".into())]).unwrap();
+        assert_eq!(label, "deformer_reset: Warp");
+        let steps = m.history().commands().count();
+        m.apply(command).unwrap();
+        assert_eq!(m.history().commands().count(), steps + 1);
+        let w = m.warps().get(id).unwrap();
+        // The same cells, the same bounding box, evenly spaced.
+        assert_eq!((w.rows, w.columns, w.base_points.len()), (2, 3, 12));
+        assert_eq!(box_of(&w.base_points), box_of(&bent));
+        assert_eq!(w.base_points, regular_grid(box_of(&bent), 2, 3));
+        // The child is drawn where the new grid puts it (not where the bent one did).
+        assert_ne!(drawn(&m), before_drawn);
+        assert!(m.undo());
+        assert_eq!(m.warps().get(id).unwrap().base_points, bent);
+        same(&drawn(&m), &before_drawn);
+        // Reset twice: the second finds nothing to do.
+        m.redo();
+        assert_eq!(
+            reset(&m, &[Selection::Warp("Warp".into())]),
+            Err(OpError::NoChange)
+        );
+    }
+
+    #[test]
+    fn resetting_a_rotation_zeroes_the_angle_and_keeps_the_origin() {
+        let mut m = built(vec![part(), mesh("Skin", 1.0)]);
+        let (c, _) = create_rotation(&m, &[mesh_target("Skin")]).unwrap();
+        m.apply(c).unwrap();
+        m.apply(Command::SetRotationBase {
+            name: "Rotation".into(),
+            base: RotationBase {
+                origin: [2.0, 1.5],
+                angle_degrees: 40.0,
+                scale: 2.0,
+                reflect_x: true,
+                reflect_y: true,
+            },
+        })
+        .unwrap();
+        let (command, label) = reset(&m, &[Selection::Rotation("Rotation".into())]).unwrap();
+        assert_eq!(label, "deformer_reset: Rotation");
+        m.apply(command).unwrap();
+        let base = m
+            .rotations()
+            .get(m.rotations().find("Rotation").unwrap())
+            .unwrap()
+            .base;
+        assert_eq!(
+            (
+                base.origin,
+                base.angle_degrees,
+                base.scale,
+                base.reflect_x,
+                base.reflect_y
+            ),
+            ([2.0, 1.5], 0.0, 1.0, false, false)
+        );
+        assert_eq!(
+            reset(&m, &[Selection::Rotation("Rotation".into())]),
+            Err(OpError::NoChange)
+        );
+    }
+
+    #[test]
+    fn several_deformers_reset_in_one_batch_and_the_untouched_ones_are_left_out() {
+        let mut m = bent_warp_model();
+        let (c, _) = create_rotation(&m, &[Target::Deformer("Warp".into())]).unwrap();
+        m.apply(c).unwrap();
+        // Rotation is still initial: only the warp changes, and the label names it alone.
+        let both = [
+            Selection::Warp("Warp".into()),
+            Selection::Rotation("Rotation".into()),
+        ];
+        let (command, label) = reset(&m, &both).unwrap();
+        assert_eq!(label, "deformer_reset: Warp");
+        assert!(matches!(&command, Command::Batch { commands } if commands.len() == 1));
+        m.apply(command).unwrap();
+        // Turn the rotation too: now two go in one batch, one undo step.
+        m.apply(Command::SetRotationBase {
+            name: "Rotation".into(),
+            base: RotationBase {
+                origin: [0.0, 0.0],
+                angle_degrees: 30.0,
+                scale: 1.0,
+                reflect_x: false,
+                reflect_y: false,
+            },
+        })
+        .unwrap();
+        let id = m.warps().find("Warp").unwrap();
+        let mut points = m.warps().get(id).unwrap().base_points.clone();
+        points[2][0] += 0.2;
+        m.apply(Command::SetWarpBasePoints {
+            name: "Warp".into(),
+            points,
+        })
+        .unwrap();
+        let (command, label) = reset(&m, &both).unwrap();
+        assert_eq!(label, "deformer_reset: 2 items");
+        let steps = m.history().commands().count();
+        m.apply(command).unwrap();
+        assert_eq!(m.history().commands().count(), steps + 1);
+        assert!(m.undo());
+        assert_eq!(
+            m.rotations()
+                .get(m.rotations().find("Rotation").unwrap())
+                .unwrap()
+                .base
+                .angle_degrees,
+            30.0
+        );
+    }
+
+    #[test]
+    fn a_deformer_with_keyforms_refuses_and_the_whole_batch_changes_nothing() {
+        use tsukumoe_core::elements::{Parameter, Part};
+        use tsukumoe_core::keyform::{Axis, Binding, KeyformGrid};
+        use tsukumoe_core::model::ModelParts;
+        use tsukumoe_core::rig::{WarpDeformer, WarpKeyform};
+        let mut parts = ModelParts::default();
+        let p = parts
+            .parameters
+            .insert("P", Parameter::new(0.0, 1.0, 0.0))
+            .unwrap();
+        let part_id = parts.parts.insert("Part", Part::default()).unwrap();
+        let binding = parts.bindings.insert(
+            Binding::new(vec![Axis {
+                parameter: p,
+                keys: vec![0.0, 1.0],
+            }])
+            .unwrap(),
+        );
+        let bent = vec![[0.0, 0.0], [1.5, 0.2], [0.0, 1.0], [1.0, 1.2]];
+        let kf = WarpKeyform {
+            points: bent.clone(),
+            opacity: 1.0,
+        };
+        parts
+            .warps
+            .insert(
+                "Keyed",
+                WarpDeformer {
+                    part: part_id,
+                    parent: None,
+                    rows: 1,
+                    columns: 1,
+                    bezier: false,
+                    base_points: bent.clone(),
+                    keyforms: Some(KeyformGrid::new(binding, vec![kf.clone(), kf.clone()])),
+                },
+            )
+            .unwrap();
+        let mut m = Model::from_parts(parts).unwrap();
+        // A plain warp beside it that would change.
+        m.apply(Command::AddWarpDeformer {
+            name: "Plain".into(),
+            part: "Part".into(),
+            parent: None,
+            rows: 1,
+            columns: 1,
+            base_points: bent.clone(),
+        })
+        .unwrap();
+        let (command, _) = reset(
+            &m,
+            &[
+                Selection::Warp("Plain".into()),
+                Selection::Warp("Keyed".into()),
+            ],
+        )
+        .unwrap();
+        let steps = m.history().commands().count();
+        let err = m.apply(command).unwrap_err();
+        assert!(err.to_string().contains("keyforms"), "{err}");
+        // The batch is atomic: the plain warp kept its shape too.
+        assert_eq!(m.history().commands().count(), steps);
+        let plain = m.warps().get(m.warps().find("Plain").unwrap()).unwrap();
+        assert_eq!(plain.base_points, bent);
+    }
+
+    #[test]
+    fn nothing_selected_or_something_that_is_not_a_deformer_is_an_error() {
+        let m = bent_warp_model();
+        assert_eq!(reset(&m, &[]), Err(OpError::NothingSelected));
+        assert_eq!(
+            reset(&m, &[Selection::Mesh("Skin".into())]),
+            Err(OpError::NothingSelected)
+        );
+        assert_eq!(
+            reset(&m, &[Selection::Warp("Nope".into())]),
+            Err(OpError::Missing("Nope".into()))
         );
     }
 }
