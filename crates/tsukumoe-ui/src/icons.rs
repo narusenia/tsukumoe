@@ -74,6 +74,9 @@ icons! {
     Download => "download",
     Upload => "upload",
     Menu => "menu",
+    History => "history",
+    ListTree => "list-tree",
+    Sparkles => "sparkles",
 }
 
 impl Icon {

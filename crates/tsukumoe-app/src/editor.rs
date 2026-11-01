@@ -16,7 +16,8 @@ use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
 use tsukumoe_ui::dock::{self, PanelHost};
 use tsukumoe_ui::{
-    Arg, Keymap, Toasts, Tone, Variant, button, checkbox, hint, label, text_input, tr, tr_args,
+    Arg, Icon, Keymap, Toasts, Tone, Variant, button, checkbox, hint, label, text_input, tr,
+    tr_args,
 };
 
 use crate::panels::viewport::Viewport;
@@ -769,6 +770,19 @@ struct Panels<'a> {
 impl PanelHost for Panels<'_> {
     fn title(&self, ctx: &Context, id: &str) -> String {
         tr(ctx, &format!("panel-{id}"))
+    }
+
+    fn icon(&self, id: &str) -> Option<Icon> {
+        Some(match id {
+            "viewport" => Icon::Image,
+            "tree" => Icon::ListTree,
+            "parameters" => Icon::Sliders,
+            "inspector" => Icon::Info,
+            "history" => Icon::History,
+            "palette" => Icon::Search,
+            "ai_diff" => Icon::Sparkles,
+            _ => return None,
+        })
     }
 
     fn ui(&mut self, ui: &mut Ui, id: &str) {
