@@ -66,6 +66,8 @@ struct Host {
     applied: WindowMode,
     show_panel: bool,
     output: Output,
+    /// Why the output stopped; the next frame must not clear it.
+    output_error: Option<String>,
     /// The Syphon server name; editable while the output is off.
     #[cfg(all(feature = "syphon", target_os = "macos"))]
     syphon_name: String,
@@ -224,9 +226,9 @@ impl Host {
         match SyphonSink::new(self.syphon_name.trim()) {
             Ok(sink) => {
                 self.output.attach(Box::new(sink));
-                self.error = None;
+                self.output_error = None;
             }
-            Err(e) => self.error = Some(e),
+            Err(e) => self.output_error = Some(e),
         }
     }
 
@@ -264,9 +266,9 @@ impl Host {
         match SpoutSink::new(self.spout_name.trim()) {
             Ok(sink) => {
                 self.output.attach(Box::new(sink));
-                self.error = None;
+                self.output_error = None;
             }
-            Err(e) => self.error = Some(e),
+            Err(e) => self.output_error = Some(e),
         }
     }
 
@@ -392,7 +394,7 @@ impl Host {
             #[cfg(all(feature = "spout", windows))]
             self.spout_panel(ui);
             self.appearance(ui);
-            if let Some(e) = &self.error {
+            for e in self.error.iter().chain(&self.output_error) {
                 hint(ui, e.clone());
             }
             egui::ScrollArea::vertical()
@@ -513,7 +515,7 @@ impl Host {
                                 viewer.draw(&rs.device, &rs.queue, view, size)
                             })
                     {
-                        self.error = Some(e);
+                        self.output_error = Some(e);
                         self.output.detach();
                     }
                 }
@@ -646,6 +648,7 @@ pub fn run(mut options: Options) -> Result<(), String> {
                 applied: window,
                 show_panel: true,
                 output: Output::new(options.syphon_size.or(options.spout_size)),
+                output_error: None,
                 #[cfg(all(feature = "syphon", target_os = "macos"))]
                 syphon_name: options.syphon_name.clone(),
                 #[cfg(all(feature = "spout", windows))]
