@@ -16,6 +16,7 @@ mod native;
 pub mod panels;
 pub mod pie;
 pub mod project;
+pub mod psd_import;
 pub mod scene;
 pub mod settings;
 pub mod view;

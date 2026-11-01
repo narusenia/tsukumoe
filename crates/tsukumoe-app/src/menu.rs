@@ -35,6 +35,7 @@ pub const MENU: &[Def] = &[
             item("file.open", "menu-open"),
             item("file.save", "menu-save"),
             item("file.save-as", "menu-save-as"),
+            item("file.import-psd", "menu-import-psd"),
             Def::Sub {
                 label: "menu-recent",
                 items: &[Def::Recent],
@@ -84,7 +85,7 @@ pub struct State {
 impl State {
     pub fn enabled(&self, action: &str) -> bool {
         match action {
-            "file.save" | "file.save-as" => self.has_doc,
+            "file.save" | "file.save-as" | "file.import-psd" => self.has_doc,
             "edit.undo" => self.can_undo,
             "edit.redo" => self.can_redo,
             _ => true,
@@ -232,7 +233,13 @@ mod tests {
     #[test]
     fn items_follow_the_document_and_the_history() {
         let none = tree(&State::default(), &|_| None);
-        for a in ["file.save", "file.save-as", "edit.undo", "edit.redo"] {
+        for a in [
+            "file.save",
+            "file.save-as",
+            "file.import-psd",
+            "edit.undo",
+            "edit.redo",
+        ] {
             assert!(!is_enabled(&none, a), "{a}");
         }
         assert!(is_enabled(&none, "file.open"));

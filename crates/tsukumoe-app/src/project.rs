@@ -48,6 +48,12 @@ impl Document {
         &self.project
     }
 
+    /// Adds or replaces a file of the project (a texture, the PSD map). It is
+    /// written on the next save.
+    pub fn put_file(&mut self, path: &str, bytes: Vec<u8>) {
+        self.project.files.insert(path.to_owned(), bytes);
+    }
+
     pub fn name(&self) -> String {
         self.path.file_name().map_or_else(
             || self.path.display().to_string(),

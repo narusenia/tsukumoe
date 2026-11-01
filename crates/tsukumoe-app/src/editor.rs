@@ -23,6 +23,7 @@ use tsukumoe_ui::{
 
 use crate::panels::viewport::Viewport;
 use crate::project::{Document, Recent};
+use crate::psd_import::{PsdImport, RowKind, Stage};
 use crate::settings;
 use crate::view::ViewState;
 use crate::workspace::{Layouts, Preset, Workspace};
@@ -44,6 +45,8 @@ pub enum Dialog {
     Drag,
     /// The pie menu slots being edited.
     Pie,
+    /// File > Import PSD.
+    PsdImport(Box<PsdImport>),
 }
 
 pub struct Editor {
@@ -201,6 +204,11 @@ impl Editor {
             "file.save" => {
                 let r = self.save();
                 self.report(ctx, r, Some(tr(ctx, "app-saved")));
+            }
+            "file.import-psd" => {
+                if self.doc.is_some() {
+                    self.dialog = Some(Dialog::PsdImport(Box::default()));
+                }
             }
             "edit.undo" => drop(self.undo()),
             "edit.redo" => drop(self.redo()),
@@ -461,6 +469,14 @@ impl Editor {
             }
             return;
         }
+        if let Dialog::PsdImport(state) = &mut dialog {
+            let mut open = true;
+            self.psd_dialog(ctx, state, &mut open);
+            if open {
+                self.dialog = Some(dialog);
+            }
+            return;
+        }
         if let Dialog::Keymap(texts, error) = &mut dialog {
             let mut open = true;
             let changed = self.keymap_dialog(ctx, texts, error, &mut open);
@@ -480,7 +496,9 @@ impl Editor {
             Dialog::SaveAs(_) => (t("dialog-save-as-title"), "dialog-save-as"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
-            Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie => unreachable!("handled above"),
+            Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {
+                unreachable!("handled above")
+            }
         };
         tsukumoe_ui::dialog(ctx, id, &title, &mut open, |ui| {
             match &mut dialog {
@@ -495,7 +513,7 @@ impl Editor {
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
                 }
-                Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie => {}
+                Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {}
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -534,6 +552,150 @@ impl Editor {
         }
         if open {
             self.dialog = Some(dialog);
+        }
+    }
+}
+
+impl Editor {
+    /// File > Import PSD: path, then the diff with the choices, then one
+    /// command. The state is `PsdImport`; this only draws and forwards.
+    fn psd_dialog(&mut self, ctx: &Context, state: &mut PsdImport, open: &mut bool) {
+        let t = |key: &str| tr(ctx, key);
+        let Some(doc) = self.doc.as_mut() else {
+            *open = false;
+            return;
+        };
+        if state.poll(doc) || state.stage == Stage::Loading {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        let candidates = state.match_candidates();
+        let rows = state.rows();
+        let mut load = false;
+        let mut confirm = false;
+        let mut cancel = false;
+        let mut remove: Option<(String, bool)> = None;
+        let mut matched: Option<(String, Option<String>)> = None;
+        let none = t("psd-none");
+        tsukumoe_ui::dialog(ctx, "dialog-psd-import", &t("psd-title"), open, |ui| {
+            ui.set_min_width(520.0);
+            match state.stage {
+                Stage::Path => {
+                    let name = t("psd-path");
+                    let response = text_input(ui, &mut state.path, &name, &name);
+                    response.request_focus();
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        load = true;
+                    }
+                }
+                Stage::Loading => {
+                    hint(ui, t("psd-loading"));
+                }
+                Stage::Review => {
+                    hint(ui, state.path.clone());
+                    if rows.is_empty() {
+                        hint(ui, t("psd-nothing"));
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(320.0)
+                        .show(ui, |ui| {
+                            for row in &rows {
+                                ui.horizontal(|ui| {
+                                    let (key, tone) = match row.kind {
+                                        RowKind::AddGroup => ("psd-row-add-group", Tone::Success),
+                                        RowKind::AddLayer => ("psd-row-add-layer", Tone::Success),
+                                        RowKind::ImageChanged => ("psd-row-image", Tone::Warning),
+                                        RowKind::Updated => ("psd-row-updated", Tone::Neutral),
+                                        RowKind::Missing { .. } => ("psd-row-missing", Tone::Error),
+                                    };
+                                    tsukumoe_ui::badge(ui, &t(key), tone);
+                                    label(ui, row.key.clone());
+                                    if !row.detail.is_empty() {
+                                        hint(ui, row.detail.clone());
+                                    }
+                                    if let RowKind::Missing { remove: current } = row.kind {
+                                        let mut value = current;
+                                        if checkbox(ui, &mut value, &t("psd-remove")).changed() {
+                                            remove = Some((row.key.clone(), value));
+                                        }
+                                    }
+                                    let can_match = !candidates.is_empty()
+                                        && (row.kind == RowKind::AddLayer
+                                            || row.matched_with.is_some());
+                                    if can_match && state.is_new_layer(&row.key) {
+                                        let mut value = row.matched_with.clone();
+                                        let mut options: Vec<(Option<String>, String)> =
+                                            vec![(None, none.clone())];
+                                        options.extend(
+                                            candidates.iter().map(|c| (Some(c.clone()), c.clone())),
+                                        );
+                                        let refs: Vec<(Option<String>, &str)> = options
+                                            .iter()
+                                            .map(|(v, n)| (v.clone(), n.as_str()))
+                                            .collect();
+                                        if tsukumoe_ui::select(
+                                            ui,
+                                            ("psd-match", &row.key),
+                                            &t("psd-match"),
+                                            &mut value,
+                                            &refs,
+                                        )
+                                        .changed()
+                                        {
+                                            matched = Some((row.key.clone(), value));
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    for note in state.notes() {
+                        hint(ui, format!("{}: {}", note.layer, note.message));
+                    }
+                }
+            }
+            if let Some(e) = &state.error {
+                tsukumoe_ui::badge(ui, e, Tone::Error);
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                match state.stage {
+                    Stage::Path => load |= button(ui, &t("psd-read"), Variant::Primary).clicked(),
+                    Stage::Loading => {}
+                    Stage::Review => {
+                        ui.add_enabled_ui(state.can_confirm(), |ui| {
+                            confirm = button(ui, &t("psd-import"), Variant::Primary).clicked();
+                        });
+                    }
+                }
+                cancel = button(ui, &t("dialog-cancel"), Variant::Secondary).clicked();
+            });
+        });
+        if let Some((key, value)) = remove {
+            state.set_remove(&key, value, doc);
+        }
+        if let Some((new, old)) = matched {
+            state.set_match(&new, old.as_deref(), doc);
+        }
+        if load {
+            state.start();
+        }
+        if confirm {
+            match state.confirm(doc) {
+                Ok(()) => {
+                    let layers = state.plan().map_or(0, |p| p.items.len());
+                    self.toasts.push(
+                        ctx,
+                        Tone::Success,
+                        tr_args(ctx, "psd-imported", &[("count", Arg::from(layers))]),
+                    );
+                    // The viewport reads its textures when it is made.
+                    self.viewport = None;
+                    *open = false;
+                }
+                Err(e) => state.error = Some(e),
+            }
+        }
+        if cancel {
+            *open = false;
         }
     }
 }
@@ -952,6 +1114,44 @@ mod tests {
             )
             .unwrap();
         editor
+    }
+
+    #[test]
+    fn importing_a_psd_through_the_dialog_changes_the_document_in_one_step() {
+        use tsukumoe_psd::writer::{LayerSpec, Node, PsdSpec, write};
+        let dir = scratch("psd");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.psd");
+        let layer = Node::Layer(LayerSpec::solid("bg", 0, 0, 8, 8, [1, 2, 3, 255]));
+        std::fs::write(&file, write(&PsdSpec::new(8, 8, vec![layer]))).unwrap();
+
+        let ctx = Context::default();
+        let mut none = Editor::new(None);
+        assert!(none.run_action(&ctx, "file.import-psd"));
+        assert!(none.dialog.is_none(), "needs a project");
+
+        let mut editor = open_minimal();
+        assert!(editor.run_action(&ctx, "file.import-psd"));
+        let Some(Dialog::PsdImport(mut state)) = editor.dialog.take() else {
+            panic!("the dialog did not open");
+        };
+        state.path = file.display().to_string();
+        state.load_blocking(editor.doc.as_ref().unwrap());
+        assert!(state.can_confirm());
+        editor.dialog = Some(Dialog::PsdImport(state));
+        // The dialog draws in the review stage.
+        let mut harness = harness(editor);
+        harness.run();
+        let mut editor = harness.into_state();
+        let Some(Dialog::PsdImport(mut state)) = editor.dialog.take() else {
+            panic!("the dialog closed");
+        };
+        let doc = editor.doc.as_mut().unwrap();
+        let before = doc.dispatcher.model().meshes().len();
+        state.confirm(doc).unwrap();
+        assert_eq!(doc.dispatcher.model().meshes().len(), before + 1);
+        assert!(doc.dispatcher.undo());
+        assert_eq!(doc.dispatcher.model().meshes().len(), before);
     }
 
     #[test]

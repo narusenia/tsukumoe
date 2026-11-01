@@ -19,6 +19,7 @@ path = "src/main.rs"
 tsukumoe-core = { workspace = true, features = ["schema"] }
 tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true
+tsukumoe-psd.workspace = true
 tsukumoe-ui.workspace = true
 egui.workspace = true
 eframe.workspace = true
@@ -31,6 +32,7 @@ wgpu.workspace = true
 muda.workspace = true
 
 [dev-dependencies]
+tsukumoe-psd = { workspace = true, features = ["test-writer"] }
 tsukumoe-cli.workspace = true
 egui_kittest.workspace = true
 tsukumoe-i18n.workspace = true

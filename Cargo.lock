@@ -3877,6 +3877,7 @@ dependencies = [
  "tsukumoe-format",
  "tsukumoe-gpu",
  "tsukumoe-i18n",
+ "tsukumoe-psd",
  "tsukumoe-ui",
  "wgpu",
 ]
