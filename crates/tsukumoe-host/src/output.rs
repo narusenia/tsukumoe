@@ -6,6 +6,14 @@
 //! texture, at which size, and when. Syphon is one sink; others (a virtual
 //! camera, Spout2) plug into the same trait.
 
+#[cfg(all(feature = "syphon", target_os = "macos"))]
+mod syphon;
+#[cfg(all(feature = "syphon", target_os = "macos"))]
+pub use syphon::SyphonSink;
+
+/// Whether this build can publish through Syphon.
+pub const SYPHON_AVAILABLE: bool = cfg!(all(feature = "syphon", target_os = "macos"));
+
 /// What a sink is doing, for the settings panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SinkStatus {
