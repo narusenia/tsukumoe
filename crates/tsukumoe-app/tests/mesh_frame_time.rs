@@ -142,6 +142,62 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     let big = tsukumoe_core::mesh_edit::fill_grid(&geometry, 64, 64);
     let grid_big = t0.elapsed();
     std::hint::black_box(&big);
+    // Contour mesh from a 1024 x 1024 alpha (a blob with a notch and a second
+    // island), from the extraction to the command applied: one key press.
+    let alpha: Vec<u8> = (0..1024 * 1024)
+        .map(|i| {
+            let (x, y) = ((i % 1024) as f32, (i / 1024) as f32);
+            let blob = (x - 450.0).hypot(y - 500.0) < 380.0 + 40.0 * (x * 0.05).sin();
+            let notch = (x - 450.0).hypot(y - 150.0) < 90.0;
+            let island = (x - 900.0).hypot(y - 900.0) < 90.0;
+            if (blob && !notch) || island { 255 } else { 0 }
+        })
+        .collect();
+    let quad = tsukumoe_core::mesh_edit::Geometry {
+        positions: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        indices: vec![0, 1, 2, 0, 2, 3],
+    };
+    let mut contour_model = tsukumoe_core::model::Model::new();
+    contour_model
+        .apply(tsukumoe_core::command::Command::AddPart {
+            name: "P".into(),
+            parent: None,
+        })
+        .unwrap();
+    contour_model
+        .apply(tsukumoe_core::command::Command::AddMesh {
+            name: "Q".into(),
+            part: "P".into(),
+            positions: quad.positions.clone(),
+            uvs: quad.uvs.clone(),
+            indices: quad.indices.clone(),
+        })
+        .unwrap();
+    let mut contour_dispatcher = Dispatcher::new(contour_model);
+    let mut contour_tool = MeshTool::default();
+    let image = tsukumoe_app::mesh_tool::AlphaImage {
+        width: 1024,
+        height: 1024,
+        data: alpha,
+    };
+    let t0 = Instant::now();
+    let (command, label) = contour_tool.contour_mesh("Q", &quad, Some(&image)).unwrap();
+    contour_dispatcher
+        .submit_labeled(command, Some(label))
+        .unwrap();
+    let contour = t0.elapsed();
+    let made = contour_dispatcher
+        .model()
+        .meshes()
+        .get(contour_dispatcher.model().meshes().find("Q").unwrap())
+        .unwrap();
+    eprintln!(
+        "mesh_frame_time: contour 1024x1024 {:.1} ms ({} vertices, {} triangles)",
+        contour.as_secs_f64() * 1e3,
+        made.positions.len(),
+        made.indices.len() / 3
+    );
     eprintln!(
         "mesh_frame_time: fill_grid 4x4 {:.2} ms, 64x64 {:.2} ms",
         grid.as_secs_f64() * 1e3,
@@ -166,6 +222,10 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     if !cfg!(debug_assertions) {
         assert!(p(0.99) <= BUDGET, "p99 {:?} is over the budget", p(0.99));
         assert!(grid <= BUDGET, "fill_grid 4x4 {grid:?} is over the budget");
+        assert!(
+            contour <= Duration::from_millis(100),
+            "contour {contour:?} is over 100 ms"
+        );
         assert!(
             delaunay <= BUDGET,
             "retriangulate {delaunay:?} is over the budget"

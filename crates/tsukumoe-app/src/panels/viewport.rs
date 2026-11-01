@@ -13,7 +13,7 @@ use egui::{
     Event, MouseWheelSource, MouseWheelUnit, PointerButton, Rect, Sense, TextureId, Ui, pos2,
 };
 use tsukumoe_gpu::{DrawOptions, Renderer, Texture};
-use tsukumoe_ui::{Theme, hint, tr};
+use tsukumoe_ui::{Keymap, Theme, hint, tr};
 
 use crate::actions::Tool;
 use crate::drag::DragAssignment;
@@ -158,6 +158,7 @@ impl Viewport {
 
     /// Draws the viewport into the free space of `ui`; returns its response and
     /// what the mesh edit tool asks for (commands to send, or why it cannot).
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -166,7 +167,12 @@ impl Viewport {
         view: &mut ViewState,
         drag: &DragAssignment,
         mesh: &mut MeshTool,
-    ) -> (egui::Response, Vec<Result<Op, ToolError>>) {
+        keymap: &Keymap,
+    ) -> (
+        egui::Response,
+        Vec<Result<Op, ToolError>>,
+        Vec<&'static str>,
+    ) {
         let avail = ui.available_size();
         let ppp = ui.ctx().pixels_per_point();
         let size = (
@@ -266,15 +272,15 @@ impl Viewport {
                 egui::Color32::WHITE,
             );
         }
-        let ops = if view.tool == Tool::Mesh {
-            self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size)
+        let (ops, actions) = if view.tool == Tool::Mesh {
+            self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size, keymap)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }
-        (response, ops)
+        (response, ops, actions)
     }
 
     /// The mesh edit tool for one frame: pointer input, then the overlay.
@@ -289,10 +295,12 @@ impl Viewport {
         drag: &DragAssignment,
         tool: &mut MeshTool,
         size: (u32, u32),
-    ) -> Vec<Result<Op, ToolError>> {
+        keymap: &Keymap,
+    ) -> (Vec<Result<Op, ToolError>>, Vec<&'static str>) {
         let mut ops = Vec::new();
+        let mut actions = Vec::new();
         let Some(scene) = &self.scene else {
-            return ops;
+            return (ops, actions);
         };
         let theme = Theme::get(ui.ctx());
         let painter = ui.painter_at(rect);
@@ -372,6 +380,23 @@ impl Viewport {
         if mesh.is_some() {
             mesh_overlay::grid_options(ui.ctx(), rect, tool);
         }
+        // The right-click menu: a vertex or edge under the pointer is selected
+        // first, so the menu acts on it. Right click is not used for panning.
+        if let Some((_, m)) = &mesh {
+            if response.secondary_clicked()
+                && let Some(at) = arrow(response.interact_pointer_pos())
+            {
+                tool.context_select(&m.positions, &m.indices, &mapper, at);
+            }
+            let ctx = ui.ctx().clone();
+            response.context_menu(|ui| {
+                let shortcut = |a: &str| keymap.shortcut_text(&ctx, a);
+                if let Some(action) = mesh_overlay::menu_ui(ui, tool, &shortcut) {
+                    actions.push(action);
+                    ui.close();
+                }
+            });
+        }
         match &mesh {
             Some((_, m)) => {
                 let preview = tool.preview(&m.positions, &mapper);
@@ -388,7 +413,7 @@ impl Viewport {
             }
             None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),
         }
-        ops
+        (ops, actions)
     }
 
     /// Modifier + drag moves the assigned parameters (view state only).

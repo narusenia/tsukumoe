@@ -254,6 +254,19 @@ impl Editor {
             "mesh.connect" => self.mesh_tool.connect_selected(&name, &g),
             "mesh.retriangulate" => self.mesh_tool.retriangulate(&name, &g),
             "mesh.fill-grid" => self.mesh_tool.fill_grid(&name, &g),
+            "mesh.contour" => {
+                let alpha = self.doc.as_ref().and_then(|d| {
+                    let model = d.dispatcher.model();
+                    let texture = model.meshes().get(model.meshes().find(&name)?)?.texture;
+                    let (width, height, data) = d.texture_alpha(texture).ok()?;
+                    Some(mesh_tool::AlphaImage {
+                        width,
+                        height,
+                        data,
+                    })
+                });
+                self.mesh_tool.contour_mesh(&name, &g, alpha.as_ref())
+            }
             _ => self.mesh_tool.flip_selected(&name, &g),
         };
         self.apply_mesh_op(ctx, op);
@@ -338,7 +351,8 @@ impl Editor {
             | "mesh.connect"
             | "mesh.flip-edge"
             | "mesh.retriangulate"
-            | "mesh.fill-grid" => {
+            | "mesh.fill-grid"
+            | "mesh.contour" => {
                 self.run_mesh_action(ctx, action);
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
@@ -1292,17 +1306,21 @@ impl PanelHost for Panels<'_> {
                             _ => None,
                         };
                         editor.mesh_tool.set_mesh(target);
-                        let (response, ops) = vp.show(
+                        let (response, ops, actions) = vp.show(
                             ui,
                             rs,
                             doc,
                             &mut editor.view,
                             &editor.drag,
                             &mut editor.mesh_tool,
+                            &editor.keymap,
                         );
                         editor.viewport_hovered = response.hovered();
                         for op in ops {
                             editor.apply_mesh_op(&ctx, op);
+                        }
+                        for action in actions {
+                            editor.run_action(&ctx, action);
                         }
                     }
                 }
@@ -1586,6 +1604,11 @@ mod tests {
         assert_eq!(count(d), 8);
         assert!(d.undo());
         assert_eq!(count(d), 9);
+        // C needs the texture of the mesh; the test project has none, so it
+        // says so and sends nothing.
+        let before = editor.doc.as_ref().unwrap().dispatcher.log().len();
+        assert!(editor.run_action(&ctx, "mesh.contour"));
+        assert_eq!(editor.doc.as_ref().unwrap().dispatcher.log().len(), before);
         // G fills a grid: one more step, named, and one undo returns.
         assert!(editor.run_action(&ctx, "mesh.fill-grid"));
         let d = &mut editor.doc.as_mut().unwrap().dispatcher;
@@ -1607,6 +1630,15 @@ mod tests {
         // D outside the mesh tool still picks the deformer tool.
         assert!(editor.run_action(&ctx, "mesh.retriangulate"));
         assert_eq!(editor.view.tool, Tool::Deformer);
+    }
+
+    #[test]
+    fn every_menu_action_is_a_known_action() {
+        let ctx = Context::default();
+        let mut editor = open_minimal();
+        for action in crate::mesh_tool::MENU_ACTIONS {
+            assert!(editor.run_action(&ctx, action), "{action}");
+        }
     }
 
     #[test]

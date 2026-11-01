@@ -105,11 +105,20 @@ pub fn caption(painter: &Painter, theme: &Theme, rect: Rect, text: &str) {
     );
 }
 
+fn float(v: &mut f32, max: f32) -> egui::DragValue<'_> {
+    egui::DragValue::new(v)
+        .range(0.0..=max)
+        .speed(0.1)
+        .max_decimals(1)
+}
+
 /// The small options box in the top right corner: columns and rows of the
-/// grid `mesh.fill-grid` lays. The values live in the tool, not in the model.
+/// grid `mesh.fill-grid` lays, and the settings of `mesh.contour`. The values
+/// live in the tool, not in the model.
 pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
     let theme = Theme::get(ctx);
     let m = theme.metrics;
+    let t = |key: &str| tsukumoe_ui::tr(ctx, key);
     egui::Area::new(egui::Id::unique("tsukumoe-mesh-grid-options"))
         .fixed_pos(rect.right_top() + vec2(-8.0, 8.0))
         .pivot(Align2::RIGHT_TOP)
@@ -122,14 +131,106 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                 .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(tsukumoe_ui::tr(ctx, "mesh-edit-grid"));
+                        ui.label(t("mesh-edit-grid"));
                         let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
                         ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
-                            .accessible_name(tsukumoe_ui::tr(ctx, "mesh-edit-grid-cols"));
+                            .accessible_name(t("mesh-edit-grid-cols"));
                         ui.label("\u{d7}");
                         ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
-                            .accessible_name(tsukumoe_ui::tr(ctx, "mesh-edit-grid-rows"));
+                            .accessible_name(t("mesh-edit-grid-rows"));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(t("mesh-edit-contour"));
+                        let c = &mut tool.contour;
+                        let fields = [
+                            (
+                                ui.add(egui::DragValue::new(&mut c.threshold)),
+                                "mesh-edit-contour-threshold",
+                            ),
+                            (
+                                ui.add(float(&mut c.simplify, 50.0)),
+                                "mesh-edit-contour-simplify",
+                            ),
+                            (
+                                ui.add(float(&mut c.offset, 50.0)),
+                                "mesh-edit-contour-offset",
+                            ),
+                            (
+                                ui.add(float(&mut c.spacing, 512.0)),
+                                "mesh-edit-contour-spacing",
+                            ),
+                        ];
+                        for (response, key) in fields {
+                            response.accessible_name(t(key)).on_hover_text(t(key));
+                        }
+                        // The spacing is 0 (none) or at least 4.
+                        if c.spacing > 0.0 && c.spacing < 4.0 {
+                            c.spacing = 4.0;
+                        }
                     });
                 });
         });
+}
+
+/// The items of the right-click menu: one button per action of
+/// [`crate::mesh_tool::MENU_ACTIONS`], disabled when the selection does not
+/// fit, with its shortcut on the right. Returns the action that was clicked.
+pub fn menu_ui(
+    ui: &mut egui::Ui,
+    tool: &MeshTool,
+    shortcut: &dyn Fn(&str) -> Option<String>,
+) -> Option<&'static str> {
+    let ctx = ui.ctx().clone();
+    let mut chosen = None;
+    for action in crate::mesh_tool::MENU_ACTIONS {
+        let label = tsukumoe_ui::tr(&ctx, &crate::actions::label_key(action));
+        let mut button = egui::Button::new(label);
+        if let Some(keys) = shortcut(action) {
+            button = button.shortcut_text(keys);
+        }
+        if ui.add_enabled(tool.menu_enabled(action), button).clicked() {
+            chosen = Some(action);
+        }
+    }
+    chosen
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mesh_tool::MENU_ACTIONS;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use tsukumoe_i18n::{I18n, Language};
+
+    fn menu_harness(tool: MeshTool) -> Harness<'static, (MeshTool, Option<&'static str>)> {
+        Harness::builder()
+            .with_size(vec2(420.0, 220.0))
+            .build_ui_state(
+                |ui, (tool, chosen): &mut (MeshTool, Option<&'static str>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    if let Some(action) = menu_ui(ui, tool, &|_| None) {
+                        *chosen = Some(action);
+                    }
+                },
+                (tool, None),
+            )
+    }
+
+    #[test]
+    fn each_menu_item_sends_its_action_and_disabled_ones_send_nothing() {
+        let t = I18n::new(Language::En);
+        let label = |a: &str| t.tr(&crate::actions::label_key(a));
+        for action in MENU_ACTIONS {
+            assert!(crate::actions::ACTIONS.contains(&action), "{action}");
+            // The whole-mesh items are enabled with nothing selected.
+            let mut harness = menu_harness(MeshTool::default());
+            harness.run();
+            harness.get_by_label(&label(action)).click();
+            harness.run();
+            let expected = MeshTool::default().menu_enabled(action).then_some(action);
+            assert_eq!(harness.state().1, expected, "{action}");
+        }
+    }
 }
