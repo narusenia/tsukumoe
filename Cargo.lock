@@ -3823,6 +3823,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsukumoe-app"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_extras",
+ "egui_kittest",
+ "pollster 0.4.0",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tsukumoe-cli",
+ "tsukumoe-core",
+ "tsukumoe-format",
+ "tsukumoe-gpu",
+ "tsukumoe-i18n",
+ "tsukumoe-ui",
+ "wgpu",
+]
+
+[[package]]
 name = "tsukumoe-cli"
 version = "0.1.0"
 dependencies = [

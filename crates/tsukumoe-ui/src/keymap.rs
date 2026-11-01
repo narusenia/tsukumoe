@@ -91,6 +91,33 @@ impl Keymap {
         Ok(())
     }
 
+    /// Removes the binding of `action` in `context`; false if there was none.
+    pub fn unbind(&mut self, action: &str, context: Option<&str>) -> bool {
+        let before = self.bindings.len();
+        self.bindings
+            .retain(|b| !(b.action == action && b.context.as_deref() == context));
+        self.bindings.len() != before
+    }
+
+    /// The shortcut of `action` (the global binding first), if any.
+    pub fn shortcut(&self, action: &str) -> Option<KeyboardShortcut> {
+        self.bindings
+            .iter()
+            .filter(|b| b.action == action)
+            .min_by_key(|b| b.context.is_some())
+            .map(|b| b.shortcut)
+    }
+
+    /// The text [`parse_shortcut`] reads back (`Mod+Shift+Z`) for the binding
+    /// of `action` in `context`.
+    pub fn keys_text(&self, action: &str, context: Option<&str>) -> Option<String> {
+        let b = self
+            .bindings
+            .iter()
+            .find(|b| b.action == action && b.context.as_deref() == context)?;
+        Some(shortcut_keys(&b.shortcut))
+    }
+
     pub fn from_json(json: &str) -> Result<Self, String> {
         let file: KeymapFile = serde_json::from_str(json).map_err(|e| e.to_string())?;
         let mut map = Self::new();
@@ -101,14 +128,14 @@ impl Keymap {
     }
 
     /// The keymap as JSON text, in binding order.
-    pub fn to_json(&self, ctx: &Context) -> String {
+    pub fn to_json(&self, _ctx: &Context) -> String {
         let bindings = self
             .bindings
             .iter()
             .map(|b| BindingFile {
                 action: b.action.clone(),
                 context: b.context.clone(),
-                keys: shortcut_keys(&b.shortcut, ctx),
+                keys: shortcut_keys(&b.shortcut),
             })
             .collect();
         serde_json::to_string_pretty(&KeymapFile { bindings }).expect("keymap serializes")
@@ -171,7 +198,7 @@ impl Keymap {
 }
 
 /// The text form of a shortcut that [`parse_shortcut`] reads back.
-fn shortcut_keys(s: &KeyboardShortcut, _ctx: &Context) -> String {
+fn shortcut_keys(s: &KeyboardShortcut) -> String {
     let m = s.modifiers;
     let mut parts = Vec::new();
     if m.command {
@@ -293,6 +320,20 @@ mod tests {
         ] {
             assert!(Keymap::from_json(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn unbind_and_lookup() {
+        let mut k = sample();
+        assert_eq!(k.keys_text("edit.undo", None).as_deref(), Some("Mod+Z"));
+        assert!(k.shortcut("edit.undo").is_some());
+        assert!(k.unbind("edit.undo", None));
+        assert!(!k.unbind("edit.undo", None));
+        assert!(k.shortcut("edit.undo").is_none());
+        assert_eq!(
+            k.keys_text("tool.pan", Some("viewport")).as_deref(),
+            Some("Space")
+        );
     }
 
     #[test]

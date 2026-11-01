@@ -7,10 +7,12 @@
 //! `docs/specifications/ui-library.md` has the rules for adding one.
 
 mod components;
+pub mod dock;
 mod font;
 mod icons;
 mod keymap;
 mod lang;
+mod pie;
 pub mod showcase;
 mod theme;
 
@@ -23,6 +25,7 @@ pub use font::{has_cjk_font, install_cjk_font};
 pub use icons::{Icon, icon};
 pub use keymap::{Keymap, KeymapFile, parse_shortcut};
 pub use lang::{language, set_language, tr, tr_args};
+pub use pie::{DEAD_RADIUS, OUTER_RADIUS, PieEvent, PieHit, PieItem, PieMenu, pie_hit};
 pub use theme::{
     ColorOverrides, Colors, Density, Metrics, Mode, NamedTheme, Preferences, Theme, ThemeFile,
     builtin_themes, set_density, set_mode, set_theme,

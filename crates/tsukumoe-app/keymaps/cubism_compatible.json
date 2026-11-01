@@ -1,0 +1,16 @@
+{
+  "bindings": [
+    { "action": "edit.undo", "keys": "Mod+Z" },
+    { "action": "edit.redo", "keys": "Mod+Shift+Z" },
+    { "action": "file.open", "keys": "Mod+O" },
+    { "action": "file.save", "keys": "Mod+S" },
+    { "action": "view.palette", "keys": "Mod+Shift+P" },
+    { "action": "view.pie-menu", "keys": "Q" },
+    { "action": "tool.select", "keys": "V" },
+    { "action": "tool.mesh", "keys": "M" },
+    { "action": "tool.deformer", "keys": "D" },
+    { "action": "viewport.zoom-in", "context": "viewport", "keys": "Equals" },
+    { "action": "viewport.zoom-out", "context": "viewport", "keys": "Minus" },
+    { "action": "viewport.reset-camera", "context": "viewport", "keys": "0" }
+  ]
+}
