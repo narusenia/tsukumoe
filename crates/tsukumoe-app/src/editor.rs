@@ -21,7 +21,7 @@ use crate::tree_model;
 use crate::tree_ops;
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
-use tsukumoe_ui::dock::{self, PanelHost};
+use tsukumoe_ui::dock::{self, PanelHost, TabStyle};
 use tsukumoe_ui::{
     Arg, Icon, Keymap, Toasts, Tone, Variant, button, checkbox, hint, label, text_input, tr,
     tr_args,
@@ -76,6 +76,8 @@ pub struct Editor {
     pub palette: Palette,
     pub keymap: Keymap,
     pub drag: DragAssignment,
+    /// How the dock writes its tab headings; saved with the editor's state.
+    pub tab_style: TabStyle,
     /// The mesh edit tool's selection and drag; view state, not model.
     pub mesh_tool: MeshTool,
     /// The deformer tool's selection and drag; view state, not model.
@@ -133,6 +135,10 @@ impl Editor {
             palette: Palette::default(),
             keymap,
             drag,
+            tab_style: state["tab_style"]
+                .as_str()
+                .and_then(TabStyle::from_key)
+                .unwrap_or_default(),
             mesh_tool: MeshTool::default(),
             deformer_tool: DeformerTool::default(),
             pie_config,
@@ -156,6 +162,7 @@ impl Editor {
             "workspace": self.workspace,
             "recent": self.recent.to_json(),
             "last_dir": self.last_dir,
+            "tab_style": self.tab_style.key(),
         });
         settings::write(
             dir,
@@ -530,7 +537,19 @@ impl Editor {
                 self.view.touch();
             }
             other => {
-                if let Some(tool) = Tool::from_action(other) {
+                if let Some(id) = other
+                    .strip_prefix("panel.show.")
+                    .filter(|id| crate::workspace::PANELS.contains(id))
+                {
+                    self.layouts.current_mut(self.workspace).show_panel(id);
+                    self.layouts_dirty = true;
+                } else if let Some(style) = other
+                    .strip_prefix("view.tab-style.")
+                    .and_then(TabStyle::from_key)
+                {
+                    self.tab_style = style;
+                    let _ = self.persist_state();
+                } else if let Some(tool) = Tool::from_action(other) {
                     self.view.tool = tool;
                 } else if let Some(path) = other.strip_prefix("file.open-recent:") {
                     let path = PathBuf::from(path);
@@ -836,6 +855,12 @@ impl Editor {
                 .filter(|s| s.workspace == self.workspace)
                 .map(|s| s.name.clone())
                 .collect(),
+            visible_panels: crate::workspace::PANELS
+                .iter()
+                .filter(|id| self.layouts.current(self.workspace).is_visible(id))
+                .map(|id| (*id).to_owned())
+                .collect(),
+            tab_style: self.tab_style,
         };
         menu::resolve(menu::MENU, &state, &|key| tr(ctx, key), &|action| {
             self.keymap.shortcut_text(ctx, action)
@@ -1395,9 +1420,12 @@ fn show_entries(ui: &mut Ui, entries: &[menu::Entry], chosen: &mut Option<String
                 label,
                 enabled,
                 shortcut,
+                checked,
             } => {
                 ui.add_enabled_ui(*enabled, |ui| {
-                    if tsukumoe_ui::menu_item(ui, label, shortcut.as_deref()).clicked() {
+                    if tsukumoe_ui::menu_item_checked(ui, label, shortcut.as_deref(), *checked)
+                        .clicked()
+                    {
                         *chosen = Some(action.clone());
                         ui.close();
                     }
@@ -1415,6 +1443,10 @@ struct Panels<'a> {
 impl PanelHost for Panels<'_> {
     fn title(&self, ctx: &Context, id: &str) -> String {
         tr(ctx, &format!("panel-{id}"))
+    }
+
+    fn tab_style(&self) -> TabStyle {
+        self.editor.tab_style
     }
 
     fn icon(&self, id: &str) -> Option<Icon> {
@@ -2020,6 +2052,80 @@ mod tests {
         );
         assert!(editor.dialog.is_none());
         assert_eq!(steps(&editor), base + 4);
+    }
+
+    #[test]
+    fn the_panel_actions_bring_a_panel_to_the_front_in_this_workspace_only() {
+        use crate::workspace::PANELS;
+        let ctx = Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
+        let mut editor = Editor::new(None);
+        for id in PANELS {
+            assert!(editor.run_action(&ctx, &format!("panel.show.{id}")), "{id}");
+            let layout = editor.layouts.current(editor.workspace);
+            assert!(layout.is_visible(id), "{id} shows after its action");
+        }
+        // A tab group shows one tab at a time: selecting one hides the other.
+        editor.run_action(&ctx, "panel.show.tree");
+        editor.run_action(&ctx, "panel.show.deformers");
+        let layout = editor.layouts.current(editor.workspace);
+        assert!(layout.is_visible("deformers") && !layout.is_visible("tree"));
+        // The menu says so too.
+        let entries = editor.menu_entries(&ctx);
+        let checked = |action: &str| {
+            fn find(entries: &[menu::Entry], action: &str) -> Option<Option<bool>> {
+                entries.iter().find_map(|e| match e {
+                    menu::Entry::Item {
+                        action: a, checked, ..
+                    } if a == action => Some(*checked),
+                    menu::Entry::Sub { entries, .. } => find(entries, action),
+                    _ => None,
+                })
+            }
+            find(&entries, action).flatten()
+        };
+        assert_eq!(checked("panel.show.deformers"), Some(true));
+        assert_eq!(checked("panel.show.tree"), Some(false));
+        // The other workspace keeps its own layout.
+        let other = Workspace::ALL
+            .iter()
+            .copied()
+            .find(|w| *w != editor.workspace)
+            .unwrap();
+        let before = editor.layouts.current(other).clone();
+        editor.run_action(&ctx, "panel.show.history");
+        assert_eq!(*editor.layouts.current(other), before);
+        // A layout that lacks the panel gets it in the right strip.
+        let layout = editor.layouts.current_mut(editor.workspace);
+        layout.remove("palette");
+        assert!(!layout.contains("palette"));
+        editor.run_action(&ctx, "panel.show.palette");
+        let layout = editor.layouts.current(editor.workspace);
+        assert!(
+            layout.right.panels.contains(&"palette".to_owned()) && layout.is_visible("palette")
+        );
+        // An unknown panel is not an action.
+        assert!(!editor.run_action(&ctx, "panel.show.nope"));
+    }
+
+    #[test]
+    fn the_tab_style_is_chosen_from_the_menu_and_kept_in_the_settings() {
+        let dir = scratch("tab-style");
+        let ctx = Context::default();
+        let mut editor = Editor::new(Some(dir.clone()));
+        assert_eq!(editor.tab_style, TabStyle::Compact);
+        assert!(editor.run_action(&ctx, "view.tab-style.full"));
+        assert_eq!(editor.tab_style, TabStyle::Full);
+        // A new editor reads it back.
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Full);
+        assert!(editor.run_action(&ctx, "view.tab-style.compact"));
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Compact);
+        // A damaged setting gives the default.
+        crate::settings::write(&dir, STATE_FILE, r#"{"tab_style":"wide"}"#).unwrap();
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Compact);
+        assert!(!editor.run_action(&ctx, "view.tab-style.wide"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

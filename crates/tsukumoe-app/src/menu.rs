@@ -6,6 +6,10 @@
 //! that both the egui menu bar and the macOS native menu draw. Nothing here
 //! touches a window, so it is tested on every OS.
 
+use tsukumoe_ui::dock::TabStyle;
+
+use crate::workspace::PANELS;
+
 /// One item of the menu definition.
 pub enum Def {
     Item {
@@ -21,6 +25,8 @@ pub enum Def {
     Recent,
     /// The saved layouts of the current workspace, likewise.
     SavedLayouts,
+    /// Every standard panel, with a check where it is showing.
+    Panels,
 }
 
 const fn item(action: &'static str, label: &'static str) -> Def {
@@ -58,6 +64,17 @@ pub const MENU: &[Def] = &[
         label: "menu-view",
         items: &[
             item("view.palette", "menu-palette"),
+            Def::Sub {
+                label: "menu-panels",
+                items: &[Def::Panels],
+            },
+            Def::Sub {
+                label: "menu-tab-style",
+                items: &[
+                    item("view.tab-style.compact", "tab-style-compact"),
+                    item("view.tab-style.full", "tab-style-full"),
+                ],
+            },
             item("view.pie-settings", "pie-title"),
             item("view.drag-settings", "drag-title"),
             item("view.keymap-settings", "keymap-title"),
@@ -85,6 +102,9 @@ pub struct State {
     pub can_redo: bool,
     pub recent: Vec<String>,
     pub saved_layouts: Vec<String>,
+    /// The panels showing in the current workspace.
+    pub visible_panels: Vec<String>,
+    pub tab_style: TabStyle,
 }
 
 impl State {
@@ -100,6 +120,18 @@ impl State {
     }
 }
 
+impl State {
+    /// A check for the items that are choices: a panel showing, the tab style in use.
+    pub fn checked(&self, action: &str) -> Option<bool> {
+        if let Some(id) = action.strip_prefix("panel.show.") {
+            return Some(self.visible_panels.iter().any(|p| p == id));
+        }
+        action
+            .strip_prefix("view.tab-style.")
+            .map(|key| key == self.tab_style.key())
+    }
+}
+
 /// A menu item as it is shown now. Equal trees draw equal menus, so the native
 /// menu is rebuilt only when this changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +142,8 @@ pub enum Entry {
         enabled: bool,
         /// Display only ("⌘Z"); the keymap is what fires it.
         shortcut: Option<String>,
+        /// `Some` for a choice: drawn with a check when true.
+        checked: Option<bool>,
     },
     Separator,
     Sub {
@@ -132,6 +166,7 @@ pub fn resolve(
         label,
         enabled,
         shortcut: None,
+        checked: None,
     };
     for def in defs {
         match def {
@@ -140,6 +175,7 @@ pub fn resolve(
                 label: label(key),
                 enabled: state.enabled(action),
                 shortcut: shortcut(action),
+                checked: state.checked(action),
             }),
             Def::Separator => out.push(Entry::Separator),
             Def::Sub { label: key, items } => out.push(Entry::Sub {
@@ -155,6 +191,16 @@ pub fn resolve(
                     .iter()
                     .map(|p| plain(format!("file.open-recent:{p}"), p.clone(), true)),
             ),
+            Def::Panels => out.extend(PANELS.iter().map(|id| {
+                let action = format!("panel.show.{id}");
+                Entry::Item {
+                    label: label(&format!("panel-{id}")),
+                    enabled: true,
+                    shortcut: shortcut(&action),
+                    checked: state.checked(&action),
+                    action,
+                }
+            })),
             Def::SavedLayouts if state.saved_layouts.is_empty() => {
                 out.push(plain(String::new(), label("layout-none-saved"), false));
             }
@@ -293,5 +339,67 @@ mod tests {
             find(&t, "edit.undo").cloned()
         };
         assert_ne!(shown("Ctrl+Z"), shown("Ctrl+Y"));
+    }
+
+    #[test]
+    fn the_panel_menu_lists_every_standard_panel_with_a_check_where_it_shows() {
+        use crate::workspace::PANELS;
+        let state = State {
+            visible_panels: vec!["viewport".into(), "deformers".into()],
+            ..State::default()
+        };
+        let t = tree(&state, &|_| None);
+        for id in PANELS {
+            let action = format!("panel.show.{id}");
+            let Some(Entry::Item {
+                checked, enabled, ..
+            }) = find(&t, &action)
+            else {
+                panic!("{action} is not in the menu");
+            };
+            assert!(enabled);
+            assert_eq!(
+                *checked,
+                Some(id == "viewport" || id == "deformers"),
+                "{id}"
+            );
+            // The action is one the editor and the keymap's list know.
+            assert!(actions::ACTIONS.contains(&action.as_str()), "{action}");
+            for lang in Language::ALL {
+                let tr = I18n::new(lang);
+                assert_ne!(tr.tr(&format!("panel-{id}")), format!("panel-{id}"));
+            }
+        }
+        // Other items carry no check, and the tab style has exactly one.
+        assert!(matches!(
+            find(&t, "file.new"),
+            Some(Entry::Item { checked: None, .. })
+        ));
+        let on: Vec<_> = ["compact", "full"]
+            .iter()
+            .filter(|k| {
+                matches!(
+                    find(&t, &format!("view.tab-style.{k}")),
+                    Some(Entry::Item {
+                        checked: Some(true),
+                        ..
+                    })
+                )
+            })
+            .collect();
+        assert_eq!(on.len(), 1);
+    }
+
+    #[test]
+    fn a_different_set_of_visible_panels_changes_the_menu() {
+        let a = tree(&State::default(), &|_| None);
+        let b = tree(
+            &State {
+                visible_panels: vec!["tree".into()],
+                ..State::default()
+            },
+            &|_| None,
+        );
+        assert_ne!(a, b);
     }
 }
