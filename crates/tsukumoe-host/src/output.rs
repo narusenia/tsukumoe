@@ -3,9 +3,15 @@
 
 //! Publishing finished frames to other programs. Knows nothing about the UI
 //! toolkit: a [`FrameSink`] takes a texture, and [`Output`] decides which
-//! texture, at which size, and when. Syphon is one sink; others (a virtual
-//! camera, Spout2) plug into the same trait.
+//! texture, at which size, and when. Syphon and Spout2 are sinks; others (a virtual
+//! camera) plug into the same trait.
 
+#[cfg(any(all(feature = "spout", windows), test))]
+mod readback;
+#[cfg(all(feature = "spout", windows))]
+mod spout;
+#[cfg(all(feature = "spout", windows))]
+pub use spout::SpoutSink;
 #[cfg(all(feature = "syphon", target_os = "macos"))]
 mod syphon;
 #[cfg(all(feature = "syphon", target_os = "macos"))]
@@ -13,6 +19,9 @@ pub use syphon::SyphonSink;
 
 /// Whether this build can publish through Syphon.
 pub const SYPHON_AVAILABLE: bool = cfg!(all(feature = "syphon", target_os = "macos"));
+
+/// Whether this build can publish through Spout2.
+pub const SPOUT_AVAILABLE: bool = cfg!(all(feature = "spout", windows));
 
 /// What a sink is doing, for the settings panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +39,7 @@ pub trait FrameSink {
     fn status(&self) -> SinkStatus;
 
     /// Publishes one frame: an `Rgba8Unorm` texture with premultiplied alpha
-    /// and `TEXTURE_BINDING` usage. The sink may not keep it past the call.
+    /// and `TEXTURE_BINDING` and `COPY_SRC` usage. The sink may not keep it past the call.
     fn publish(
         &mut self,
         device: &wgpu::Device,
@@ -117,7 +126,8 @@ impl Output {
                 dimension: wgpu::TextureDimension::D2,
                 format: tsukumoe_gpu::OUTPUT_FORMAT,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let view = texture.create_view(&Default::default());
