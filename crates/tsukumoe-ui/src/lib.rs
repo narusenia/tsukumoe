@@ -17,9 +17,9 @@ pub mod showcase;
 mod theme;
 
 pub use components::{
-    Toasts, Tone, Variant, badge, button, checkbox, color_picker, dialog, hint, icon_button,
-    icon_text_button, label, list, menu_item, number, panel, progress, radio, section_header,
-    select, selectable_row, slider, switch, tabs, text_input, tip,
+    DIALOG_WIDTH, Toasts, Tone, Variant, badge, button, checkbox, color_picker, dialog,
+    dialog_sized, hint, icon_button, icon_text_button, label, list, menu_item, number, panel,
+    progress, radio, section_header, select, selectable_row, slider, switch, tabs, text_input, tip,
 };
 pub use font::{has_cjk_font, install_cjk_font};
 pub use icons::{Icon, icon};

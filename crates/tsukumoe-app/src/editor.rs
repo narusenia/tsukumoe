@@ -576,8 +576,8 @@ impl Editor {
         let mut remove: Option<(String, bool)> = None;
         let mut matched: Option<(String, Option<String>)> = None;
         let none = t("psd-none");
-        tsukumoe_ui::dialog(ctx, "dialog-psd-import", &t("psd-title"), open, |ui| {
-            ui.set_min_width(520.0);
+        let title = t("psd-title");
+        tsukumoe_ui::dialog_sized(ctx, "dialog-psd-import", &title, 640.0, open, |ui| {
             match state.stage {
                 Stage::Path => {
                     let name = t("psd-path");
@@ -599,7 +599,7 @@ impl Editor {
                         .max_height(320.0)
                         .show(ui, |ui| {
                             for row in &rows {
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     let (key, tone) = match row.kind {
                                         RowKind::AddGroup => ("psd-row-add-group", Tone::Success),
                                         RowKind::AddLayer => ("psd-row-add-layer", Tone::Success),
