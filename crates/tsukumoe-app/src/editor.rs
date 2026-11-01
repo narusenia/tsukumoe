@@ -17,7 +17,7 @@ use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
-use crate::tree_model;
+use crate::tree_model::{self, TreeView};
 use crate::tree_ops;
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
@@ -36,6 +36,7 @@ use crate::workspace::{Layouts, Preset, Workspace};
 
 const LAYOUTS_FILE: &str = "layouts.json";
 const STATE_FILE: &str = "state.json";
+const TREE_FILE: &str = "tree.json";
 const KEYMAP_FILE: &str = "keymap.json";
 const DRAG_FILE: &str = "drag.json";
 const PIE_FILE: &str = "pie.json";
@@ -76,6 +77,10 @@ pub struct Editor {
     pub palette: Palette,
     pub keymap: Keymap,
     pub drag: DragAssignment,
+    /// The tree panels' state of each workspace (the open one is in `view`),
+    /// and what was last written to `tree.json`.
+    trees: [(TreeView, TreeView); 2],
+    trees_saved: String,
     /// How the dock writes its tab headings; saved with the editor's state.
     pub tab_style: TabStyle,
     /// The mesh edit tool's selection and drag; view state, not model.
@@ -123,7 +128,10 @@ impl Editor {
             read(DRAG_FILE).map_or_else(DragAssignment::default, |t| DragAssignment::from_json(&t));
         let pie_config =
             read(PIE_FILE).map_or_else(PieConfig::default, |t| PieConfig::from_json(&t));
-        Self {
+        let tree_file: serde_json::Value = read(TREE_FILE)
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        let mut editor = Self {
             doc: None,
             workspace: serde_json::from_value(state["workspace"].clone()).unwrap_or_default(),
             layouts,
@@ -135,6 +143,8 @@ impl Editor {
             palette: Palette::default(),
             keymap,
             drag,
+            trees: Default::default(),
+            trees_saved: String::new(),
             tab_style: state["tab_style"]
                 .as_str()
                 .and_then(TabStyle::from_key)
@@ -151,7 +161,72 @@ impl Editor {
             last_dir: state["last_dir"].as_str().map(PathBuf::from),
             pending: Vec::new(),
             stash: None,
+        };
+        for (i, w) in Workspace::ALL.iter().enumerate() {
+            let saved = &tree_file[w.key()];
+            editor.trees[i] = (
+                TreeView::from_json(&saved["parts"]),
+                TreeView::from_json(&saved["deformers"]),
+            );
         }
+        editor.load_tree_views();
+        editor.trees_saved = editor.tree_json();
+        editor
+    }
+
+    fn workspace_index(&self) -> usize {
+        Workspace::ALL
+            .iter()
+            .position(|w| *w == self.workspace)
+            .unwrap_or(0)
+    }
+
+    /// Takes the open workspace's tree state into the view.
+    fn load_tree_views(&mut self) {
+        let (parts, deformers) = self.trees[self.workspace_index()].clone();
+        self.view.parts = parts;
+        self.view.deformers = deformers;
+    }
+
+    /// Puts the view's tree state back into the open workspace's slot.
+    fn store_tree_views(&mut self) {
+        let i = self.workspace_index();
+        self.trees[i] = (self.view.parts.clone(), self.view.deformers.clone());
+    }
+
+    /// The tree state of every workspace as the file holds it.
+    fn tree_json(&self) -> String {
+        let mut file = serde_json::Map::new();
+        for (i, w) in Workspace::ALL.iter().enumerate() {
+            let (parts, deformers) = &self.trees[i];
+            file.insert(
+                w.key().to_owned(),
+                serde_json::json!({"parts": parts.to_json(), "deformers": deformers.to_json()}),
+            );
+        }
+        serde_json::to_string_pretty(&serde_json::Value::Object(file)).unwrap_or_default()
+    }
+
+    /// Writes the tree state when it changed (not while a mouse button is down).
+    fn save_trees(&mut self, ctx: &Context) {
+        if let Some(doc) = &self.doc {
+            let model = doc.dispatcher.model();
+            self.view.parts.prune(model, tree_model::Panel::Parts);
+            self.view
+                .deformers
+                .prune(model, tree_model::Panel::Deformers);
+        }
+        self.store_tree_views();
+        let json = self.tree_json();
+        if json == self.trees_saved || ctx.input(|i| i.pointer.any_down()) {
+            return;
+        }
+        if let Some(dir) = &self.settings_dir
+            && let Err(e) = settings::write(dir, TREE_FILE, &json)
+        {
+            self.toasts.push(ctx, Tone::Error, e);
+        }
+        self.trees_saved = json;
     }
 
     fn persist_state(&self) -> Result<(), String> {
@@ -183,7 +258,9 @@ impl Editor {
         match Document::open(path) {
             Ok(doc) => {
                 self.doc = Some(doc);
+                self.store_tree_views();
                 self.view = ViewState::default();
+                self.load_tree_views();
                 self.mesh_tool = MeshTool::default();
                 self.deformer_tool = DeformerTool::default();
                 self.recent.push(path);
@@ -736,7 +813,9 @@ impl Editor {
         crate::project::discard_project(dir, written);
         self.recent.remove(dir);
         self.doc = self.stash.take();
+        self.store_tree_views();
         self.view = ViewState::default();
+        self.load_tree_views();
         self.viewport = None;
         let _ = self.persist_state();
     }
@@ -778,7 +857,9 @@ impl Editor {
 
     pub fn switch_workspace(&mut self, workspace: Workspace) {
         if self.workspace != workspace {
+            self.store_tree_views();
             self.workspace = workspace;
+            self.load_tree_views();
             let _ = self.persist_state();
         }
     }
@@ -825,6 +906,7 @@ impl Editor {
             }
         });
         self.dialogs(&ctx);
+        self.save_trees(&ctx);
         // Writing while a divider is dragged would spam the disk.
         if self.layouts_dirty && !ctx.input(|i| i.pointer.any_down()) {
             let result = self.persist_layouts();
@@ -2125,6 +2207,88 @@ mod tests {
         crate::settings::write(&dir, STATE_FILE, r#"{"tab_style":"wide"}"#).unwrap();
         assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Compact);
         assert!(!editor.run_action(&ctx, "view.tab-style.wide"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_tree_state_is_saved_per_workspace_and_comes_back() {
+        use crate::tree_model::{Kind, Sort};
+        let dir = scratch("tree-state");
+        let ctx = Context::default();
+        let mut editor = Editor::new(Some(dir.clone()));
+        editor.view.parts.filter = "eye".into();
+        editor.view.parts.sort = Sort::Name;
+        editor.view.deformers.toggle_kind(Kind::Rotation);
+        editor.save_trees(&ctx);
+        // The other workspace has its own state, starting from the default.
+        let other = Workspace::ALL
+            .iter()
+            .copied()
+            .find(|w| *w != editor.workspace)
+            .unwrap();
+        let first = editor.workspace;
+        editor.switch_workspace(other);
+        assert_eq!(editor.view.parts.filter, "");
+        editor.view.parts.hidden_only = true;
+        editor.save_trees(&ctx);
+        editor.switch_workspace(first);
+        assert_eq!(editor.view.parts.filter, "eye");
+        assert!(!editor.view.parts.hidden_only);
+        // A new editor reads both back.
+        let mut again = Editor::new(Some(dir.clone()));
+        assert_eq!(again.workspace, first);
+        assert_eq!(again.view.parts.filter, "eye");
+        assert_eq!(again.view.parts.sort, Sort::Name);
+        assert!(again.view.deformers.kinds.contains(&Kind::Rotation));
+        again.switch_workspace(other);
+        assert!(again.view.parts.hidden_only && again.view.parts.filter.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closed_folders_survive_opening_a_project_and_forget_names_that_are_gone() {
+        let dir = scratch("tree-folders");
+        let ctx = Context::default();
+        let mut editor = open_minimal();
+        editor.settings_dir = Some(dir.clone());
+        // `Fold` is a part with a part in it; `Gone` does not exist.
+        for (name, parent) in [("Fold", None), ("Inside", Some("Fold"))] {
+            assert!(editor.submit(
+                &ctx,
+                tsukumoe_core::command::Command::AddPart {
+                    name: name.into(),
+                    parent: parent.map(Into::into),
+                }
+            ));
+        }
+        editor.view.parts.set_open("p:Fold", false);
+        editor.view.parts.set_open("p:Gone", false);
+        editor.save_trees(&ctx);
+        assert!(editor.view.parts.collapsed.contains("p:Fold"));
+        assert!(!editor.view.parts.collapsed.contains("p:Gone"));
+        // Reopening the project keeps what was closed.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tsukumoe-format/tests/fixtures/minimal");
+        // (The reopened project has no `Fold`, so the closed state goes with it.)
+        editor.view.parts.set_open("p:Face", false);
+        editor.open(&path).unwrap();
+        assert!(editor.view.parts.collapsed.contains("p:Face"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_damaged_tree_file_gives_the_defaults_without_failing() {
+        let dir = scratch("tree-damaged");
+        for text in [
+            "",
+            "not json",
+            "[1,2]",
+            r#"{"modeling":7,"animation":{"parts":{"sort":"x"}}}"#,
+        ] {
+            crate::settings::write(&dir, TREE_FILE, text).unwrap();
+            let editor = Editor::new(Some(dir.clone()));
+            assert!(editor.view.parts.collapsed.is_empty() && editor.view.parts.filter.is_empty());
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

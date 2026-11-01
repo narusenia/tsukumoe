@@ -194,7 +194,92 @@ impl TreeView {
     }
 }
 
+impl Kind {
+    fn word(self) -> &'static str {
+        match self {
+            Kind::Part => "part",
+            Kind::Mesh => "mesh",
+            Kind::Warp => "warp",
+            Kind::Rotation => "rotation",
+        }
+    }
+}
+
+impl Sort {
+    fn word(self) -> &'static str {
+        match self {
+            Sort::Model => "model",
+            Sort::Name => "name",
+            Sort::Draw => "draw",
+        }
+    }
+}
+
 impl TreeView {
+    /// The part of the state that is saved with the workspace: the closed
+    /// folders, the filters and the sort. Not the selection, the scroll
+    /// position or a name being typed.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "filter": self.filter,
+            "kinds": self.kinds.iter().map(|k| k.word()).collect::<Vec<_>>(),
+            "hidden_only": self.hidden_only,
+            "sort": self.sort.word(),
+            "collapsed": self.collapsed.iter().collect::<Vec<_>>(),
+        })
+    }
+
+    /// Reads what [`Self::to_json`] wrote. Each field is read on its own: one
+    /// that is missing, of the wrong type or holding a word that is not known
+    /// gives its default and leaves the others alone.
+    pub fn from_json(value: &serde_json::Value) -> Self {
+        let mut view = TreeView::default();
+        if let Some(f) = value["filter"].as_str() {
+            view.filter = f.to_owned();
+        }
+        if let Some(kinds) = value["kinds"].as_array() {
+            view.kinds = kinds
+                .iter()
+                .filter_map(|k| k.as_str())
+                .filter_map(|w| {
+                    [Kind::Part, Kind::Mesh, Kind::Warp, Kind::Rotation]
+                        .into_iter()
+                        .find(|k| k.word() == w)
+                })
+                .collect();
+        }
+        if let Some(h) = value["hidden_only"].as_bool() {
+            view.hidden_only = h;
+        }
+        if let Some(sort) = value["sort"].as_str().and_then(|w| {
+            [Sort::Model, Sort::Name, Sort::Draw]
+                .into_iter()
+                .find(|s| s.word() == w)
+        }) {
+            view.sort = sort;
+        }
+        if let Some(keys) = value["collapsed"].as_array() {
+            view.collapsed = keys
+                .iter()
+                .filter_map(|k| k.as_str())
+                .filter(|k| k.starts_with("p:") || k.starts_with("d:") || k.starts_with("m:"))
+                .map(str::to_owned)
+                .collect();
+        }
+        view
+    }
+
+    /// Forgets closed folders that no longer exist (renamed or deleted since).
+    pub fn prune(&mut self, model: &Model, panel: Panel) {
+        let all = TreeView::default();
+        let live: BTreeSet<String> = rows(model, &all, panel)
+            .iter()
+            .filter(|r| r.expandable)
+            .map(Row::key)
+            .collect();
+        self.collapsed.retain(|k| live.contains(k));
+    }
+
     /// Opens or closes `key` and every folder below it in `panel`.
     pub fn set_subtree_open(&mut self, model: &Model, panel: Panel, key: &str, open: bool) {
         let all = TreeView::default();
@@ -1036,5 +1121,85 @@ mod tests {
         assert_eq!(meshes_under_part(&m, "Body"), ["HairFront"]);
         assert_eq!(meshes_under_part(&m, "Face"), ["Skin", "Eye", "Mouth"]);
         assert!(meshes_under_part(&m, "Nope").is_empty());
+    }
+
+    #[test]
+    fn the_saved_part_of_the_state_round_trips_and_leaves_out_the_rest() {
+        let mut v = TreeView {
+            filter: "eye".into(),
+            ..TreeView::default()
+        };
+        v.toggle_kind(Kind::Mesh);
+        v.toggle_kind(Kind::Part);
+        v.hidden_only = true;
+        v.sort = Sort::Draw;
+        v.set_open("p:Head", false);
+        v.set_open("d:W", false);
+        v.seen = Some(Selection::Mesh("x".into()));
+        v.scroll = (10.0, 20.0);
+        v.renaming = Some(Renaming::new(Kind::Mesh, "x"));
+        let back = TreeView::from_json(&v.to_json());
+        assert_eq!(back.filter, "eye");
+        assert_eq!(back.kinds, v.kinds);
+        assert!(back.hidden_only);
+        assert_eq!(back.sort, Sort::Draw);
+        assert_eq!(back.collapsed, v.collapsed);
+        assert!(back.seen.is_none() && back.renaming.is_none() && back.scroll == (0.0, 0.0));
+        assert_eq!(
+            TreeView::from_json(&TreeView::default().to_json()),
+            TreeView::default()
+        );
+    }
+
+    #[test]
+    fn damaged_or_foreign_data_gives_defaults_field_by_field() {
+        use serde_json::json;
+        // The wrong type for one field does not spoil the others.
+        let v = TreeView::from_json(&json!({
+            "filter": 7,
+            "kinds": ["mesh", "bogus", 3],
+            "hidden_only": "yes",
+            "sort": "name",
+            "collapsed": ["p:Head", 5, "nonsense", "d:W"],
+        }));
+        assert_eq!(v.filter, "");
+        assert_eq!(v.kinds, BTreeSet::from([Kind::Mesh]));
+        assert!(!v.hidden_only);
+        assert_eq!(v.sort, Sort::Name);
+        assert_eq!(
+            v.collapsed,
+            BTreeSet::from(["p:Head".to_owned(), "d:W".to_owned()])
+        );
+        assert_eq!(TreeView::from_json(&json!(null)), TreeView::default());
+        assert_eq!(TreeView::from_json(&json!([1, 2])), TreeView::default());
+        assert_eq!(
+            TreeView::from_json(&json!({"sort": "sideways"})).sort,
+            Sort::Model
+        );
+    }
+
+    #[test]
+    fn closed_folders_that_no_longer_exist_are_forgotten() {
+        let m = model();
+        let mut v = TreeView::default();
+        v.set_open("p:Head", false);
+        v.set_open("p:Gone", false);
+        v.set_open("d:Missing", false);
+        v.set_open("d:W", false);
+        // A closed folder that is not in this panel is not kept for it.
+        v.prune(&m, Panel::Parts);
+        assert_eq!(v.collapsed, BTreeSet::from(["p:Head".to_owned()]));
+        let mut d = TreeView::default();
+        d.set_open("d:W", false);
+        d.set_open("d:Old", false);
+        d.prune(&m, Panel::Deformers);
+        assert_eq!(d.collapsed, BTreeSet::from(["d:W".to_owned()]));
+        // Unknown names in a saved state do no harm to the rows meanwhile.
+        let mut stale = TreeView::default();
+        stale.set_open("p:Gone", false);
+        assert_eq!(
+            rows(&m, &stale, Panel::Parts).len(),
+            rows(&m, &TreeView::default(), Panel::Parts).len()
+        );
     }
 }
