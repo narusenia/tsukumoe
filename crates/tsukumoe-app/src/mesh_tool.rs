@@ -14,6 +14,7 @@ use tsukumoe_core::contour::{self, Alpha, ContourError, ContourParams};
 use tsukumoe_core::elements::Point;
 use tsukumoe_core::mesh_edit::{self, EditError, Geometry};
 use tsukumoe_core::model::Model;
+use tsukumoe_core::rig::ArtMesh;
 
 /// A vertex is picked within this many points of the pointer.
 pub const VERTEX_RADIUS: f32 = 8.0;
@@ -208,8 +209,9 @@ pub fn hit_test(positions: &[Point], indices: &[u32], m: &Mapper, at: [f32; 2]) 
     edge.map_or(Hit::Nothing, |((a, b), _)| Hit::Edge(a, b))
 }
 
-/// The visible mesh drawn in front at `at` (a model point), by name. Meshes are
-/// taken at their base shape, as the tool shows them.
+/// The visible mesh drawn in front at `at` (a model point), by name. A mesh under
+/// a hidden part is not visible. Meshes are taken at their base shape, as the
+/// tool shows them.
 pub fn pick_mesh(model: &Model, at: Point) -> Option<String> {
     let inside = |p: &[Point], t: &[u32]| {
         let side =
@@ -230,9 +232,21 @@ pub fn pick_mesh(model: &Model, at: Point) -> Option<String> {
     model
         .meshes()
         .iter()
-        .filter(|(_, _, m)| m.visible && inside(&m.positions, &m.indices))
+        .filter(|(_, _, m)| shown(model, m) && inside(&m.positions, &m.indices))
         .max_by(|a, b| a.2.draw_order.total_cmp(&b.2.draw_order))
         .map(|(_, name, _)| name.to_owned())
+}
+
+/// Whether the mesh and every part above it are visible (as when drawing).
+fn shown(model: &Model, mesh: &ArtMesh) -> bool {
+    let mut part = Some(mesh.part);
+    let mut shown = mesh.visible;
+    while let Some(id) = part {
+        let p = model.parts().get(id).expect("a mesh's part exists");
+        shown &= p.visible;
+        part = p.parent;
+    }
+    shown
 }
 
 /// The mesh `name` as a [`Geometry`].
@@ -1062,6 +1076,37 @@ mod tests {
             .unwrap();
         assert_eq!(pick_mesh(&model, [0.5, 0.5]).as_deref(), Some("Front"));
         assert_eq!(pick_mesh(&model, [5.0, 5.0]), None);
+    }
+
+    #[test]
+    fn picking_skips_a_visible_mesh_under_a_hidden_part() {
+        let mut model = Model::new();
+        for (name, parent) in [("Root", None), ("Child", Some("Root"))] {
+            model
+                .apply(Command::AddPart {
+                    name: name.into(),
+                    parent: parent.map(Into::into),
+                })
+                .unwrap();
+        }
+        let tri = vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]];
+        model
+            .apply(Command::AddMesh {
+                name: "M".into(),
+                part: "Child".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            })
+            .unwrap();
+        assert_eq!(pick_mesh(&model, [0.5, 0.5]).as_deref(), Some("M"));
+        model
+            .apply(Command::SetPartVisible {
+                name: "Root".into(),
+                visible: false,
+            })
+            .unwrap();
+        assert_eq!(pick_mesh(&model, [0.5, 0.5]), None);
     }
 
     #[test]
