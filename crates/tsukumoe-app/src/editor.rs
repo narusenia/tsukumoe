@@ -11,6 +11,7 @@ use crate::actions::{self, ACTIONS, Tool};
 use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
+use crate::pie::{Entry, PieConfig};
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
 use tsukumoe_ui::dock::{self, PanelHost};
@@ -28,6 +29,7 @@ const LAYOUTS_FILE: &str = "layouts.json";
 const STATE_FILE: &str = "state.json";
 const KEYMAP_FILE: &str = "keymap.json";
 const DRAG_FILE: &str = "drag.json";
+const PIE_FILE: &str = "pie.json";
 
 pub enum Dialog {
     Open(String),
@@ -38,6 +40,8 @@ pub enum Dialog {
     Keymap(Vec<String>, Option<String>),
     /// The drag-to-parameter assignment being edited.
     Drag,
+    /// The pie menu slots being edited.
+    Pie,
 }
 
 pub struct Editor {
@@ -53,6 +57,9 @@ pub struct Editor {
     pub palette: Palette,
     pub keymap: Keymap,
     pub drag: DragAssignment,
+    pub pie_config: PieConfig,
+    /// The open pie menu, while its key is held.
+    pie: Option<tsukumoe_ui::PieMenu>,
     /// Whether the pointer was over the viewport last frame (a keymap context).
     viewport_hovered: bool,
     viewport: Option<Viewport>,
@@ -77,6 +84,8 @@ impl Editor {
             .unwrap_or_else(actions::cubism_compatible);
         let drag =
             read(DRAG_FILE).map_or_else(DragAssignment::default, |t| DragAssignment::from_json(&t));
+        let pie_config =
+            read(PIE_FILE).map_or_else(PieConfig::default, |t| PieConfig::from_json(&t));
         Self {
             doc: None,
             workspace: serde_json::from_value(state["workspace"].clone()).unwrap_or_default(),
@@ -89,6 +98,8 @@ impl Editor {
             palette: Palette::default(),
             keymap,
             drag,
+            pie_config,
+            pie: None,
             viewport_hovered: false,
             viewport: None,
             layouts_dirty: false,
@@ -182,6 +193,10 @@ impl Editor {
             "edit.undo" => drop(self.undo()),
             "edit.redo" => drop(self.redo()),
             "view.palette" => self.open_palette(),
+            "view.pie-menu" => {
+                let at = ctx.pointer_latest_pos().unwrap_or_default();
+                self.pie = Some(tsukumoe_ui::PieMenu::open(at, self.pie_config.items(ctx)));
+            }
             "viewport.zoom-in" | "viewport.zoom-out" => {
                 let f = if action.ends_with("in") { 1.25 } else { 0.8 };
                 self.view.camera.zoom_at(f, [0.5, 0.5]);
@@ -196,6 +211,26 @@ impl Editor {
                     self.view.tool = tool;
                 }
             }
+        }
+    }
+
+    /// Draws the open pie menu; the key's release picks the item under the
+    /// pointer (or cancels at the center).
+    fn pie_frame(&mut self, ctx: &Context) {
+        let Some(pie) = self.pie.as_mut() else {
+            return;
+        };
+        let released = match self.keymap.shortcut("view.pie-menu") {
+            Some(s) => ctx.input(|i| i.key_released(s.logical_key)),
+            None => true,
+        };
+        match pie.show(ctx, released) {
+            tsukumoe_ui::PieEvent::Open => {}
+            tsukumoe_ui::PieEvent::Chosen(action) => {
+                self.pie = None;
+                self.run_action(ctx, &action);
+            }
+            tsukumoe_ui::PieEvent::Cancelled => self.pie = None,
         }
     }
 
@@ -250,6 +285,7 @@ impl Editor {
         for action in self.keymap.triggered(&ctx, active) {
             self.run_action(&ctx, &action);
         }
+        self.pie_frame(&ctx);
         egui::Panel::top("tsukumoe-menu").show(ui, |ui| self.menu_bar(ui));
         egui::Panel::bottom("tsukumoe-status").show(ui, |ui| self.status_bar(ui));
         egui::CentralPanel::default().show(ui, |ui| {
@@ -333,6 +369,10 @@ impl Editor {
                 .clicked()
                 {
                     self.open_palette();
+                    ui.close();
+                }
+                if tsukumoe_ui::menu_item(ui, &t("pie-title"), None).clicked() {
+                    self.dialog = Some(Dialog::Pie);
                     ui.close();
                 }
                 if tsukumoe_ui::menu_item(ui, &t("drag-title"), None).clicked() {
@@ -429,6 +469,19 @@ impl Editor {
             return;
         };
         let t = |key: &str| tr(ctx, key);
+        if matches!(dialog, Dialog::Pie) {
+            let mut open = true;
+            if self.pie_dialog(ctx, &mut open)
+                && let Some(dir) = &self.settings_dir
+                && let Err(e) = settings::write(dir, PIE_FILE, &self.pie_config.to_json())
+            {
+                self.toasts.push(ctx, Tone::Error, e);
+            }
+            if open {
+                self.dialog = Some(dialog);
+            }
+            return;
+        }
         if matches!(dialog, Dialog::Drag) {
             let mut open = true;
             if self.drag_dialog(ctx, &mut open)
@@ -461,7 +514,7 @@ impl Editor {
             Dialog::SaveAs(_) => (t("dialog-save-as-title"), "dialog-save-as"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
-            Dialog::Keymap(..) | Dialog::Drag => unreachable!("handled above"),
+            Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie => unreachable!("handled above"),
         };
         tsukumoe_ui::dialog(ctx, id, &title, &mut open, |ui| {
             match &mut dialog {
@@ -476,7 +529,7 @@ impl Editor {
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
                 }
-                Dialog::Keymap(..) | Dialog::Drag => {}
+                Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie => {}
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -520,6 +573,52 @@ impl Editor {
 }
 
 impl Editor {
+    /// Which action each pie slot runs; returns whether anything changed.
+    fn pie_dialog(&mut self, ctx: &Context, open: &mut bool) -> bool {
+        let t = |key: &str| tr(ctx, key);
+        let before = self.pie_config.clone();
+        let names: Vec<(String, String)> = ACTIONS
+            .iter()
+            .map(|a| ((*a).to_owned(), t(&actions::label_key(a))))
+            .collect();
+        let options: Vec<(String, &str)> =
+            names.iter().map(|(a, n)| (a.clone(), n.as_str())).collect();
+        let config = &mut self.pie_config;
+        let mut reset = false;
+        tsukumoe_ui::dialog(ctx, "dialog-pie", &t("pie-title"), open, |ui| {
+            hint(ui, t("pie-hint"));
+            fn slots(
+                ui: &mut Ui,
+                entries: &mut [Entry],
+                options: &[(String, &str)],
+                path: &str,
+                t: &dyn Fn(&str) -> String,
+            ) {
+                for (i, entry) in entries.iter_mut().enumerate() {
+                    let id = format!("{path}/{i}");
+                    match entry {
+                        Entry::Action { action } => {
+                            tsukumoe_ui::select(ui, id, &format!("{}", i + 1), action, options);
+                        }
+                        Entry::Group { label, items } => {
+                            label_text(ui, &t(label));
+                            ui.indent(id.clone(), |ui| slots(ui, items, options, &id, t));
+                        }
+                    }
+                }
+            }
+            fn label_text(ui: &mut Ui, text: &str) {
+                label(ui, text);
+            }
+            slots(ui, &mut config.items, &options, "pie", &t);
+            reset = button(ui, &t("pie-reset"), Variant::Secondary).clicked();
+        });
+        if reset {
+            *config = PieConfig::default();
+        }
+        *config != before
+    }
+
     /// The drag-to-parameter settings; returns whether they changed.
     fn drag_dialog(&mut self, ctx: &Context, open: &mut bool) -> bool {
         let t = |key: &str| tr(ctx, key);
@@ -873,6 +972,59 @@ mod tests {
         h.run();
         assert_eq!(h.state().view.tool, Tool::Mesh);
         h.state_mut().run_action(&ctx, "nonsense.action");
+    }
+
+    fn frame(ctx: &Context, events: Vec<egui::Event>, mut f: impl FnMut(&Context)) {
+        let input = egui::RawInput {
+            events,
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| f(ui.ctx()));
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_pie_menu_opens_on_its_key_and_releasing_toward_an_item_runs_it() {
+        let ctx = Context::default();
+        let mut editor = Editor::new(None);
+        editor.pie_config = PieConfig::from_json(
+            r#"{"items":[{"action":"tool.mesh"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
+        );
+        let at = egui::pos2(400.0, 400.0);
+        frame(&ctx, vec![egui::Event::PointerMoved(at)], |ctx| {
+            editor.run_action(ctx, "view.pie-menu");
+            editor.pie_frame(ctx);
+        });
+        assert!(editor.pie.is_some(), "open while the key is held");
+        // release straight up: the first item
+        let key = |pressed| egui::Event::Key {
+            key: egui::Key::Q,
+            physical_key: Some(egui::Key::Q),
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(at + egui::vec2(0.0, -60.0)),
+                key(false),
+            ],
+            |ctx| {
+                editor.pie_frame(ctx);
+            },
+        );
+        assert!(editor.pie.is_none());
+        assert_eq!(editor.view.tool, Tool::Mesh);
+        // releasing at the center cancels without running anything
+        editor.view.tool = Tool::Select;
+        frame(&ctx, vec![egui::Event::PointerMoved(at)], |ctx| {
+            editor.run_action(ctx, "view.pie-menu");
+            editor.pie_frame(ctx);
+        });
+        frame(&ctx, vec![key(false)], |ctx| editor.pie_frame(ctx));
+        assert!(editor.pie.is_none());
+        assert_eq!(editor.view.tool, Tool::Select);
     }
 
     #[test]

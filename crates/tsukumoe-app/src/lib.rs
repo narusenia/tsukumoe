@@ -11,6 +11,7 @@ pub mod dispatcher;
 pub mod drag;
 pub mod editor;
 pub mod panels;
+pub mod pie;
 pub mod project;
 pub mod scene;
 pub mod settings;

@@ -126,3 +126,7 @@ drag-parameter = パラメータ
 drag-none = (なし)
 drag-sensitivity = 全範囲に要するポイント数
 drag-invert = 反転
+pie-title = パイメニュー
+pie-hint = パイメニューのキー (キーボードショートカット参照) を押したまま項目の方向へ動かし、放して確定。中心で放すとキャンセル。
+pie-reset = 既定の割り当てに戻す
+pie-group-view = 表示

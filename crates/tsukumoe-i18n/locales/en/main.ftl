@@ -130,3 +130,7 @@ drag-parameter = Parameter
 drag-none = (none)
 drag-sensitivity = Points per full range
 drag-invert = Invert
+pie-title = Pie menu
+pie-hint = Hold the pie menu key (see Keyboard shortcuts), move toward an item and release. Release at the center to cancel.
+pie-reset = Reset to the default slots
+pie-group-view = View
