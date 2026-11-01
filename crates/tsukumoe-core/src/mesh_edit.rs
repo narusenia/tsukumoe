@@ -219,6 +219,75 @@ fn flip(g: &mut Geometry, u: u32, v: u32) -> Result<(u32, u32), EditError> {
     Ok((c, d))
 }
 
+/// Positive when `d` is inside the circle through `a b c` (given counter-clockwise),
+/// with the size of the terms to judge "zero" against.
+fn in_circle(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> (f64, f64) {
+    let (ax, ay, bx, by, cx, cy) = (
+        a[0] - d[0],
+        a[1] - d[1],
+        b[0] - d[0],
+        b[1] - d[1],
+        c[0] - d[0],
+        c[1] - d[1],
+    );
+    let (al, bl, cl) = (ax * ax + ay * ay, bx * bx + by * by, cx * cx + cy * cy);
+    let terms = [
+        al * (bx * cy - cx * by),
+        -bl * (ax * cy - cx * ay),
+        cl * (ax * by - bx * ay),
+    ];
+    (terms.iter().sum(), terms.iter().map(|t| t.abs()).sum())
+}
+
+/// Re-triangulates the whole mesh as a constrained Delaunay triangulation:
+/// edges are flipped until every edge that may flip has an empty circle. The
+/// outline never changes (its edges cannot flip) and the edges in `keep`
+/// stay, so hand-drawn edges survive when they are listed. Triangles keep
+/// their winding. Vertices are not moved, added or removed.
+pub fn retriangulate(g: &Geometry, keep: &[(u32, u32)]) -> Result<Geometry, EditError> {
+    let ids: Vec<u32> = keep.iter().flat_map(|&(a, b)| [a, b]).collect();
+    check_vertices(g, &ids)?;
+    let keep: std::collections::HashSet<(u32, u32)> =
+        keep.iter().map(|&(a, b)| (a.min(b), a.max(b))).collect();
+    let mut out = g.clone();
+    let mut flips = 0;
+    let limit = 64 + 32 * (g.indices.len() / 3);
+    while flips < limit {
+        let map = edge_map(&out);
+        let mut edges: Vec<(u32, u32)> = map
+            .keys()
+            .filter(|&&(u, v)| u < v && map.contains_key(&(v, u)) && !keep.contains(&(u, v)))
+            .copied()
+            .collect();
+        edges.sort_unstable();
+        let violates = |&(u, v): &(u32, u32)| {
+            let c = apex(tri(&out, map[&(u, v)]), u, v).expect("edge map entry has the edge");
+            let d = apex(tri(&out, map[&(v, u)]), v, u).expect("edge map entry has the edge");
+            let (pu, pv, pc, pd) = (p64(&out, u), p64(&out, v), p64(&out, c), p64(&out, d));
+            // Triangle `u v c` is counter-clockwise or clockwise as drawn.
+            let (det, size) = if cross(pu, pv, pc) > 0.0 {
+                in_circle(pu, pv, pc, pd)
+            } else {
+                in_circle(pv, pu, pc, pd)
+            };
+            det > 1e-10 * size
+        };
+        let mut flipped = false;
+        let bad: Vec<(u32, u32)> = edges.into_iter().filter(|e| violates(e)).collect();
+        for edge in bad {
+            if flip(&mut out, edge.0, edge.1).is_ok() {
+                flipped = true;
+                break;
+            }
+        }
+        if !flipped {
+            break;
+        }
+        flips += 1;
+    }
+    Ok(out)
+}
+
 /// Draws an edge between `a` and `b` by flipping the edges that cross it, as
 /// long as it takes. Does nothing if the edge exists. Fails when an edge on
 /// the outline or a vertex is in the way, or no flip can make progress.
@@ -672,6 +741,148 @@ mod tests {
         assert_eq!(flip_edge(&g, 99, 0), Err(EditError::BadVertex));
         assert_eq!(remove_vertices(&g, &[99]), Err(EditError::BadVertex));
         assert_eq!(split_edge(&g, 0, 99, 0.5), Err(EditError::BadVertex));
+    }
+
+    /// No vertex of `g` is strictly inside the circle of a triangle.
+    fn assert_empty_circles(g: &Geometry) {
+        for t in 0..g.indices.len() / 3 {
+            let v = tri(g, t);
+            let (a, b, c) = (p64(g, v[0]), p64(g, v[1]), p64(g, v[2]));
+            let ccw = cross(a, b, c) > 0.0;
+            for w in 0..g.positions.len() as u32 {
+                if v.contains(&w) || !g.indices.contains(&w) {
+                    continue;
+                }
+                let (det, size) = if ccw {
+                    in_circle(a, b, c, p64(g, w))
+                } else {
+                    in_circle(b, a, c, p64(g, w))
+                };
+                assert!(
+                    det <= 1e-9 * size.max(1e-12),
+                    "vertex {w} is inside triangle {t}"
+                );
+            }
+        }
+    }
+
+    fn sorted_triangles(g: &Geometry) -> Vec<[u32; 3]> {
+        let mut all: Vec<[u32; 3]> = (0..g.indices.len() / 3)
+            .map(|t| {
+                let mut v = tri(g, t);
+                let k = (0..3).min_by_key(|&k| v[k]).unwrap();
+                v.rotate_left(k);
+                v
+            })
+            .collect();
+        all.sort_unstable();
+        all
+    }
+
+    /// A scrambled triangulation of random points in a square.
+    fn cloud(seed: &mut u64, points: usize, flipped: bool) -> Geometry {
+        let mut g = Geometry {
+            positions: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        if flipped {
+            g.indices.swap(1, 2);
+            g.indices.swap(4, 5);
+        }
+        while g.positions.len() < points + 4 {
+            if let Ok(out) = add_vertex(&g, [rand(seed) * 10.0, rand(seed) * 10.0]) {
+                g = out;
+            }
+        }
+        for _ in 0..points * 4 {
+            let t = (rand(seed) * (g.indices.len() / 3) as f32) as usize % (g.indices.len() / 3);
+            let k = (rand(seed) * 3.0) as usize % 3;
+            let v = tri(&g, t);
+            if let Ok(out) = flip_edge(&g, v[k], v[(k + 1) % 3]) {
+                g = out;
+            }
+        }
+        g
+    }
+
+    #[test]
+    fn retriangulating_random_clouds_gives_empty_circles_and_keeps_the_shape() {
+        for (seed0, flipped) in [(21, false), (22, true), (23, false), (24, true)] {
+            let mut seed = seed0;
+            let g = cloud(&mut seed, 60, flipped);
+            let out = retriangulate(&g, &[]).unwrap();
+            assert_sound(&out, sign_of(&g));
+            assert_eq!(out.positions, g.positions);
+            assert!((area(&out) - area(&g)).abs() < 1e-3);
+            let mut a = outline(&g).0;
+            let mut b = outline(&out).0;
+            a.sort_unstable();
+            b.sort_unstable();
+            assert_eq!(a, b);
+            assert_empty_circles(&out);
+            // Running it again changes nothing.
+            let again = retriangulate(&out, &[]).unwrap();
+            assert_eq!(sorted_triangles(&again), sorted_triangles(&out));
+        }
+    }
+
+    #[test]
+    fn retriangulating_keeps_the_listed_edges() {
+        let mut seed = 31;
+        let g = cloud(&mut seed, 40, false);
+        let map = edge_map(&g);
+        // Keep a few inner edges of the scrambled mesh.
+        let keep: Vec<(u32, u32)> = map
+            .keys()
+            .filter(|&&(a, b)| a < b && map.contains_key(&(b, a)))
+            .copied()
+            .step_by(7)
+            .collect();
+        assert!(keep.len() > 3);
+        let out = retriangulate(&g, &keep).unwrap();
+        let after = edge_map(&out);
+        for &(a, b) in &keep {
+            assert!(
+                after.contains_key(&(a, b)) || after.contains_key(&(b, a)),
+                "{a}-{b}"
+            );
+        }
+        assert_sound(&out, 1.0);
+        assert!((area(&out) - area(&g)).abs() < 1e-3);
+        // Every other inner edge has an empty circle on both sides.
+        let keep: std::collections::HashSet<_> = keep.into_iter().collect();
+        for (&(u, v), &t1) in &after {
+            if u > v || keep.contains(&(u, v)) || !after.contains_key(&(v, u)) {
+                continue;
+            }
+            let c = apex(tri(&out, t1), u, v).unwrap();
+            let d = apex(tri(&out, after[&(v, u)]), v, u).unwrap();
+            let (det, size) = in_circle(p64(&out, u), p64(&out, v), p64(&out, c), p64(&out, d));
+            assert!(det <= 1e-9 * size.max(1e-12), "edge {u}-{v}");
+        }
+    }
+
+    #[test]
+    fn retriangulating_a_concave_outline_keeps_it() {
+        let g = Geometry {
+            positions: vec![
+                [0.0, 0.0],
+                [4.0, 0.0],
+                [4.0, 1.0],
+                [1.0, 1.0],
+                [1.0, 4.0],
+                [0.0, 4.0],
+                [0.0, 1.0],
+            ],
+            uvs: vec![[0.0, 0.0]; 7],
+            indices: vec![0, 1, 3, 1, 2, 3, 0, 3, 6, 6, 3, 4, 6, 4, 5],
+        };
+        let out = retriangulate(&g, &[]).unwrap();
+        assert_sound(&out, 1.0);
+        assert!((area(&out) - area(&g)).abs() < 1e-9);
+        assert_eq!(outline(&out).1, outline(&g).1);
+        assert_eq!(retriangulate(&g, &[(0, 99)]), Err(EditError::BadVertex));
     }
 
     #[test]
