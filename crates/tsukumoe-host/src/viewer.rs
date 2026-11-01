@@ -190,6 +190,18 @@ impl Viewer {
         dt: f32,
     ) -> Result<(), String> {
         self.scene.advance(dt);
+        self.draw(device, queue, target, size)
+    }
+
+    /// [`Viewer::render`] without advancing: draws the current pose again,
+    /// into a second target of another size.
+    pub fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target: &wgpu::TextureView,
+        size: (u32, u32),
+    ) -> Result<(), String> {
         let view = fit_view(self.scene.bounds, size.0, size.1);
         let list = self.scene.frame.draw_list(&self.scene.model);
         self.renderer

@@ -16,6 +16,16 @@ tsukumoe-ui.workspace = true
 wgpu.workspace = true
 eframe.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+syphon-wgpu = { workspace = true, optional = true }
+
+[features]
+# Publishes the output as a Syphon server (macOS; needs Syphon.framework to link and run).
+syphon = ["dep:syphon-wgpu"]
+
+[dev-dependencies]
+pollster.workspace = true
+
 [[bin]]
 name = "tsukumoe-host"
 path = "src/main.rs"

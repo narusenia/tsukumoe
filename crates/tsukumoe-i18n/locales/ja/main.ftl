@@ -29,3 +29,8 @@ live-transparent = 透過ウィンドウ
 live-borderless = 枠なし
 live-on-top = 最前面
 live-hint-panel = F1 でこのパネルを隠す・表示
+
+syphon-title = Syphon 出力
+syphon-name = サーバ名
+syphon-status-no-clients = 受信側なし
+syphon-status-publishing = 公開中

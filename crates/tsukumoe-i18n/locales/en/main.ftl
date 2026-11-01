@@ -33,3 +33,8 @@ live-transparent = Transparent window
 live-borderless = Borderless
 live-on-top = Always on top
 live-hint-panel = F1 hides or shows this panel
+
+syphon-title = Syphon output
+syphon-name = Server name
+syphon-status-no-clients = No receiver
+syphon-status-publishing = Publishing

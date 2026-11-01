@@ -15,6 +15,9 @@ use tsukumoe_ui::{
 
 use crate::live::{Live, Status};
 use crate::options::Options;
+use crate::output::Output;
+#[cfg(all(feature = "syphon", target_os = "macos"))]
+use crate::output::{SinkStatus, SyphonSink};
 use crate::settings;
 use crate::viewer::{Viewer, open_project};
 
@@ -30,6 +33,7 @@ const SMOOTHING: std::ops::RangeInclusive<f32> = 0.0..=0.3;
 const SENSITIVITY: std::ops::RangeInclusive<f32> = 0.5..=2.0;
 
 struct Target {
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
     id: egui::TextureId,
     size: (u32, u32),
@@ -54,6 +58,10 @@ struct Host {
     /// What the window currently is, to send commands only on a change.
     applied: WindowMode,
     show_panel: bool,
+    output: Output,
+    /// The Syphon server name; editable while the output is off.
+    #[cfg(all(feature = "syphon", target_os = "macos"))]
+    syphon_name: String,
 }
 
 /// The window's look. `transparent` clears the background to alpha 0 and drops
@@ -196,6 +204,46 @@ impl Host {
         }
     }
 
+    /// Starts or stops the Syphon output; a failure is shown in the panel.
+    #[cfg(all(feature = "syphon", target_os = "macos"))]
+    fn set_syphon(&mut self, on: bool) {
+        if !on {
+            self.output.detach();
+            return;
+        }
+        match SyphonSink::new(self.syphon_name.trim()) {
+            Ok(sink) => {
+                self.output.attach(Box::new(sink));
+                self.error = None;
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    #[cfg(all(feature = "syphon", target_os = "macos"))]
+    fn syphon_panel(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let text = |key: &str| tr(&ctx, key);
+        section_header(ui, &text("syphon-title"));
+        ui.horizontal(|ui| {
+            let mut on = self.output.enabled();
+            if switch(ui, &mut on, &text("syphon-title")).changed() {
+                self.set_syphon(on);
+            }
+            if let Some(sink) = self.output.sink() {
+                let (key, tone) = match sink.status() {
+                    SinkStatus::NoClients => ("syphon-status-no-clients", Tone::Warning),
+                    SinkStatus::Publishing => ("syphon-status-publishing", Tone::Success),
+                };
+                badge(ui, &text(key), tone);
+            }
+        });
+        hint(ui, text("syphon-name"));
+        ui.add_enabled_ui(!self.output.enabled(), |ui| {
+            text_input(ui, &mut self.syphon_name, &text("syphon-name"), "Tsukumoe");
+        });
+    }
+
     fn live_panel(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let text = |key: &str| tr(&ctx, key);
@@ -289,6 +337,8 @@ impl Host {
             );
             hint(ui, tr(ui.ctx(), "host-hint-drive"));
             self.live_panel(ui);
+            #[cfg(all(feature = "syphon", target_os = "macos"))]
+            self.syphon_panel(ui);
             self.appearance(ui);
             if let Some(e) = &self.error {
                 hint(ui, e.clone());
@@ -355,7 +405,12 @@ impl Host {
         });
         let view = texture.create_view(&Default::default());
         let id = renderer.register_native_texture(&rs.device, &view, wgpu::FilterMode::Linear);
-        self.target = Some(Target { view, id, size });
+        self.target = Some(Target {
+            texture,
+            view,
+            id,
+            size,
+        });
         // A new target is empty: draw it.
         self.active_until = self.active_until.max(Instant::now());
     }
@@ -394,7 +449,20 @@ impl Host {
                 .viewer
                 .render(&rs.device, &rs.queue, &target.view, size, dt)
             {
-                Ok(()) => self.error = None,
+                Ok(()) => {
+                    self.error = None;
+                    // The output gets the same frame the window just drew.
+                    let viewer = &mut self.viewer;
+                    if let Err(e) =
+                        self.output
+                            .publish(&rs.device, &rs.queue, &target.texture, |view, size| {
+                                viewer.draw(&rs.device, &rs.queue, view, size)
+                            })
+                    {
+                        self.error = Some(e);
+                        self.output.detach();
+                    }
+                }
                 Err(e) => self.error = Some(e),
             }
             ui.ctx().request_repaint();
@@ -439,7 +507,8 @@ impl eframe::App for Host {
             self.wake();
         }
         // Waiting for input also needs frames, to notice the first packet.
-        if self.live.enabled() {
+        // A receiver of the output needs a steady stream of frames too.
+        if self.live.enabled() || self.output.enabled() {
             self.wake();
         }
         if self.show_panel {
@@ -522,7 +591,17 @@ pub fn run(mut options: Options) -> Result<(), String> {
                 window,
                 applied: window,
                 show_panel: true,
+                output: Output::new(options.syphon_size),
+                #[cfg(all(feature = "syphon", target_os = "macos"))]
+                syphon_name: options.syphon_name.clone(),
             };
+            #[cfg(all(feature = "syphon", target_os = "macos"))]
+            if options.syphon {
+                host.set_syphon(true);
+                if let Some(e) = host.error.take() {
+                    return Err(e.into());
+                }
+            }
             if options.vmc_port.is_some() {
                 host.set_tracking(&cc.egui_ctx, true);
                 if let Some(e) = host.error.take() {

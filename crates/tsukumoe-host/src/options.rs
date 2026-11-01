@@ -1,14 +1,20 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! The command line: `tsukumoe-host <project> [--vmc-port <n>] [--mapping <json>] [--transparent]`.
+//! The command line: `tsukumoe-host <project> [--vmc-port <n>] [--mapping <json>] [--transparent]
+//! [--syphon [--syphon-name <name>] [--syphon-size <w>x<h>]]`.
 
 use std::fs;
 use std::path::PathBuf;
 
 use tsukumoe_tracking::{Overrides, Rule};
 
-pub const USAGE: &str = "usage: tsukumoe-host <project directory or archive> [--vmc-port <n>] [--mapping <json>] [--transparent]";
+use crate::output::{SYPHON_AVAILABLE, parse_size};
+
+pub const USAGE: &str = "usage: tsukumoe-host <project directory or archive> [--vmc-port <n>] [--mapping <json>] [--transparent] [--syphon [--syphon-name <name>] [--syphon-size <w>x<h>]]";
+
+/// The Syphon server name when `--syphon-name` is not given.
+pub const DEFAULT_SYPHON_NAME: &str = "Tsukumoe";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
@@ -18,6 +24,11 @@ pub struct Options {
     /// The mapping rules from `--mapping`, defaults merged in as the file says.
     pub mapping: Option<Vec<Rule>>,
     pub transparent: bool,
+    /// Publish to Syphon from the start (`--syphon`).
+    pub syphon: bool,
+    pub syphon_name: String,
+    /// Publish at this size instead of the window's (`--syphon-size`).
+    pub syphon_size: Option<(u32, u32)>,
 }
 
 /// Parses the arguments after the program name. Anything wrong is an error:
@@ -27,6 +38,9 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     let mut vmc_port = None;
     let mut mapping = None;
     let mut transparent = false;
+    let mut syphon = false;
+    let mut syphon_name = None;
+    let mut syphon_size = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -47,16 +61,37 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 mapping = Some(overrides.resolve());
             }
             "--transparent" => transparent = true,
+            "--syphon" => syphon = true,
+            "--syphon-name" => {
+                let name = args.next().ok_or("--syphon-name needs a name")?;
+                if name.is_empty() {
+                    return Err("--syphon-name: the name is empty".into());
+                }
+                syphon_name = Some(name.clone());
+            }
+            "--syphon-size" => {
+                let value = args.next().ok_or("--syphon-size needs <w>x<h>")?;
+                syphon_size = Some(parse_size(value).map_err(|e| format!("--syphon-size: {e}"))?);
+            }
             flag if flag.starts_with("--") => return Err(format!("unknown option '{flag}'")),
             _ if project.is_none() => project = Some(PathBuf::from(arg)),
             _ => return Err(format!("unexpected argument '{arg}'")),
         }
+    }
+    if syphon && !SYPHON_AVAILABLE {
+        return Err("--syphon: this build has no Syphon support (it needs macOS and the 'syphon' cargo feature: cargo build -p tsukumoe-host --features syphon)".into());
+    }
+    if !syphon && (syphon_name.is_some() || syphon_size.is_some()) {
+        return Err("--syphon-name and --syphon-size need --syphon".into());
     }
     Ok(Options {
         project: project.ok_or("missing project")?,
         vmc_port,
         mapping,
         transparent,
+        syphon,
+        syphon_name: syphon_name.unwrap_or_else(|| DEFAULT_SYPHON_NAME.to_owned()),
+        syphon_size,
     })
 }
 
@@ -80,6 +115,56 @@ mod tests {
         let o = parse_args(&["model"]).unwrap();
         assert_eq!(o.project, PathBuf::from("model"));
         assert_eq!((o.vmc_port, o.mapping, o.transparent), (None, None, false));
+        assert_eq!(
+            (o.syphon, o.syphon_name.as_str(), o.syphon_size),
+            (false, "Tsukumoe", None)
+        );
+    }
+
+    #[test]
+    fn syphon_options_parse_when_the_build_supports_it() {
+        let args = [
+            "m",
+            "--syphon",
+            "--syphon-name",
+            "Live",
+            "--syphon-size",
+            "1280x720",
+        ];
+        if SYPHON_AVAILABLE {
+            let o = parse_args(&args).unwrap();
+            assert_eq!(
+                (o.syphon, o.syphon_name.as_str(), o.syphon_size),
+                (true, "Live", Some((1280, 720)))
+            );
+            assert!(parse_args(&["--syphon", "m"]).unwrap().syphon);
+        } else {
+            let e = parse_args(&args).unwrap_err();
+            assert!(e.contains("--syphon") && e.contains("feature"), "{e}");
+        }
+    }
+
+    #[test]
+    fn syphon_without_the_build_support_or_the_flag_is_an_error() {
+        // Without --syphon the other two are never ignored silently.
+        assert!(parse_args(&["m", "--syphon-name", "x"]).is_err());
+        assert!(parse_args(&["m", "--syphon-size", "10x10"]).is_err());
+        if !SYPHON_AVAILABLE {
+            assert!(parse_args(&["m", "--syphon"]).is_err());
+        }
+    }
+
+    #[test]
+    fn a_bad_syphon_size_or_name_is_an_error() {
+        for args in [
+            &["m", "--syphon", "--syphon-size", "0x10"][..],
+            &["m", "--syphon", "--syphon-size", "wide"],
+            &["m", "--syphon", "--syphon-size"],
+            &["m", "--syphon", "--syphon-name"],
+            &["m", "--syphon", "--syphon-name", ""],
+        ] {
+            assert!(parse_args(args).is_err(), "{args:?}");
+        }
     }
 
     #[test]
