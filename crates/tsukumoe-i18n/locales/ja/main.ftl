@@ -34,3 +34,7 @@ syphon-title = Syphon 出力
 syphon-name = サーバ名
 syphon-status-no-clients = 受信側なし
 syphon-status-publishing = 公開中
+spout-title = Spout 出力
+spout-name = 送信側の名前
+spout-status-no-clients = 受信側なし
+spout-status-publishing = 公開中
