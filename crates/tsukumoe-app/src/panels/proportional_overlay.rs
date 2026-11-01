@@ -145,7 +145,7 @@ pub fn paint(
         let clip = painter.clip_rect().expand(8.0);
         for (&at, &w) in points.iter().zip(weights) {
             if w > 0.0 && w < 1.0 && clip.contains(at) {
-                painter.circle_filled(at, 2.0 + 3.0 * w, c.accent.gamma_multiply(0.25 + 0.65 * w));
+                painter.circle_filled(at, 4.5 + 4.0 * w, c.accent.gamma_multiply(0.3 + 0.6 * w));
             }
         }
     }
