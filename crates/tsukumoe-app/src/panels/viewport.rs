@@ -13,12 +13,15 @@ use egui::{
     Event, MouseWheelSource, MouseWheelUnit, PointerButton, Rect, Sense, TextureId, Ui, pos2,
 };
 use tsukumoe_gpu::{Renderer, Texture};
-use tsukumoe_ui::{hint, tr};
+use tsukumoe_ui::{Theme, hint, tr};
 
+use crate::actions::Tool;
 use crate::drag::DragAssignment;
+use crate::mesh_tool::{self, Hit, Mapper, MeshTool, Op, ToolError};
+use crate::panels::mesh_overlay;
 use crate::project::Document;
 use crate::scene::{Scene, fit_view};
-use crate::view::ViewState;
+use crate::view::{Selection, ViewState};
 
 /// How long to keep drawing after a change, so physics can settle.
 const SETTLE: Duration = Duration::from_secs(3);
@@ -132,7 +135,8 @@ impl Viewport {
         self.wake();
     }
 
-    /// Draws the viewport into the free space of `ui`; returns its response.
+    /// Draws the viewport into the free space of `ui`; returns its response and
+    /// what the mesh edit tool asks for (commands to send, or why it cannot).
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -140,7 +144,8 @@ impl Viewport {
         doc: &Document,
         view: &mut ViewState,
         drag: &DragAssignment,
-    ) -> egui::Response {
+        mesh: &mut MeshTool,
+    ) -> (egui::Response, Vec<Result<Op, ToolError>>) {
         let avail = ui.available_size();
         let ppp = ui.ctx().pixels_per_point();
         let size = (
@@ -204,10 +209,120 @@ impl Viewport {
                 egui::Color32::WHITE,
             );
         }
+        let ops = if view.tool == Tool::Mesh {
+            self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size)
+        } else {
+            Vec::new()
+        };
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }
-        response
+        (response, ops)
+    }
+
+    /// The mesh edit tool for one frame: pointer input, then the overlay.
+    #[allow(clippy::too_many_arguments)]
+    fn mesh_tool_frame(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        doc: &Document,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        tool: &mut MeshTool,
+        size: (u32, u32),
+    ) -> Vec<Result<Op, ToolError>> {
+        let mut ops = Vec::new();
+        let Some(scene) = &self.scene else {
+            return ops;
+        };
+        let theme = Theme::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        let model = doc.dispatcher.model();
+        let mesh = tool
+            .mesh()
+            .and_then(|n| Some((n.to_owned(), model.meshes().get(model.meshes().find(n)?)?)));
+        mesh_overlay::veil(&painter, &theme, rect);
+        let (modifiers, escape) = ui.input(|i| (i.modifiers, i.key_pressed(egui::Key::Escape)));
+        let arrow = |p: Option<egui::Pos2>| p.map(|p| [p.x, p.y]);
+        // The press position: a drag is reported only after it has moved.
+        let pressed = arrow(ui.input(|i| i.pointer.press_origin()));
+        let now = arrow(response.interact_pointer_pos());
+        let primary = PointerButton::Primary;
+        let tool_input = !drag.modifier_down(modifiers);
+        if let Some((name, mesh)) = &mesh {
+            tool.sanitize(mesh.positions.len());
+            if escape {
+                tool.cancel();
+            }
+            if tool_input
+                && response.drag_started_by(primary)
+                && let Some(at) = pressed
+            {
+                tool.press(&mesh.positions, &mesh.indices, &mapper, at, modifiers.shift);
+            }
+            if response.dragged_by(primary)
+                && let Some(at) = now
+            {
+                tool.drag(at);
+            }
+            if response.drag_stopped_by(primary)
+                && let Some(op) = tool.release(name, &mesh.positions, &mapper)
+            {
+                ops.push(Ok(op));
+            }
+        }
+        if tool_input
+            && response.clicked_by(primary)
+            && let Some(at) = now
+        {
+            let positions = mesh.as_ref().map_or(&[][..], |(_, m)| &m.positions[..]);
+            let indices = mesh.as_ref().map_or(&[][..], |(_, m)| &m.indices[..]);
+            let empty = mesh_tool::hit_test(positions, indices, &mapper, at) == Hit::Nothing;
+            let picked = (empty && !modifiers.shift && !modifiers.command)
+                .then(|| mesh_tool::pick_mesh(model, mapper.to_model(at)))
+                .flatten();
+            match (&mesh, picked) {
+                (Some((name, _)), Some(p)) if &p != name => {
+                    view.selection = Some(Selection::Mesh(p));
+                    view.touch();
+                }
+                (None, Some(p)) => {
+                    view.selection = Some(Selection::Mesh(p));
+                    view.touch();
+                }
+                (Some((name, _)), _) if modifiers.command => {
+                    if let Some(g) = mesh_tool::geometry_of(model, name) {
+                        ops.push(tool.add_at(name, &g, &mapper, at));
+                    }
+                }
+                (Some(_), _) => tool.click(positions, indices, &mapper, at, modifiers.shift),
+                (None, None) => {}
+            }
+        }
+        match &mesh {
+            Some((_, m)) => {
+                let preview = tool.preview(&m.positions, &mapper);
+                mesh_overlay::paint(
+                    &painter,
+                    &theme,
+                    &mapper,
+                    &m.positions,
+                    &m.indices,
+                    tool,
+                    preview.as_deref(),
+                );
+                mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-hint"));
+            }
+            None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),
+        }
+        ops
     }
 
     /// Modifier + drag moves the assigned parameters (view state only).
@@ -242,7 +357,8 @@ impl Viewport {
     /// pinch) the camera.
     fn navigate(&mut self, ui: &Ui, response: &egui::Response, rect: Rect, view: &mut ViewState) {
         let size = [rect.width(), rect.height()];
-        let shift = ui.input(|i| i.modifiers.shift);
+        // The mesh tool takes Shift + drag for its box selection.
+        let shift = ui.input(|i| i.modifiers.shift) && view.tool != Tool::Mesh;
         if response.dragged_by(PointerButton::Middle)
             || (shift && response.dragged_by(PointerButton::Primary))
         {
