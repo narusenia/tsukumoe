@@ -7,11 +7,13 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Vec2};
+use tsukumoe_tracking::VmcReceiver;
 use tsukumoe_ui::{
-    Arg, Density, Language, Mode, NamedTheme, Preferences, Theme, Variant, button, hint, label,
-    panel, select, slider, tr, tr_args,
+    Arg, Density, Language, Mode, NamedTheme, Preferences, Theme, Tone, Variant, badge, button,
+    checkbox, hint, label, panel, section_header, select, slider, switch, text_input, tr, tr_args,
 };
 
+use crate::live::{Live, Status};
 use crate::options::Options;
 use crate::settings;
 use crate::viewer::{Viewer, open_project};
@@ -23,6 +25,9 @@ const DRAG_POINTS: f32 = 400.0;
 const SETTLE: Duration = Duration::from_secs(3);
 const SIDEBAR_WIDTH: f32 = 300.0;
 const READOUT_WIDTH: f32 = 40.0;
+/// Smoothing time constants, in seconds, and the blendshape gain.
+const SMOOTHING: std::ops::RangeInclusive<f32> = 0.0..=0.3;
+const SENSITIVITY: std::ops::RangeInclusive<f32> = 0.5..=2.0;
 
 struct Target {
     view: wgpu::TextureView,
@@ -42,6 +47,22 @@ struct Host {
     themes: Vec<NamedTheme>,
     /// Where preferences are saved; `None` when the environment has no home.
     config: Option<PathBuf>,
+    live: Live,
+    started: Instant,
+    port: String,
+    window: WindowMode,
+    /// What the window currently is, to send commands only on a change.
+    applied: WindowMode,
+    show_panel: bool,
+}
+
+/// The window's look. `transparent` clears the background to alpha 0 and drops
+/// the opaque panel behind the model; the other two apply only then.
+#[derive(Clone, Copy, PartialEq)]
+struct WindowMode {
+    transparent: bool,
+    borderless: bool,
+    on_top: bool,
 }
 
 impl Host {
@@ -134,6 +155,120 @@ impl Host {
         }
     }
 
+    /// Sends the window commands for a changed `window`.
+    fn apply_window(&mut self, ctx: &egui::Context) {
+        use egui::{ViewportCommand as Cmd, WindowLevel};
+        let (old, new) = (self.applied, self.window);
+        if old == new {
+            return;
+        }
+        let borderless = new.transparent && new.borderless;
+        if borderless != (old.transparent && old.borderless) {
+            ctx.send_viewport_cmd(Cmd::Decorations(!borderless));
+        }
+        let top = new.transparent && new.on_top;
+        if top != (old.transparent && old.on_top) {
+            ctx.send_viewport_cmd(Cmd::WindowLevel(if top {
+                WindowLevel::AlwaysOnTop
+            } else {
+                WindowLevel::Normal
+            }));
+        }
+        self.applied = new;
+        self.wake();
+    }
+
+    /// Starts or stops the VMC receiver; a bind failure is shown in the panel.
+    fn set_tracking(&mut self, ctx: &egui::Context, on: bool) {
+        if !on {
+            self.live.detach();
+            return;
+        }
+        match self.port.trim().parse::<u16>() {
+            Ok(port) if port != 0 => match VmcReceiver::bind(("0.0.0.0", port)) {
+                Ok(rx) => {
+                    self.live.attach(Box::new(rx));
+                    self.error = None;
+                }
+                Err(e) => self.error = Some(format!("UDP {port}: {e}")),
+            },
+            _ => self.error = Some(tr(ctx, "live-port-invalid")),
+        }
+    }
+
+    fn live_panel(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let text = |key: &str| tr(&ctx, key);
+        section_header(ui, &text("live-tracking"));
+        ui.horizontal(|ui| {
+            let mut on = self.live.enabled();
+            if switch(ui, &mut on, &text("live-tracking")).changed() {
+                self.set_tracking(&ctx, on);
+            }
+            let (key, tone) = match self.live.status() {
+                Status::Off => ("live-status-off", Tone::Neutral),
+                Status::Waiting => ("live-status-waiting", Tone::Warning),
+                Status::Receiving => ("live-status-receiving", Tone::Success),
+                Status::Dropped => ("live-status-dropped", Tone::Error),
+            };
+            badge(ui, &text(key), tone);
+        });
+        hint(ui, text("live-port"));
+        ui.add_enabled_ui(!self.live.enabled(), |ui| {
+            text_input(ui, &mut self.port, &text("live-port"), "39539");
+        });
+        for (key, range, get, set) in [
+            (
+                "live-smoothing",
+                SMOOTHING,
+                Live::smoothing as fn(&Live) -> f32,
+                Live::set_smoothing as fn(&mut Live, f32),
+            ),
+            (
+                "live-sensitivity",
+                SENSITIVITY,
+                Live::sensitivity,
+                Live::set_sensitivity,
+            ),
+        ] {
+            let mut value = get(&self.live);
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(110.0, 20.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| label(ui, text(key)),
+                );
+                let width = (ui.available_width() - READOUT_WIDTH).max(40.0);
+                let changed = ui
+                    .allocate_ui(Vec2::new(width, 20.0), |ui| {
+                        slider(ui, &mut value, range, &text(key)).changed()
+                    })
+                    .inner;
+                hint(ui, format!("{value:.2}"));
+                if changed {
+                    set(&mut self.live, value);
+                }
+            });
+        }
+        hint(
+            ui,
+            tr_args(
+                &ctx,
+                "live-mapping",
+                &[
+                    ("bound", Arg::from(self.live.bound())),
+                    ("skipped", Arg::from(self.live.skipped())),
+                ],
+            ),
+        );
+        checkbox(ui, &mut self.window.transparent, &text("live-transparent"));
+        if self.window.transparent {
+            checkbox(ui, &mut self.window.borderless, &text("live-borderless"));
+            checkbox(ui, &mut self.window.on_top, &text("live-on-top"));
+        }
+        hint(ui, text("live-hint-panel"));
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         let t = Theme::get(ui.ctx());
         panel(ui, |ui| {
@@ -153,6 +288,7 @@ impl Host {
                 tr_args(ui.ctx(), "host-parameters", &[("count", Arg::from(count))]),
             );
             hint(ui, tr(ui.ctx(), "host-hint-drive"));
+            self.live_panel(ui);
             self.appearance(ui);
             if let Some(e) = &self.error {
                 hint(ui, e.clone());
@@ -163,6 +299,7 @@ impl Host {
                     for i in 0..self.viewer.scene.parameters().len() {
                         let p = self.viewer.scene.parameters()[i].clone();
                         let mut value = self.viewer.scene.value(i);
+                        let driven = self.live.is_driven(i);
                         ui.horizontal(|ui| {
                             ui.allocate_ui_with_layout(
                                 Vec2::new(110.0, t.metrics.control),
@@ -172,7 +309,11 @@ impl Host {
                             let width = (ui.available_width() - READOUT_WIDTH).max(40.0);
                             let changed = ui
                                 .allocate_ui(Vec2::new(width, t.metrics.control), |ui| {
-                                    slider(ui, &mut value, p.min..=p.max, &p.name).changed()
+                                    // Read-only while the tracking drives it.
+                                    ui.add_enabled_ui(!driven, |ui| {
+                                        slider(ui, &mut value, p.min..=p.max, &p.name).changed()
+                                    })
+                                    .inner
                                 })
                                 .inner;
                             hint(ui, format!("{value:.2}"));
@@ -271,40 +412,74 @@ impl Host {
 }
 
 impl eframe::App for Host {
+    /// Transparent: the surface is cleared to alpha 0 and nothing paints behind
+    /// the model. The renderer's output is premultiplied alpha, which is also
+    /// what egui composites, so the image goes through unchanged.
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        if self.window.transparent {
+            [0.0; 4]
+        } else {
+            visuals.panel_fill.to_normalized_gamma_f32()
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let Theme {
             colors, metrics, ..
         } = Theme::get(ui.ctx());
         let (background, pad) = (colors.background, metrics.pad);
-        egui::Panel::left("parameters")
-            .resizable(false)
-            .exact_size(SIDEBAR_WIDTH)
-            .frame(egui::Frame::NONE.fill(background).inner_margin(pad))
-            .show(ui, |ui| self.sidebar(ui));
+        self.apply_window(ui.ctx());
+        if ui.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.show_panel = !self.show_panel;
+        }
+        if self
+            .live
+            .step(self.started.elapsed().as_secs_f64(), &mut self.viewer.scene)
+        {
+            self.wake();
+        }
+        // Waiting for input also needs frames, to notice the first packet.
+        if self.live.enabled() {
+            self.wake();
+        }
+        if self.show_panel {
+            egui::Panel::left("parameters")
+                .resizable(false)
+                .exact_size(SIDEBAR_WIDTH)
+                .frame(egui::Frame::NONE.fill(background).inner_margin(pad))
+                .show(ui, |ui| self.sidebar(ui));
+        }
+        let fill = if self.window.transparent {
+            egui::Color32::TRANSPARENT
+        } else {
+            background
+        };
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(background))
+            .frame(egui::Frame::NONE.fill(fill))
             .show(ui, |ui| self.viewport(ui, frame));
     }
 }
 
 /// Opens `path` and shows it until the window closes.
-pub fn run(options: Options) -> Result<(), String> {
+pub fn run(mut options: Options) -> Result<(), String> {
     let path = options.project.clone();
     let project = open_project(&path)?;
     let name = path.file_name().map_or_else(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
-    let options = eframe::NativeOptions {
+    let native = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title(format!("Tsukumoe - {name}"))
-            .with_inner_size([1200.0, 800.0]),
+            .with_inner_size([1200.0, 800.0])
+            // The surface must be created with alpha to be made transparent later.
+            .with_transparent(true),
         ..Default::default()
     };
     eframe::run_native(
         "tsukumoe-host",
-        options,
+        native,
         Box::new(move |cc| {
             tsukumoe_ui::init(&cc.egui_ctx);
             let config = settings::config_dir();
@@ -322,7 +497,16 @@ pub fn run(options: Options) -> Result<(), String> {
                 .as_ref()
                 .ok_or("no wgpu render state")?;
             let viewer = Viewer::new(&rs.device, &rs.queue, &project)?;
-            Ok(Box::new(Host {
+            let live = Live::new(&viewer.scene, options.mapping.take());
+            let port = options
+                .vmc_port
+                .map_or_else(|| "39539".to_owned(), |p| p.to_string());
+            let window = WindowMode {
+                transparent: options.transparent,
+                borderless: false,
+                on_top: false,
+            };
+            let mut host = Host {
                 name,
                 viewer,
                 target: None,
@@ -332,7 +516,20 @@ pub fn run(options: Options) -> Result<(), String> {
                 prefs,
                 themes,
                 config,
-            }))
+                live,
+                started: Instant::now(),
+                port,
+                window,
+                applied: window,
+                show_panel: true,
+            };
+            if options.vmc_port.is_some() {
+                host.set_tracking(&cc.egui_ctx, true);
+                if let Some(e) = host.error.take() {
+                    return Err(e.into());
+                }
+            }
+            Ok(Box::new(host))
         }),
     )
     .map_err(|e| e.to_string())
