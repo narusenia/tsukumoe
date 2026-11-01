@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 29] = [
+pub const ACTIONS: [&str; 30] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -32,6 +32,7 @@ pub const ACTIONS: [&str; 29] = [
     "deformer.create-warp",
     "deformer.create-rotation",
     "deformer.reset",
+    "proportional.toggle",
     "panel.show.viewport",
     "panel.show.tree",
     "panel.show.deformers",
@@ -49,7 +50,8 @@ pub const ACTIONS: [&str; 29] = [
 pub fn context_of(action: &str) -> Option<&'static str> {
     (action.starts_with("viewport.")
         || action.starts_with("mesh.")
-        || action.starts_with("deformer."))
+        || action.starts_with("deformer.")
+        || action.starts_with("proportional."))
     .then_some("viewport")
 }
 

@@ -390,6 +390,17 @@ impl DeformerTool {
         &self.points
     }
 
+    /// True while grid points are being dragged (not a handle or a box).
+    pub fn is_moving_points(&self) -> bool {
+        matches!(
+            self.gesture,
+            Some(Gesture::Move {
+                grab: Grab::Points,
+                ..
+            })
+        )
+    }
+
     pub fn is_dragging(&self) -> bool {
         matches!(
             self.gesture,

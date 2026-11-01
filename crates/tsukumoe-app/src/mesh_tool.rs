@@ -350,6 +350,11 @@ impl MeshTool {
         self.edge
     }
 
+    /// True while selected vertices are being dragged (not a box).
+    pub fn is_moving(&self) -> bool {
+        matches!(self.gesture, Some(Gesture::Move { .. }))
+    }
+
     pub fn is_dragging(&self) -> bool {
         matches!(
             self.gesture,
