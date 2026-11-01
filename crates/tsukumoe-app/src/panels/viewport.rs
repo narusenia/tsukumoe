@@ -13,6 +13,7 @@ use egui::{PointerButton, Rect, Sense, TextureId, Ui, pos2};
 use tsukumoe_gpu::{Renderer, Texture};
 use tsukumoe_ui::{hint, tr};
 
+use crate::drag::DragAssignment;
 use crate::project::Document;
 use crate::scene::{Scene, fit_view};
 use crate::view::ViewState;
@@ -107,6 +108,7 @@ impl Viewport {
         rs: &RenderState,
         doc: &Document,
         view: &mut ViewState,
+        drag: &DragAssignment,
     ) -> egui::Response {
         let avail = ui.available_size();
         let ppp = ui.ctx().pixels_per_point();
@@ -139,6 +141,7 @@ impl Viewport {
             self.wake();
         }
         self.navigate(ui, &response, rect, view);
+        self.drag_parameters(ui, &response, doc, view, drag);
 
         let now = Instant::now();
         if (resized || now < self.active_until)
@@ -176,12 +179,40 @@ impl Viewport {
         response
     }
 
-    /// Pan (middle drag, or Space + drag) and zoom (wheel, pinch) the camera.
+    /// Modifier + drag moves the assigned parameters (view state only).
+    fn drag_parameters(
+        &mut self,
+        ui: &Ui,
+        response: &egui::Response,
+        doc: &Document,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+    ) {
+        let modifiers = ui.input(|i| i.modifiers);
+        if !response.dragged_by(PointerButton::Primary) || !drag.modifier_down(modifiers) {
+            return;
+        }
+        let d = ui.input(|i| i.pointer.delta());
+        let model = doc.dispatcher.model();
+        let params = model.parameters();
+        let updates = drag.drive([d.x, d.y], |name| {
+            let p = params.get(params.find(name)?)?;
+            Some((p.clone(), view.param(name, p)))
+        });
+        for (name, value) in updates {
+            if let Some(p) = params.find(&name).and_then(|id| params.get(id)) {
+                view.set_param(&name, p, value);
+            }
+        }
+        self.wake();
+    }
+
+    /// Pan (middle drag, or Shift + drag) and zoom (wheel, pinch) the camera.
     fn navigate(&mut self, ui: &Ui, response: &egui::Response, rect: Rect, view: &mut ViewState) {
         let size = [rect.width(), rect.height()];
-        let space = ui.input(|i| i.key_down(egui::Key::Space));
+        let shift = ui.input(|i| i.modifiers.shift);
         if response.dragged_by(PointerButton::Middle)
-            || (space && response.dragged_by(PointerButton::Primary))
+            || (shift && response.dragged_by(PointerButton::Primary))
         {
             let d = ui.input(|i| i.pointer.delta());
             view.camera.pan([d.x, d.y], size);

@@ -21,6 +21,7 @@ tsukumoe-wasm = { path = "crates/tsukumoe-wasm", version = "0.1.0" }
 tsukumoe-host = { path = "crates/tsukumoe-host", version = "0.1.0" }
 tsukumoe-tracking = { path = "crates/tsukumoe-tracking", version = "0.1.0" }
 tsukumoe-ai = { path = "crates/tsukumoe-ai", version = "0.1.0" }
+tsukumoe-cli = { path = "crates/tsukumoe-cli", version = "0.1.0" }
 tsukumoe-app = { path = "crates/tsukumoe-app", version = "0.1.0" }
 
 serde = { version = "1", features = ["derive"] }

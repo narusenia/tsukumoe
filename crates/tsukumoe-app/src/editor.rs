@@ -8,12 +8,15 @@
 use std::path::{Path, PathBuf};
 
 use crate::actions::{self, ACTIONS, Tool};
+use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
 use tsukumoe_ui::dock::{self, PanelHost};
-use tsukumoe_ui::{Arg, Keymap, Toasts, Tone, Variant, button, hint, text_input, tr, tr_args};
+use tsukumoe_ui::{
+    Arg, Keymap, Toasts, Tone, Variant, button, checkbox, hint, label, text_input, tr, tr_args,
+};
 
 use crate::panels::viewport::Viewport;
 use crate::project::{Document, Recent};
@@ -24,6 +27,7 @@ use crate::workspace::{Layouts, Preset, Workspace};
 const LAYOUTS_FILE: &str = "layouts.json";
 const STATE_FILE: &str = "state.json";
 const KEYMAP_FILE: &str = "keymap.json";
+const DRAG_FILE: &str = "drag.json";
 
 pub enum Dialog {
     Open(String),
@@ -32,6 +36,8 @@ pub enum Dialog {
     ConfirmPreset(Preset),
     /// The shortcut list: the text of each action's field, and the last error.
     Keymap(Vec<String>, Option<String>),
+    /// The drag-to-parameter assignment being edited.
+    Drag,
 }
 
 pub struct Editor {
@@ -46,6 +52,7 @@ pub struct Editor {
     pub view: ViewState,
     pub palette: Palette,
     pub keymap: Keymap,
+    pub drag: DragAssignment,
     /// Whether the pointer was over the viewport last frame (a keymap context).
     viewport_hovered: bool,
     viewport: Option<Viewport>,
@@ -68,6 +75,8 @@ impl Editor {
         let keymap = read(KEYMAP_FILE)
             .and_then(|t| Keymap::from_json(&t).ok())
             .unwrap_or_else(actions::cubism_compatible);
+        let drag =
+            read(DRAG_FILE).map_or_else(DragAssignment::default, |t| DragAssignment::from_json(&t));
         Self {
             doc: None,
             workspace: serde_json::from_value(state["workspace"].clone()).unwrap_or_default(),
@@ -79,6 +88,7 @@ impl Editor {
             view: ViewState::default(),
             palette: Palette::default(),
             keymap,
+            drag,
             viewport_hovered: false,
             viewport: None,
             layouts_dirty: false,
@@ -325,6 +335,10 @@ impl Editor {
                     self.open_palette();
                     ui.close();
                 }
+                if tsukumoe_ui::menu_item(ui, &t("drag-title"), None).clicked() {
+                    self.dialog = Some(Dialog::Drag);
+                    ui.close();
+                }
                 if tsukumoe_ui::menu_item(ui, &t("keymap-title"), None).clicked() {
                     let texts = ACTIONS
                         .iter()
@@ -415,6 +429,19 @@ impl Editor {
             return;
         };
         let t = |key: &str| tr(ctx, key);
+        if matches!(dialog, Dialog::Drag) {
+            let mut open = true;
+            if self.drag_dialog(ctx, &mut open)
+                && let Some(dir) = &self.settings_dir
+                && let Err(e) = settings::write(dir, DRAG_FILE, &self.drag.to_json())
+            {
+                self.toasts.push(ctx, Tone::Error, e);
+            }
+            if open {
+                self.dialog = Some(dialog);
+            }
+            return;
+        }
         if let Dialog::Keymap(texts, error) = &mut dialog {
             let mut open = true;
             let changed = self.keymap_dialog(ctx, texts, error, &mut open);
@@ -434,7 +461,7 @@ impl Editor {
             Dialog::SaveAs(_) => (t("dialog-save-as-title"), "dialog-save-as"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
-            Dialog::Keymap(..) => unreachable!("handled above"),
+            Dialog::Keymap(..) | Dialog::Drag => unreachable!("handled above"),
         };
         tsukumoe_ui::dialog(ctx, id, &title, &mut open, |ui| {
             match &mut dialog {
@@ -449,7 +476,7 @@ impl Editor {
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
                 }
-                Dialog::Keymap(..) => {}
+                Dialog::Keymap(..) | Dialog::Drag => {}
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -493,6 +520,73 @@ impl Editor {
 }
 
 impl Editor {
+    /// The drag-to-parameter settings; returns whether they changed.
+    fn drag_dialog(&mut self, ctx: &Context, open: &mut bool) -> bool {
+        let t = |key: &str| tr(ctx, key);
+        let names: Vec<String> = self.doc.as_ref().map_or_else(Vec::new, |d| {
+            d.dispatcher
+                .model()
+                .parameters()
+                .iter()
+                .map(|(_, n, _)| n.to_owned())
+                .collect()
+        });
+        let before = self.drag.clone();
+        let drag = &mut self.drag;
+        tsukumoe_ui::dialog(ctx, "dialog-drag", &t("drag-title"), open, |ui| {
+            hint(ui, t("drag-hint"));
+            let modifiers = [
+                (Modifier::Alt, "Alt".to_owned()),
+                (Modifier::Ctrl, "Ctrl".to_owned()),
+                (Modifier::Cmd, "Cmd".to_owned()),
+            ];
+            let options: Vec<(Modifier, &str)> =
+                modifiers.iter().map(|(m, n)| (*m, n.as_str())).collect();
+            tsukumoe_ui::select(
+                ui,
+                "drag-modifier",
+                &t("drag-modifier"),
+                &mut drag.modifier,
+                &options,
+            );
+            for (key, axis) in [("drag-x", &mut drag.x), ("drag-y", &mut drag.y)] {
+                ui.separator();
+                label(ui, t(key));
+                let mut choice: Option<String> = axis.as_ref().map(|a| a.parameter.clone());
+                let mut options: Vec<(Option<String>, &str)> = vec![(None, "-")];
+                options.extend(names.iter().map(|n| (Some(n.clone()), n.as_str())));
+                let none = t("drag-none");
+                options[0].1 = &none;
+                if tsukumoe_ui::select(ui, key, &t("drag-parameter"), &mut choice, &options)
+                    .changed()
+                {
+                    *axis = choice.map(|parameter| match axis.take() {
+                        Some(a) => AxisTarget { parameter, ..a },
+                        None => AxisTarget {
+                            parameter,
+                            points_per_range: 400.0,
+                            invert: false,
+                        },
+                    });
+                }
+                if let Some(a) = axis {
+                    ui.horizontal(|ui| {
+                        label(ui, t("drag-sensitivity"));
+                        tsukumoe_ui::number(
+                            ui,
+                            &mut a.points_per_range,
+                            20.0..=4000.0,
+                            5.0,
+                            &t("drag-sensitivity"),
+                        );
+                        checkbox(ui, &mut a.invert, &t("drag-invert"));
+                    });
+                }
+            }
+        });
+        *drag != before
+    }
+
     /// The shortcut list. Each field applies when it loses focus; returns
     /// whether the keymap changed.
     fn keymap_dialog(
@@ -614,7 +708,9 @@ impl PanelHost for Panels<'_> {
                         }
                     }
                     if let Some(vp) = editor.viewport.as_mut() {
-                        editor.viewport_hovered = vp.show(ui, rs, doc, &mut editor.view).hovered();
+                        editor.viewport_hovered = vp
+                            .show(ui, rs, doc, &mut editor.view, &editor.drag)
+                            .hovered();
                     }
                 }
                 None => viewport::placeholder(ui, true),

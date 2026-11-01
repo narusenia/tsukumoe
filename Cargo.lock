@@ -3833,6 +3833,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tsukumoe-cli",
  "tsukumoe-core",
  "tsukumoe-format",
  "tsukumoe-gpu",
