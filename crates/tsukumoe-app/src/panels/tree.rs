@@ -169,8 +169,30 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
     // Empty space below the rows clears the selection.
     let area = ui.available_rect_before_wrap();
     let background = ui.interact(area, ui.next_auto_id(), Sense::click());
+    let panel_id = background.id;
     if background.clicked() {
         view.clear_selection();
+        ui.memory_mut(|m| m.request_focus(panel_id));
+    }
+    // The keys work while the panel has the keyboard (and no name is being typed).
+    let focused = ui.memory(|m| m.has_focus(panel_id));
+    if focused {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                panel_id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    tab: false,
+                    escape: false,
+                },
+            );
+        });
+        if view.tree(panel).renaming.is_none() {
+            for key in pressed_keys(ui) {
+                outs.extend(apply_key(&rows, view, panel, key));
+            }
+        }
     }
 
     let mut scroll = egui::ScrollArea::vertical().auto_shrink(false);
@@ -419,6 +441,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                 activate(model, view, panel, row);
             }
             if response.clicked() {
+                ui.memory_mut(|m| m.request_focus(panel_id));
                 let modifiers = ui.input(|i| i.modifiers);
                 let tool = view.tool;
                 if modifiers.command {
@@ -437,6 +460,90 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
     view.tree_mut(panel).scroll = (shown.state.clamped_offset().y, shown.inner_rect.height());
     view.tree_mut(panel).seen = view.selection.clone();
     outs
+}
+
+/// A key the panel handles while it has the keyboard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelKey {
+    Up,
+    Down,
+    Left,
+    Right,
+    /// Enter or F2: change the name of the selected row.
+    Rename,
+    Delete,
+    /// Ctrl / Cmd + D.
+    Duplicate,
+}
+
+/// What a key does: it moves the selection, opens or closes a folder, starts
+/// renaming, or asks to delete or duplicate the selection (the returned `Out`).
+pub fn apply_key(rows: &[Row], view: &mut ViewState, panel: Panel, key: PanelKey) -> Option<Out> {
+    let nav = match key {
+        PanelKey::Up => Some(tree_model::NavKey::Up),
+        PanelKey::Down => Some(tree_model::NavKey::Down),
+        PanelKey::Left => Some(tree_model::NavKey::Left),
+        PanelKey::Right => Some(tree_model::NavKey::Right),
+        _ => None,
+    };
+    if let Some(nav) = nav {
+        let from = view.selection.clone();
+        if let Some(to) = tree_model::navigate(rows, from.as_ref(), nav, view.tree_mut(panel)) {
+            view.select_only(to);
+        }
+        return None;
+    }
+    match key {
+        PanelKey::Rename => {
+            let row = view
+                .selection
+                .as_ref()
+                .and_then(|s| rows.iter().find(|r| r.selection() == *s))?;
+            view.tree_mut(panel).renaming = Some(Renaming::new(row.kind, &row.name));
+            None
+        }
+        PanelKey::Delete => {
+            let items = view.selected();
+            (!items.is_empty()).then_some(Out::Delete(items))
+        }
+        PanelKey::Duplicate => {
+            let items: Vec<Selection> = view
+                .selected()
+                .into_iter()
+                .filter(|s| {
+                    matches!(
+                        s,
+                        Selection::Mesh(_) | Selection::Warp(_) | Selection::Rotation(_)
+                    )
+                })
+                .collect();
+            (!items.is_empty()).then_some(Out::Duplicate(items))
+        }
+        _ => None,
+    }
+}
+
+/// The keys pressed this frame that the panel handles.
+fn pressed_keys(ui: &mut Ui) -> Vec<PanelKey> {
+    use egui::{Key, Modifiers};
+    let table = [
+        (Modifiers::NONE, Key::ArrowUp, PanelKey::Up),
+        (Modifiers::NONE, Key::ArrowDown, PanelKey::Down),
+        (Modifiers::NONE, Key::ArrowLeft, PanelKey::Left),
+        (Modifiers::NONE, Key::ArrowRight, PanelKey::Right),
+        (Modifiers::NONE, Key::Enter, PanelKey::Rename),
+        (Modifiers::NONE, Key::F2, PanelKey::Rename),
+        (Modifiers::NONE, Key::Delete, PanelKey::Delete),
+        (Modifiers::NONE, Key::Backspace, PanelKey::Delete),
+        (Modifiers::COMMAND, Key::D, PanelKey::Duplicate),
+    ];
+    ui.input_mut(|i| {
+        table
+            .iter()
+            .filter(|(m, k, _)| i.consume_key(*m, *k))
+            .map(|(_, _, key)| *key)
+            .collect()
+    })
 }
 
 /// A double click on a row: a part selects the meshes under it, anything else
@@ -1039,5 +1146,82 @@ mod tests {
                 "{text:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_keys_move_rename_delete_and_duplicate_as_state_functions() {
+        let m = many();
+        let mut view = ViewState::default();
+        let rows = |v: &ViewState| tree_model::rows(&m, v.tree(Panel::Parts), Panel::Parts);
+        let sel = |n: &str| Selection::Mesh(n.into());
+        view.select_only(sel("a1"));
+        assert_eq!(
+            apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Down),
+            None
+        );
+        assert_eq!(view.selection, Some(sel("a2")));
+        apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Up);
+        assert_eq!(view.selection, Some(sel("a1")));
+        // Left on a leaf goes to the folder, Left again closes it, Right opens it.
+        apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Left);
+        assert_eq!(view.selection, Some(Selection::Part("Arm".into())));
+        apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Left);
+        assert!(!view.parts.is_open("p:Arm"));
+        apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Right);
+        assert!(view.parts.is_open("p:Arm"));
+        // Enter / F2 starts renaming the selected row.
+        view.select_only(sel("a3"));
+        assert_eq!(
+            apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Rename),
+            None
+        );
+        assert_eq!(
+            view.parts.renaming.as_ref().map(|r| r.name.as_str()),
+            Some("a3")
+        );
+        view.parts.renaming = None;
+        // Delete and Ctrl+D ask for the whole selection; a part is not duplicated.
+        view.select_all(vec![sel("a1"), Selection::Part("Arm".into())]);
+        assert_eq!(
+            apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Delete),
+            Some(Out::Delete(vec![sel("a1"), Selection::Part("Arm".into())]))
+        );
+        assert_eq!(
+            apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Duplicate),
+            Some(Out::Duplicate(vec![sel("a1")]))
+        );
+        view.clear_selection();
+        assert_eq!(
+            apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Delete),
+            None
+        );
+        assert_eq!(
+            apply_key(&rows(&view), &mut view, Panel::Parts, PanelKey::Rename),
+            None
+        );
+    }
+
+    #[test]
+    fn the_keys_work_only_while_the_panel_has_the_keyboard() {
+        let mut h = collecting(many(), Panel::Parts);
+        h.run();
+        // Selected from elsewhere: the panel has no focus, so Down does nothing.
+        h.state_mut().1.select_only(Selection::Mesh("a1".into()));
+        h.run();
+        h.key_press(egui::Key::ArrowDown);
+        h.run();
+        assert_eq!(h.state().1.selection, Some(Selection::Mesh("a1".into())));
+        // A click gives it the keyboard.
+        h.get_by_label("a1").click();
+        h.run();
+        h.key_press(egui::Key::ArrowDown);
+        h.run();
+        assert_eq!(h.state().1.selection, Some(Selection::Mesh("a2".into())));
+        h.key_press(egui::Key::Delete);
+        h.run();
+        assert_eq!(
+            h.state().2,
+            [Out::Delete(vec![Selection::Mesh("a2".into())])]
+        );
     }
 }
