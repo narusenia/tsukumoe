@@ -83,8 +83,8 @@ pub struct Scene {
     bounds: [f32; 4],
     warp_names: Vec<String>,
     rotation_names: Vec<String>,
-    preview: Option<Preview>,
-    saved: Option<Saved>,
+    previews: Vec<Preview>,
+    saved: Vec<Saved>,
 }
 
 impl Scene {
@@ -107,36 +107,50 @@ impl Scene {
                 .iter()
                 .map(|(_, n, _)| n.to_owned())
                 .collect(),
-            preview: None,
-            saved: None,
+            previews: Vec::new(),
+            saved: Vec::new(),
         })
     }
 
     /// Shows `preview` (or, with `None`, the model as it is). True if that
     /// changed what is drawn; the next [`Scene::advance`] evaluates it.
     pub fn set_preview(&mut self, preview: Option<&Preview>) -> bool {
-        if self.preview.as_ref() == preview {
+        self.set_previews(preview.map(std::slice::from_ref).unwrap_or_default())
+    }
+
+    /// Shows several previews at once (a drag that moves a shape and what
+    /// hangs from it). An empty list shows the model as it is.
+    pub fn set_previews(&mut self, previews: &[Preview]) -> bool {
+        if self.previews == previews {
             return false;
         }
-        match self.saved.take() {
-            Some(Saved::Floats { warp, start, data }) => {
-                let target = if warp {
-                    self.model.warp_base_points.to_mut()
-                } else {
-                    self.model.mesh_base_positions.to_mut()
-                };
-                target[start..start + data.len()].copy_from_slice(&data);
+        // Put back what the last previews replaced, in the opposite order.
+        for saved in std::mem::take(&mut self.saved).into_iter().rev() {
+            match saved {
+                Saved::Floats { warp, start, data } => {
+                    let target = if warp {
+                        self.model.warp_base_points.to_mut()
+                    } else {
+                        self.model.mesh_base_positions.to_mut()
+                    };
+                    target[start..start + data.len()].copy_from_slice(&data);
+                }
+                Saved::Rotation { index, base } => {
+                    self.model.rotations.to_mut()[index].base = base;
+                }
             }
-            Some(Saved::Rotation { index, base }) => {
-                self.model.rotations.to_mut()[index].base = base;
-            }
-            None => {}
         }
-        self.preview = preview.cloned();
-        let Some(preview) = preview else {
-            return true;
-        };
-        self.saved = match preview {
+        self.previews = previews.to_vec();
+        for preview in previews {
+            let saved = self.apply_preview(preview);
+            self.saved.extend(saved);
+        }
+        true
+    }
+
+    /// Lays one preview over the compiled model; what it replaced, if it applied.
+    fn apply_preview(&mut self, preview: &Preview) -> Option<Saved> {
+        match preview {
             Preview::Mesh { name, positions } => self.model.mesh_index(name).and_then(|i| {
                 let def = self.model.meshes[i];
                 let (start, n) = (def.vertex_start as usize * 2, def.vertex_count as usize);
@@ -192,8 +206,7 @@ impl Scene {
                     }
                 })
             }
-        };
-        true
+        }
     }
 
     pub fn bounds(&self) -> [f32; 4] {

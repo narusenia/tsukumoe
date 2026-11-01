@@ -459,6 +459,20 @@ impl Editor {
         }
     }
 
+    /// Moves the origin of the rotation `name` and keeps what hangs from it where it is drawn.
+    pub fn move_axis(&mut self, ctx: &Context, name: &str, origin: [f32; 2]) {
+        let Some(doc) = &self.doc else { return };
+        match deformer_ops::move_axis(doc.dispatcher.model(), name, origin) {
+            Ok((command, label)) => {
+                self.submit_labeled(ctx, command, Some(label));
+            }
+            Err(e) => {
+                let text = format!("{} ({e})", tr(ctx, e.key()));
+                self.toasts.push(ctx, Tone::Error, text);
+            }
+        }
+    }
+
     /// Puts the base shape of the deformers in `items` back to its initial
     /// state, as one undo step.
     pub fn reset_deformers(&mut self, ctx: &Context, items: &[Selection]) {
@@ -1594,15 +1608,18 @@ impl PanelHost for Panels<'_> {
             }
             "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
             "inspector" => {
-                let mut reset = false;
+                let mut requests = inspector::Requests::default();
                 let command = inspector::show_with(
                     ui,
                     doc.dispatcher.model(),
                     editor.view.selection.as_ref(),
                     Some(&editor.deformer_tool),
-                    &mut reset,
+                    &mut requests,
                 );
-                if reset {
+                if let Some((name, origin)) = requests.move_axis.take() {
+                    editor.move_axis(&ctx, &name, origin);
+                }
+                if requests.reset {
                     let items = editor.view.selected();
                     editor.reset_deformers(&ctx, &items);
                 }
@@ -2401,6 +2418,72 @@ mod tests {
             d.name_of(base).as_deref(),
             Some("deformer_reset: ResetWarp")
         );
+    }
+
+    #[test]
+    fn moving_an_axis_is_one_named_step_that_keeps_the_children_and_a_failure_says_why() {
+        use tsukumoe_core::command::{Command, RotationBase};
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        for command in [
+            Command::AddPart {
+                name: "AxisPart".into(),
+                parent: None,
+            },
+            Command::AddRotationDeformer {
+                name: "AxisRot".into(),
+                part: "AxisPart".into(),
+                parent: None,
+                base: RotationBase {
+                    origin: [1.0, 1.0],
+                    angle_degrees: 30.0,
+                    scale: 1.0,
+                    reflect_x: false,
+                    reflect_y: false,
+                },
+            },
+            Command::AddMesh {
+                name: "AxisMesh".into(),
+                part: "AxisPart".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            },
+            Command::SetMeshParent {
+                name: "AxisMesh".into(),
+                parent: Some("AxisRot".into()),
+            },
+        ] {
+            assert!(editor.submit(&ctx, command));
+        }
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let base = steps(&editor);
+        let drawn = |e: &Editor| {
+            let m = e.doc.as_ref().unwrap().dispatcher.model();
+            let mesh = m
+                .meshes()
+                .get(m.meshes().find("AxisMesh").unwrap())
+                .unwrap();
+            let space = tsukumoe_core::deformer_space::Space::of(m, mesh.parent).unwrap();
+            mesh.positions
+                .iter()
+                .map(|&p| space.point_to_world(p))
+                .collect::<Vec<_>>()
+        };
+        let before = drawn(&editor);
+        editor.move_axis(&ctx, "AxisRot", [3.0, 0.5]);
+        assert_eq!(steps(&editor), base + 1);
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        assert_eq!(
+            d.name_of(base).as_deref(),
+            Some("deformer_move_axis: AxisRot")
+        );
+        for (a, b) in before.iter().zip(drawn(&editor)) {
+            assert!((a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3);
+        }
+        // An unknown rotation: a message, no step.
+        editor.move_axis(&ctx, "Nope", [0.0, 0.0]);
+        assert_eq!(steps(&editor), base + 1);
     }
 
     #[test]

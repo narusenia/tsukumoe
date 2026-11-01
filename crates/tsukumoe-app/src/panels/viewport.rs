@@ -211,7 +211,7 @@ impl Viewport {
         // A shape being dragged is drawn as it will be committed, before it is.
         let live = self.live_preview(rect, doc, view, mesh, deformer, size);
         if let Some(scene) = &mut self.scene
-            && scene.set_preview(live.as_ref())
+            && scene.set_previews(&live)
         {
             self.wake();
         }
@@ -331,8 +331,10 @@ impl Viewport {
         mesh: &MeshTool,
         deformer: &DeformerTool,
         size: (u32, u32),
-    ) -> Option<Preview> {
-        let scene = self.scene.as_ref()?;
+    ) -> Vec<Preview> {
+        let Some(scene) = self.scene.as_ref() else {
+            return Vec::new();
+        };
         let model = doc.dispatcher.model();
         let mapper = Mapper {
             origin: [rect.min.x, rect.min.y],
@@ -340,23 +342,33 @@ impl Viewport {
             view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
         };
         match view.tool {
-            Tool::Mesh => {
+            Tool::Mesh => (|| {
                 let name = mesh.mesh()?;
                 let m = model.meshes().get(model.meshes().find(name)?)?;
                 let space = Space::of(model, m.parent).ok()?;
                 let positions = mesh.dragging_stored(&m.positions, &mapper, &space)?;
-                Some(Preview::Mesh {
+                Some(vec![Preview::Mesh {
                     name: name.to_owned(),
                     positions,
-                })
-            }
-            Tool::Deformer => {
+                }])
+            })()
+            .unwrap_or_default(),
+            Tool::Deformer => (|| {
                 let name = deformer.deformer()?;
                 let radius = (mapper.view[2] - mapper.view[0]) * 0.05;
                 let shape = deformer_tool::Shape::of(model, name, radius)?;
-                Some(deformer.dragging(&shape, &mapper)?.as_preview(name))
-            }
-            Tool::Select => None,
+                // Dragging a rotation's origin moves the axis and corrects what hangs
+                // from it: preview all of it, exactly as it would be committed.
+                if let Some(axis) = deformer.axis_drag(name, &shape, &mapper, model) {
+                    return Some(match axis {
+                        Ok((command, _)) => crate::deformer_ops::previews_of(&command),
+                        Err(_) => Vec::new(),
+                    });
+                }
+                Some(vec![deformer.dragging(&shape, &mapper)?.as_preview(name)])
+            })()
+            .unwrap_or_default(),
+            Tool::Select => Vec::new(),
         }
     }
 
@@ -441,6 +453,8 @@ impl Viewport {
         let now = arrow(response.interact_pointer_pos());
         let primary = PointerButton::Primary;
         let tool_input = !drag.modifier_down(modifiers);
+        // Cmd / Ctrl on the origin handle moves the whole rotation, not just its axis.
+        tool.whole = modifiers.command;
         if let (Some(name), Some(shape)) = (&name, &shape) {
             tool.sanitize(shape.world_points().len());
             if escape {
@@ -458,9 +472,9 @@ impl Viewport {
                 tool.drag(at);
             }
             if response.drag_stopped_by(primary)
-                && let Some(op) = tool.release(name, shape, &mapper)
+                && let Some(made) = tool.release_in(name, shape, &mapper, model)
             {
-                ops.push(Ok(op));
+                ops.push(made.map_err(|e| ToolError::Deformer(e.key())));
             }
         }
         if tool_input

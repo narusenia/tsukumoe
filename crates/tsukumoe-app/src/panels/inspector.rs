@@ -81,17 +81,27 @@ pub fn show(
     selection: Option<&Selection>,
     deformer: Option<&DeformerTool>,
 ) -> Option<Command> {
-    show_with(ui, model, selection, deformer, &mut false)
+    show_with(ui, model, selection, deformer, &mut Requests::default())
 }
 
-/// [`show`], also telling (`reset`) when the reset button of a deformer was
-/// pressed: the editor resets the selected deformers.
+/// What the inspector asks of the editor besides a plain command.
+#[derive(Debug, Default, PartialEq)]
+pub struct Requests {
+    /// The reset button of a deformer was pressed.
+    pub reset: bool,
+    /// The origin of a rotation was edited: move its axis only (what hangs
+    /// from it keeps its place), to this point.
+    pub move_axis: Option<(String, [f32; 2])>,
+}
+
+/// [`show`], also telling in `requests` what needs the editor: the reset
+/// button of a deformer, and an edit of a rotation's origin.
 pub fn show_with(
     ui: &mut Ui,
     model: &Model,
     selection: Option<&Selection>,
     deformer: Option<&DeformerTool>,
-    reset: &mut bool,
+    requests: &mut Requests,
 ) -> Option<Command> {
     let ctx = ui.ctx().clone();
     let Some(selection) = selection else {
@@ -186,7 +196,7 @@ pub fn show_with(
                 .and_then(|id| model.warps().get(id))?;
             section_header(ui, name);
             if reset_button(ui, &ctx) {
-                *reset = true;
+                requests.reset = true;
             }
             // The grid size is fixed; a different one means making a new warp.
             hint(
@@ -232,7 +242,7 @@ pub fn show_with(
                 .and_then(|id| model.rotations().get(id))?;
             section_header(ui, name);
             if reset_button(ui, &ctx) {
-                *reset = true;
+                requests.reset = true;
             }
             let base = RotationBase::of(&r.base);
             let rows = [
@@ -276,10 +286,16 @@ pub fn show_with(
                         speed,
                         &tr(&ctx, key),
                     ) {
-                        command = Some(Command::SetRotationBase {
-                            name: name.clone(),
-                            base: with_field(base, field, v),
-                        });
+                        let moved = with_field(base, field, v);
+                        // The origin moves the axis only; the rest is a plain edit.
+                        if matches!(field, RotationField::OriginX | RotationField::OriginY) {
+                            requests.move_axis = Some((name.clone(), moved.origin));
+                        } else {
+                            command = Some(Command::SetRotationBase {
+                                name: name.clone(),
+                                base: moved,
+                            });
+                        }
                     }
                 });
             }
@@ -445,9 +461,9 @@ mod tests {
                 |ui, state: &mut (Model, Selection, bool)| {
                     tsukumoe_ui::init(ui.ctx());
                     tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
-                    let mut reset = false;
-                    show_with(ui, &state.0, Some(&state.1), None, &mut reset);
-                    state.2 |= reset;
+                    let mut requests = Requests::default();
+                    show_with(ui, &state.0, Some(&state.1), None, &mut requests);
+                    state.2 |= requests.reset;
                 },
                 (m, Selection::Rotation("R".into()), false),
             );
@@ -465,5 +481,58 @@ mod tests {
         h.state_mut().1 = Selection::Part("P".into());
         h.run();
         assert!(h.query_by_label("Reset").is_none());
+    }
+
+    #[test]
+    fn editing_the_origin_asks_for_an_axis_move_not_a_plain_command() {
+        use egui_kittest::kittest::Queryable;
+        let m = deformer_model();
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(300.0, 300.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, Selection, Requests, Option<Command>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    let mut requests = Requests::default();
+                    let command = show_with(ui, &state.0, Some(&state.1), None, &mut requests);
+                    if requests.move_axis.is_some() {
+                        state.2 = requests;
+                    }
+                    if command.is_some() {
+                        state.3 = command;
+                    }
+                },
+                (
+                    m,
+                    Selection::Rotation("R".into()),
+                    Requests::default(),
+                    None,
+                ),
+            );
+        h.run();
+        h.get_all_by_label("Origin X").last().unwrap().click();
+        h.run();
+        h.get_all_by_label("Origin X")
+            .last()
+            .unwrap()
+            .type_text("8");
+        h.key_press(egui::Key::Enter);
+        h.run();
+        h.run();
+        assert_eq!(h.state().2.move_axis, Some(("R".to_owned(), [8.0, 2.0])));
+        assert!(
+            h.state().3.is_none(),
+            "no plain SetRotationBase for the origin"
+        );
+        // The angle is a plain edit.
+        h.state_mut().2 = Requests::default();
+        h.get_all_by_label("Angle").last().unwrap().click();
+        h.run();
+        h.get_all_by_label("Angle").last().unwrap().type_text("45");
+        h.key_press(egui::Key::Enter);
+        h.run();
+        h.run();
+        assert!(matches!(h.state().3, Some(Command::SetRotationBase { .. })));
+        assert!(h.state().2.move_axis.is_none());
     }
 }

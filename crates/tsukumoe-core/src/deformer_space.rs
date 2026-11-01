@@ -15,6 +15,7 @@
 
 use std::fmt;
 
+use crate::command::RotationBase;
 use crate::elements::Point;
 use crate::model::Model;
 use crate::rig::DeformerRef;
@@ -201,18 +202,22 @@ impl Space {
                     return Ok(Self::Drawing);
                 };
                 let up = Self::build(model, rot.parent, depth + 1)?;
-                let b = &rot.base;
-                let (sin, cos) = f64::from(b.angle_degrees).to_radians().sin_cos();
-                let (sx, sy) = (
-                    if b.reflect_x { -1.0 } else { 1.0 },
-                    if b.reflect_y { -1.0 } else { 1.0 },
-                );
-                let s = f64::from(b.scale);
-                let (lex, ley) = ([s * cos * sx, s * sin * sx], [-s * sin * sy, s * cos * sy]);
-                let o = p64(b.origin);
-                Ok(Self::axes(&up, o, lex, ley))
+                Ok(Self::rotation(&up, &RotationBase::of(&rot.base)))
             }
         }
+    }
+
+    /// The space a rotation deformer with base shape `base` gives its
+    /// children, under the parent space `up`.
+    pub fn rotation(up: &Self, base: &RotationBase) -> Self {
+        let (sin, cos) = f64::from(base.angle_degrees).to_radians().sin_cos();
+        let (sx, sy) = (
+            if base.reflect_x { -1.0 } else { 1.0 },
+            if base.reflect_y { -1.0 } else { 1.0 },
+        );
+        let s = f64::from(base.scale);
+        let (lex, ley) = ([s * cos * sx, s * sin * sx], [-s * sin * sy, s * cos * sy]);
+        Self::axes(up, p64(base.origin), lex, ley)
     }
 
     /// The rotation space with origin `o` and local axes `ex`, `ey` in `up`:

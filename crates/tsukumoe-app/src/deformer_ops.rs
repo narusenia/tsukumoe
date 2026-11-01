@@ -37,6 +37,9 @@ pub enum OpError {
     Space(SpaceError),
     /// Every deformer is in its initial shape already.
     NoChange,
+    /// This deformer, or something under it, has keyforms, whose coordinates
+    /// the edit would invalidate.
+    HasKeyforms(String),
 }
 
 impl OpError {
@@ -48,6 +51,7 @@ impl OpError {
             Self::Flat => "deformer-flat-selection",
             Self::Space(_) => "deformer-flat-space",
             Self::NoChange => "deformer-reset-nochange",
+            Self::HasKeyforms(_) => "deformer-has-keyforms",
         }
     }
 }
@@ -56,6 +60,7 @@ impl fmt::Display for OpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Missing(name) => write!(f, "'{name}' is not in the model"),
+            Self::HasKeyforms(name) => write!(f, "'{name}' has keyforms"),
             other => f.write_str(other.key()),
         }
     }
@@ -284,6 +289,106 @@ pub fn regular_grid(rect: [f32; 4], rows: u32, columns: u32) -> Vec<Point> {
         }
     }
     points
+}
+
+/// Moves the origin of the rotation deformer `name` to `origin` and keeps
+/// everything that hangs from it where it is drawn: the meshes and the child
+/// deformers get the coordinates that, in the moved axes, come out at the
+/// same place (a child rotation keeps its world axes as far as one angle and
+/// one scale can). One `Batch`, so one undo step. Fails if the rotation or
+/// anything directly under it has keyforms.
+pub fn move_axis(model: &Model, name: &str, origin: Point) -> Result<Op, OpError> {
+    let id = model
+        .rotations()
+        .find(name)
+        .ok_or_else(|| OpError::Missing(name.to_owned()))?;
+    let rot = model.rotations().get(id).expect("found above");
+    if rot.keyforms.is_some() {
+        return Err(OpError::HasKeyforms(name.to_owned()));
+    }
+    let me = DeformerRef::Rotation(id);
+    let old = Space::of(model, Some(me))?;
+    let up = Space::of(model, rot.parent)?;
+    let mut base = RotationBase::of(&rot.base);
+    base.origin = origin;
+    let new = Space::rotation(&up, &base);
+    let keep = |points: &[Point]| -> Result<Vec<Point>, OpError> {
+        points
+            .iter()
+            .map(|&p| Ok(new.point_from_world(old.point_to_world(p))?))
+            .collect()
+    };
+    let mut commands = vec![Command::SetRotationBase {
+        name: name.to_owned(),
+        base,
+    }];
+    for (_, mesh, m) in model
+        .meshes()
+        .iter()
+        .filter(|(_, _, m)| m.parent == Some(me))
+    {
+        if m.keyforms.is_some() {
+            return Err(OpError::HasKeyforms(mesh.to_owned()));
+        }
+        commands.push(Command::SetMeshPositions {
+            name: mesh.to_owned(),
+            positions: keep(&m.positions)?,
+        });
+    }
+    for (_, child, d) in model
+        .warps()
+        .iter()
+        .filter(|(_, _, d)| d.parent == Some(me))
+    {
+        if d.keyforms.is_some() {
+            return Err(OpError::HasKeyforms(child.to_owned()));
+        }
+        commands.push(Command::SetWarpBasePoints {
+            name: child.to_owned(),
+            points: keep(&d.base_points)?,
+        });
+    }
+    for (_, child, d) in model
+        .rotations()
+        .iter()
+        .filter(|(_, _, d)| d.parent == Some(me))
+    {
+        if d.keyforms.is_some() {
+            return Err(OpError::HasKeyforms(child.to_owned()));
+        }
+        commands.push(Command::SetRotationBase {
+            name: child.to_owned(),
+            base: convert_rotation(&old, &new, &d.base)?,
+        });
+    }
+    Ok(batch(commands, format!("deformer_move_axis: {name}")))
+}
+
+/// What the scene shows while the commands of a drag are not yet committed:
+/// each shape-setting command as a preview, so the picture is the committed one.
+pub fn previews_of(command: &Command) -> Vec<crate::scene::Preview> {
+    use crate::scene::Preview;
+    let all = match command {
+        Command::Batch { commands } => commands.iter().collect::<Vec<_>>(),
+        one => vec![one],
+    };
+    all.into_iter()
+        .filter_map(|c| match c {
+            Command::SetMeshPositions { name, positions } => Some(Preview::Mesh {
+                name: name.clone(),
+                positions: positions.clone(),
+            }),
+            Command::SetWarpBasePoints { name, points } => Some(Preview::Warp {
+                name: name.clone(),
+                points: points.clone(),
+            }),
+            Command::SetRotationBase { name, base } => Some(Preview::Rotation {
+                name: name.clone(),
+                base: *base,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Puts the base shape of the deformers in `items` back to its initial state:
@@ -911,5 +1016,270 @@ mod tests {
             reset(&m, &[Selection::Warp("Nope".into())]),
             Err(OpError::Missing("Nope".into()))
         );
+    }
+
+    /// A rotation at (5, 4), turned, scaled and reflected, holding a mesh, a
+    /// warp and a rotation (with a mesh of its own).
+    fn axis_model(parent_warp: bool) -> Model {
+        let tri = |x: f32| vec![[x, 0.0], [x + 1.0, 0.2], [x + 0.3, 1.5]];
+        let mut commands = vec![
+            part(),
+            Command::AddRotationDeformer {
+                name: "Axis".into(),
+                part: "P".into(),
+                parent: None,
+                base: RotationBase {
+                    origin: [5.0, 4.0],
+                    angle_degrees: 33.0,
+                    scale: 1.6,
+                    reflect_x: false,
+                    reflect_y: true,
+                },
+            },
+            Command::AddMesh {
+                name: "Direct".into(),
+                part: "P".into(),
+                positions: tri(0.2),
+                uvs: tri(0.0),
+                indices: vec![0, 1, 2],
+            },
+            Command::AddWarpDeformer {
+                name: "ChildWarp".into(),
+                part: "P".into(),
+                parent: Some("Axis".into()),
+                rows: 1,
+                columns: 1,
+                base_points: vec![[-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0], [1.2, 1.1]],
+            },
+            Command::AddRotationDeformer {
+                name: "ChildTurn".into(),
+                part: "P".into(),
+                parent: Some("Axis".into()),
+                base: RotationBase {
+                    origin: [0.5, -0.4],
+                    angle_degrees: 20.0,
+                    scale: 0.8,
+                    reflect_x: false,
+                    reflect_y: false,
+                },
+            },
+            Command::AddMesh {
+                name: "InWarp".into(),
+                part: "P".into(),
+                positions: tri(0.0),
+                uvs: tri(0.0),
+                indices: vec![0, 1, 2],
+            },
+            Command::AddMesh {
+                name: "InTurn".into(),
+                part: "P".into(),
+                positions: tri(0.1),
+                uvs: tri(0.0),
+                indices: vec![0, 1, 2],
+            },
+            Command::SetMeshParent {
+                name: "Direct".into(),
+                parent: Some("Axis".into()),
+            },
+            Command::SetMeshParent {
+                name: "InWarp".into(),
+                parent: Some("ChildWarp".into()),
+            },
+            Command::SetMeshParent {
+                name: "InTurn".into(),
+                parent: Some("ChildTurn".into()),
+            },
+        ];
+        if parent_warp {
+            commands.insert(
+                1,
+                Command::AddWarpDeformer {
+                    name: "Outer".into(),
+                    part: "P".into(),
+                    parent: None,
+                    rows: 2,
+                    columns: 2,
+                    base_points: vec![
+                        [0.0, 0.0],
+                        [5.0, -0.5],
+                        [10.0, 0.3],
+                        [-0.4, 4.0],
+                        [5.5, 4.5],
+                        [10.4, 4.0],
+                        [0.2, 8.0],
+                        [5.0, 8.6],
+                        [10.0, 8.0],
+                    ],
+                },
+            );
+            commands.insert(
+                3,
+                Command::SetDeformerParent {
+                    name: "Axis".into(),
+                    parent: Some("Outer".into()),
+                },
+            );
+            // Its origin and size are in the warp's (u, v) space now.
+            commands.insert(
+                4,
+                Command::SetRotationBase {
+                    name: "Axis".into(),
+                    base: RotationBase {
+                        origin: [0.5, 0.45],
+                        angle_degrees: 33.0,
+                        scale: 0.1,
+                        reflect_x: false,
+                        reflect_y: true,
+                    },
+                },
+            );
+        }
+        built(commands)
+    }
+
+    #[test]
+    fn moving_the_axis_keeps_every_child_where_it_is_drawn() {
+        let mut m = axis_model(false);
+        let before = drawn(&m);
+        let (command, label) = move_axis(&m, "Axis", [7.0, 2.5]).unwrap();
+        assert_eq!(label, "deformer_move_axis: Axis");
+        let steps = m.history().commands().count();
+        m.apply(command).unwrap();
+        // One step; the origin moved; nothing drawn moved (a mesh, a warp's mesh, a rotation's mesh).
+        assert_eq!(m.history().commands().count(), steps + 1);
+        let id = m.rotations().find("Axis").unwrap();
+        assert_eq!(m.rotations().get(id).unwrap().base.origin, [7.0, 2.5]);
+        same(&drawn(&m), &before);
+        // The children's own coordinates did change, to make that so.
+        let direct = m.meshes().get(m.meshes().find("Direct").unwrap()).unwrap();
+        assert_ne!(direct.positions[0], [0.2, 0.0]);
+        // The axis is where the handle put it: the rotation's child space is drawn from there.
+        assert!(m.undo());
+        same(&drawn(&m), &before);
+        assert_eq!(m.rotations().get(id).unwrap().base.origin, [5.0, 4.0]);
+    }
+
+    #[test]
+    fn under_a_warp_the_drawn_positions_stay_within_the_tolerance() {
+        let mut m = axis_model(true);
+        let before = drawn(&m);
+        let (command, _) = move_axis(&m, "Axis", [0.56, 0.4]).unwrap();
+        m.apply(command).unwrap();
+        let after = drawn(&m);
+        assert_eq!(before.len(), after.len());
+        for (a, b) in before.iter().zip(&after) {
+            // The parent warp bends the axes, so a child rotation's angle is the
+            // closest one angle and scale can give: close, not exact.
+            assert!((a - b).abs() < 0.05, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn a_plain_origin_edit_still_moves_everything_under_the_rotation() {
+        let mut m = axis_model(false);
+        let before = drawn(&m);
+        let id = m.rotations().find("Axis").unwrap();
+        let mut base = RotationBase::of(&m.rotations().get(id).unwrap().base);
+        base.origin = [7.0, 2.5];
+        m.apply(Command::SetRotationBase {
+            name: "Axis".into(),
+            base,
+        })
+        .unwrap();
+        assert_ne!(drawn(&m), before);
+    }
+
+    #[test]
+    fn a_child_with_keyforms_refuses_and_the_model_is_untouched() {
+        use tsukumoe_core::elements::{Parameter, Part};
+        use tsukumoe_core::keyform::{Axis as KeyAxis, Binding, KeyformGrid};
+        use tsukumoe_core::model::ModelParts;
+        use tsukumoe_core::rig::{ArtMesh, DeformerRef, MeshKeyform, RotationDeformer};
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let mut parts = ModelParts::default();
+        let p = parts
+            .parameters
+            .insert("P", Parameter::new(0.0, 1.0, 0.0))
+            .unwrap();
+        let part_id = parts.parts.insert("Part", Part::default()).unwrap();
+        let binding = parts.bindings.insert(
+            Binding::new(vec![KeyAxis {
+                parameter: p,
+                keys: vec![0.0, 1.0],
+            }])
+            .unwrap(),
+        );
+        let rot = parts
+            .rotations
+            .insert(
+                "Axis",
+                RotationDeformer {
+                    part: part_id,
+                    parent: None,
+                    base: Default::default(),
+                    keyforms: None,
+                },
+            )
+            .unwrap();
+        let key = MeshKeyform {
+            positions: tri.clone(),
+            opacity: 1.0,
+            draw_order: 500.0,
+            multiply_color: [1.0; 3],
+            screen_color: [0.0; 3],
+        };
+        let mut keyed = ArtMesh::new(part_id, tri.clone(), tri.clone(), vec![0, 1, 2]);
+        keyed.parent = Some(DeformerRef::Rotation(rot));
+        keyed.keyforms = Some(KeyformGrid::new(binding, vec![key.clone(), key]));
+        parts.meshes.insert("Keyed", keyed).unwrap();
+        let m = Model::from_parts(parts).unwrap();
+        assert_eq!(
+            move_axis(&m, "Axis", [1.0, 1.0]),
+            Err(OpError::HasKeyforms("Keyed".into()))
+        );
+        assert_eq!(
+            move_axis(&m, "Nope", [0.0, 0.0]),
+            Err(OpError::Missing("Nope".into()))
+        );
+    }
+
+    #[test]
+    fn the_live_preview_of_an_axis_move_is_the_committed_picture() {
+        use crate::scene::Scene;
+        let mut m = axis_model(false);
+        let mut scene = Scene::new(&m).unwrap();
+        scene.advance(0.0);
+        let names = ["Direct", "InWarp", "InTurn"];
+        let shown = |scene: &Scene| -> Vec<Vec<[f32; 2]>> {
+            names
+                .iter()
+                .map(|n| scene.drawn_positions(n).unwrap())
+                .collect()
+        };
+        let before = shown(&scene);
+        let (command, _) = move_axis(&m, "Axis", [7.0, 2.5]).unwrap();
+        let previews = previews_of(&command);
+        // The axis and the three things hanging directly from it.
+        assert_eq!(previews.len(), 4);
+        scene.set_previews(&previews);
+        scene.advance(0.0);
+        // The children stay where they are drawn, though the axis moved.
+        let live = shown(&scene);
+        for (a, b) in before.iter().flatten().zip(live.iter().flatten()) {
+            assert!((a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3);
+        }
+        // The committed picture is the same as the preview.
+        m.apply(command).unwrap();
+        let mut done = Scene::new(&m).unwrap();
+        done.advance(0.0);
+        for (a, b) in shown(&done).iter().flatten().zip(live.iter().flatten()) {
+            assert!((a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4);
+        }
+        // Esc: the previews go and the original model's picture is back.
+        scene.set_previews(&[]);
+        scene.advance(0.0);
+        for (a, b) in before.iter().flatten().zip(shown(&scene).iter().flatten()) {
+            assert!((a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4);
+        }
     }
 }
