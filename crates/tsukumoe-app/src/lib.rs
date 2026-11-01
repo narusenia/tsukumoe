@@ -23,5 +23,6 @@ pub mod project;
 pub mod psd_import;
 pub mod scene;
 pub mod settings;
+pub mod tree_model;
 pub mod view;
 pub mod workspace;

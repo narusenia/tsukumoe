@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use tsukumoe_core::elements::Parameter;
 
 use crate::actions::Tool;
+use crate::tree_model::TreeView;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
@@ -76,156 +77,194 @@ impl Camera {
 
 #[derive(Clone, Debug, Default)]
 pub struct ViewState {
-    /// What is selected; with several meshes, the one chosen last.
+    /// What is selected; with several, the one chosen last.
     pub selection: Option<Selection>,
-    /// The other meshes of a multiple selection, and the `selection` they
-    /// were chosen next to: when anything else sets `selection`, they no longer count.
-    others: Vec<String>,
+    /// The other selected items, and the `selection` they were chosen next
+    /// to: when anything else sets `selection`, they no longer count.
+    others: Vec<Selection>,
     others_of: Option<Selection>,
     /// Where a Shift click range starts.
-    pub anchor: Option<String>,
-    /// The selection the tree last showed, to tell a change made elsewhere
-    /// (the viewport, a menu) from one made by a click on a tree row.
-    pub tree_seen: Option<Selection>,
-    /// Scroll offset and height of the tree panel as of the last frame.
-    pub tree_scroll: (f32, f32),
+    pub anchor: Option<Selection>,
+    /// The parts panel and the deformers panel.
+    pub parts: TreeView,
+    pub deformers: TreeView,
     pub tool: Tool,
     pub camera: Camera,
     /// Current parameter values by name; absent means the default.
     params: BTreeMap<String, f32>,
     /// Counts changes the viewport must redraw for.
     revision: u64,
-    pub tree_filter: String,
     pub param_filter: String,
 }
 
 impl ViewState {
-    /// The meshes selected, in the order they were chosen; the last is `selection`.
-    pub fn selected_meshes(&self) -> Vec<String> {
-        let mut out: Vec<String> = if self.others_of == self.selection {
+    pub fn tree(&self, panel: crate::tree_model::Panel) -> &TreeView {
+        match panel {
+            crate::tree_model::Panel::Parts => &self.parts,
+            crate::tree_model::Panel::Deformers => &self.deformers,
+        }
+    }
+
+    pub fn tree_mut(&mut self, panel: crate::tree_model::Panel) -> &mut TreeView {
+        match panel {
+            crate::tree_model::Panel::Parts => &mut self.parts,
+            crate::tree_model::Panel::Deformers => &mut self.deformers,
+        }
+    }
+
+    /// Everything selected, in the order it was chosen; the last is `selection`.
+    pub fn selected(&self) -> Vec<Selection> {
+        let mut out: Vec<Selection> = if self.others_of == self.selection {
             self.others.clone()
         } else {
             Vec::new()
         };
-        if let Some(Selection::Mesh(n)) = &self.selection {
-            out.retain(|o| o != n);
-            out.push(n.clone());
+        if let Some(s) = &self.selection {
+            out.retain(|o| o != s);
+            out.push(s.clone());
         }
         out
     }
 
-    /// Whether `s` is selected (any mesh of a multiple selection counts).
+    /// The meshes selected, in the order they were chosen.
+    pub fn selected_meshes(&self) -> Vec<String> {
+        self.selected()
+            .into_iter()
+            .filter_map(|s| match s {
+                Selection::Mesh(n) => Some(n),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The mesh chosen last: what the mesh tool edits.
+    pub fn last_mesh(&self) -> Option<String> {
+        self.selected_meshes().pop()
+    }
+
+    /// The deformer chosen last: what the deformer tool edits.
+    pub fn last_deformer(&self) -> Option<String> {
+        self.selected().into_iter().rev().find_map(|s| match s {
+            Selection::Warp(n) | Selection::Rotation(n) => Some(n),
+            _ => None,
+        })
+    }
+
+    /// How many things are selected.
+    pub fn selected_count(&self) -> usize {
+        self.selected().len()
+    }
+
+    /// Whether `s` is selected (any item of a multiple selection counts).
     pub fn is_selected(&self, s: &Selection) -> bool {
-        if self.selection.as_ref() == Some(s) {
-            return true;
-        }
-        matches!(s, Selection::Mesh(n) if self.others_of == self.selection && self.others.contains(n))
+        self.selection.as_ref() == Some(s)
+            || (self.others_of == self.selection && self.others.contains(s))
     }
 
     /// Selects `s` alone.
     pub fn select_only(&mut self, s: Selection) {
-        if let Selection::Mesh(n) = &s {
-            self.anchor = Some(n.clone());
-        }
+        self.anchor = Some(s.clone());
         self.others.clear();
         self.others_of = None;
         self.selection = Some(s);
         self.touch();
     }
 
-    /// Selects exactly these meshes; the last one is `selection`.
-    pub fn select_meshes(&mut self, mut names: Vec<String>) {
-        let Some(last) = names.pop() else {
-            self.selection = None;
-            self.others.clear();
-            self.others_of = None;
-            self.touch();
+    /// Selects exactly these; the last one is `selection`.
+    pub fn select_all(&mut self, mut items: Vec<Selection>) {
+        let Some(last) = items.pop() else {
+            self.clear_selection();
             return;
         };
-        self.selection = Some(Selection::Mesh(last));
-        self.others = names;
+        self.selection = Some(last);
+        self.others = items;
         self.others_of = self.selection.clone();
         self.touch();
     }
 
-    /// Ctrl / Cmd click: adds the mesh to the selection, or takes it out if it is in.
-    pub fn toggle_mesh(&mut self, name: &str) {
-        let mut names = self.selected_meshes();
-        if let Some(i) = names.iter().position(|n| n == name) {
-            names.remove(i);
-        } else {
-            names.push(name.to_owned());
-        }
-        self.anchor = Some(name.to_owned());
-        self.select_meshes(names);
+    /// Nothing selected.
+    pub fn clear_selection(&mut self) {
+        self.selection = None;
+        self.others.clear();
+        self.others_of = None;
+        self.touch();
     }
 
-    /// The meshes a selection stands for: the selected meshes, or every mesh
-    /// under a part, or those hanging from a deformer (down the whole tree).
+    /// Selects exactly these meshes; the last one is `selection`.
+    pub fn select_meshes(&mut self, names: Vec<String>) {
+        self.select_all(names.into_iter().map(Selection::Mesh).collect());
+    }
+
+    /// Ctrl / Cmd click: adds `s` to the selection, or takes it out if it is in.
+    pub fn toggle(&mut self, s: Selection) {
+        let mut items = self.selected();
+        if let Some(i) = items.iter().position(|o| *o == s) {
+            items.remove(i);
+        } else {
+            items.push(s.clone());
+        }
+        self.anchor = Some(s);
+        self.select_all(items);
+    }
+
+    pub fn toggle_mesh(&mut self, name: &str) {
+        self.toggle(Selection::Mesh(name.to_owned()));
+    }
+
+    /// The meshes the selection stands for: the selected meshes, every mesh
+    /// under a selected part, and those hanging from a selected deformer
+    /// (down the whole tree); each once.
     pub fn meshes_of(&self, model: &tsukumoe_core::model::Model) -> Vec<String> {
         use tsukumoe_core::rig::DeformerRef;
-        match &self.selection {
-            Some(Selection::Mesh(_)) => self.selected_meshes(),
-            Some(Selection::Part(name)) => {
-                let Some(part) = model.parts().find(name) else {
-                    return Vec::new();
-                };
-                let mut parts = vec![part];
-                let mut i = 0;
-                while i < parts.len() {
-                    let at = parts[i];
-                    let below: Vec<_> = model
-                        .parts()
-                        .iter()
-                        .filter(|(id, _, p)| p.parent == Some(at) && !parts.contains(id))
-                        .map(|(id, _, _)| id)
-                        .collect();
-                    parts.extend(below);
-                    i += 1;
+        let mut out: Vec<String> = Vec::new();
+        let mut add = |names: Vec<String>| {
+            for n in names {
+                if !out.contains(&n) {
+                    out.push(n);
                 }
-                model
-                    .meshes()
-                    .iter()
-                    .filter(|(_, _, m)| parts.contains(&m.part))
-                    .map(|(_, n, _)| n.to_owned())
-                    .collect()
             }
-            Some(Selection::Warp(name) | Selection::Rotation(name)) => {
-                let root = model
-                    .warps()
-                    .find(name)
-                    .map(DeformerRef::Warp)
-                    .or_else(|| model.rotations().find(name).map(DeformerRef::Rotation));
-                let Some(root) = root else {
-                    return Vec::new();
-                };
-                let mut tree = vec![root];
-                let mut i = 0;
-                while i < tree.len() {
-                    let at = tree[i];
-                    let warps = model
+        };
+        for item in self.selected() {
+            match item {
+                Selection::Mesh(n) => add(vec![n]),
+                Selection::Part(name) => add(crate::tree_model::meshes_under_part(model, &name)),
+                Selection::Warp(name) | Selection::Rotation(name) => {
+                    let root = model
                         .warps()
+                        .find(&name)
+                        .map(DeformerRef::Warp)
+                        .or_else(|| model.rotations().find(&name).map(DeformerRef::Rotation));
+                    let Some(root) = root else { continue };
+                    let mut tree = vec![root];
+                    let mut i = 0;
+                    while i < tree.len() {
+                        let at = tree[i];
+                        let warps = model
+                            .warps()
+                            .iter()
+                            .filter(|(_, _, d)| d.parent == Some(at))
+                            .map(|(id, _, _)| DeformerRef::Warp(id));
+                        let rots = model
+                            .rotations()
+                            .iter()
+                            .filter(|(_, _, d)| d.parent == Some(at))
+                            .map(|(id, _, _)| DeformerRef::Rotation(id));
+                        let below: Vec<_> =
+                            warps.chain(rots).filter(|d| !tree.contains(d)).collect();
+                        tree.extend(below);
+                        i += 1;
+                    }
+                    add(model
+                        .meshes()
                         .iter()
-                        .filter(|(_, _, d)| d.parent == Some(at))
-                        .map(|(id, _, _)| DeformerRef::Warp(id));
-                    let rots = model
-                        .rotations()
-                        .iter()
-                        .filter(|(_, _, d)| d.parent == Some(at))
-                        .map(|(id, _, _)| DeformerRef::Rotation(id));
-                    let below: Vec<_> = warps.chain(rots).filter(|d| !tree.contains(d)).collect();
-                    tree.extend(below);
-                    i += 1;
+                        .filter(|(_, _, m)| m.parent.is_some_and(|p| tree.contains(&p)))
+                        .map(|(_, n, _)| n.to_owned())
+                        .collect());
                 }
-                model
-                    .meshes()
-                    .iter()
-                    .filter(|(_, _, m)| m.parent.is_some_and(|p| tree.contains(&p)))
-                    .map(|(_, n, _)| n.to_owned())
-                    .collect()
+                Selection::Parameter(_) => {}
             }
-            _ => Vec::new(),
         }
+        out
     }
 
     pub fn revision(&self) -> u64 {

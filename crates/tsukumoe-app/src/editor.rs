@@ -17,6 +17,7 @@ use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
+use crate::tree_model;
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
 use tsukumoe_ui::dock::{self, PanelHost};
@@ -241,22 +242,24 @@ impl Editor {
             return Vec::new();
         };
         let model = doc.dispatcher.model();
-        match &self.view.selection {
-            Some(Selection::Mesh(_)) => self
-                .view
-                .selected_meshes()
-                .into_iter()
-                .map(Target::Mesh)
-                .collect(),
-            Some(Selection::Warp(n) | Selection::Rotation(n)) => vec![Target::Deformer(n.clone())],
-            Some(Selection::Part(_)) => self
-                .view
-                .meshes_of(model)
-                .into_iter()
-                .map(Target::Mesh)
-                .collect(),
-            _ => Vec::new(),
+        let mut out: Vec<Target> = Vec::new();
+        for item in self.view.selected() {
+            let found = match item {
+                Selection::Mesh(n) => vec![Target::Mesh(n)],
+                Selection::Warp(n) | Selection::Rotation(n) => vec![Target::Deformer(n)],
+                Selection::Part(n) => tree_model::meshes_under_part(model, &n)
+                    .into_iter()
+                    .map(Target::Mesh)
+                    .collect(),
+                Selection::Parameter(_) => Vec::new(),
+            };
+            for t in found {
+                if !out.contains(&t) {
+                    out.push(t);
+                }
+            }
         }
+        out
     }
 
     /// Makes a warp or a rotation deformer around the selection and selects it.
@@ -1337,7 +1340,12 @@ impl PanelHost for Panels<'_> {
         match id {
             "history" => history::show(ui, &mut doc.dispatcher),
             "tree" => {
-                for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                for out in tree::show(
+                    ui,
+                    doc.dispatcher.model(),
+                    &mut editor.view,
+                    crate::tree_model::Panel::Parts,
+                ) {
                     match out {
                         tree::Out::Command(command) => {
                             editor.submit(&ctx, command);
@@ -1388,18 +1396,11 @@ impl PanelHost for Panels<'_> {
                         }
                     }
                     if let Some(vp) = editor.viewport.as_mut() {
-                        let target = match &editor.view.selection {
-                            Some(Selection::Mesh(name)) => Some(name.as_str()),
-                            _ => None,
-                        };
-                        editor.mesh_tool.set_mesh(target);
-                        let deformer = match &editor.view.selection {
-                            Some(Selection::Warp(name) | Selection::Rotation(name)) => {
-                                Some(name.as_str())
-                            }
-                            _ => None,
-                        };
-                        editor.deformer_tool.set_deformer(deformer);
+                        // The tools work on the mesh and the deformer chosen last.
+                        let mesh = editor.view.last_mesh();
+                        editor.mesh_tool.set_mesh(mesh.as_deref());
+                        let deformer = editor.view.last_deformer();
+                        editor.deformer_tool.set_deformer(deformer.as_deref());
                         let (response, ops, actions) = vp.show(
                             ui,
                             rs,

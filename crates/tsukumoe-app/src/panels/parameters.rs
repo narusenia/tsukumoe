@@ -9,7 +9,7 @@ use egui::{Ui, Vec2};
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{Variant, button, number, slider, text_input, tr};
 
-use super::tree::matches;
+use crate::tree_model::matches;
 use crate::view::{Selection, ViewState};
 
 /// Names of the parameters matching the filter (name or display name).
