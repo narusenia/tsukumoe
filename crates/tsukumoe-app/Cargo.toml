@@ -31,6 +31,9 @@ wgpu.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 muda.workspace = true
 
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+rfd.workspace = true
+
 [dev-dependencies]
 tsukumoe-psd = { workspace = true, features = ["test-writer"] }
 tsukumoe-cli.workspace = true

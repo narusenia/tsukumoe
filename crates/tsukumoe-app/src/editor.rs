@@ -12,6 +12,7 @@ use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::menu;
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
+use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
@@ -47,6 +48,12 @@ pub enum Dialog {
     Pie,
     /// File > Import PSD.
     PsdImport(Box<PsdImport>),
+    /// A folder for a new project (the path-input form of File > New).
+    NewProject(String),
+    /// A PSD and a folder for a new project (the path-input form).
+    NewFromPsd(String, String),
+    /// Where to save as a folder project (the path-input form).
+    SaveAsFolder(String),
 }
 
 pub struct Editor {
@@ -71,6 +78,16 @@ pub struct Editor {
     viewport_hovered: bool,
     viewport: Option<Viewport>,
     layouts_dirty: bool,
+    /// How files and folders are chosen; replaced by a scripted one in tests.
+    pub picker: Box<dyn FilePicker>,
+    /// The folder the last file dialog was used in; where the next one starts.
+    pub last_dir: Option<PathBuf>,
+    /// Actions that need a file dialog, run by [`Editor::process_pending`]
+    /// where the window handle is at hand.
+    pending: Vec<String>,
+    /// The document that was open when a new project from a PSD was started,
+    /// kept until the import is confirmed so that cancelling brings it back.
+    stash: Option<Document>,
 }
 
 impl Editor {
@@ -111,6 +128,10 @@ impl Editor {
             viewport_hovered: false,
             viewport: None,
             layouts_dirty: false,
+            picker: crate::picker::default_picker(),
+            last_dir: state["last_dir"].as_str().map(PathBuf::from),
+            pending: Vec::new(),
+            stash: None,
         }
     }
 
@@ -121,6 +142,7 @@ impl Editor {
         let state = serde_json::json!({
             "workspace": self.workspace,
             "recent": self.recent.to_json(),
+            "last_dir": self.last_dir,
         });
         settings::write(
             dir,
@@ -195,10 +217,31 @@ impl Editor {
     /// carry their argument after the colon.
     pub fn run_action(&mut self, ctx: &Context, action: &str) -> bool {
         match action {
-            "file.open" => self.dialog = Some(Dialog::Open(String::new())),
+            "file.open" | "file.open-folder" | "file.new" | "file.new-from-psd"
+                if self.picker.is_native() =>
+            {
+                self.pending.push(action.to_owned());
+            }
+            "file.save-as" | "file.save-as-folder" | "file.import-psd"
+                if self.picker.is_native() =>
+            {
+                if self.doc.is_some() {
+                    self.pending.push(action.to_owned());
+                }
+            }
+            "file.open" | "file.open-folder" => self.dialog = Some(Dialog::Open(String::new())),
+            "file.new" => self.dialog = Some(Dialog::NewProject(String::new())),
+            "file.new-from-psd" => {
+                self.dialog = Some(Dialog::NewFromPsd(String::new(), String::new()));
+            }
             "file.save-as" => {
                 if self.doc.is_some() {
                     self.dialog = Some(Dialog::SaveAs(String::new()));
+                }
+            }
+            "file.save-as-folder" => {
+                if self.doc.is_some() {
+                    self.dialog = Some(Dialog::SaveAsFolder(String::new()));
                 }
             }
             "file.save" => {
@@ -268,6 +311,173 @@ impl Editor {
             }
         }
         true
+    }
+
+    /// Runs the actions that wait for a file dialog. Call it once a frame
+    /// where the window (`parent`) is at hand; the dialog blocks until closed.
+    pub fn process_pending(&mut self, ctx: &Context, parent: Option<&eframe::Frame>) {
+        for action in std::mem::take(&mut self.pending) {
+            self.run_picked(ctx, &action, parent);
+        }
+    }
+
+    /// Asks the picker; remembers the folder it was answered in.
+    fn pick(
+        &mut self,
+        ctx: &Context,
+        kind: PickKind,
+        title_key: &str,
+        parent: Option<&eframe::Frame>,
+    ) -> Option<PathBuf> {
+        let request = PickRequest {
+            kind,
+            title: tr(ctx, title_key),
+            start_dir: self.last_dir.clone(),
+        };
+        let path = self.picker.pick(&request, parent)?;
+        let folder = match kind {
+            PickKind::OpenFolder | PickKind::SaveFolder | PickKind::NewFolder => Some(&*path),
+            _ => path.parent(),
+        };
+        if let Some(folder) = folder.filter(|f| !f.as_os_str().is_empty()) {
+            self.last_dir = Some(folder.to_owned());
+            let _ = self.persist_state();
+        }
+        Some(path)
+    }
+
+    fn run_picked(&mut self, ctx: &Context, action: &str, parent: Option<&eframe::Frame>) {
+        match action {
+            "file.open" | "file.open-folder" => {
+                let (kind, title) = if action == "file.open" {
+                    (PickKind::OpenProject, "pick-open-title")
+                } else {
+                    (PickKind::OpenFolder, "pick-open-folder-title")
+                };
+                if let Some(path) = self.pick(ctx, kind, title, parent) {
+                    self.open_and_report(ctx, &path);
+                }
+            }
+            "file.save-as" => {
+                if let Some(mut path) =
+                    self.pick(ctx, PickKind::SaveProject, "pick-save-title", parent)
+                {
+                    if path.extension().is_none() {
+                        path.set_extension("tsukumoe");
+                    }
+                    let r = self.save_as(&path);
+                    self.report(ctx, r, Some(tr(ctx, "app-saved")));
+                }
+            }
+            "file.save-as-folder" => {
+                if let Some(path) =
+                    self.pick(ctx, PickKind::SaveFolder, "pick-save-folder-title", parent)
+                {
+                    let r = self.save_as_folder(&path);
+                    self.report(ctx, r, Some(tr(ctx, "app-saved")));
+                }
+            }
+            "file.new" => {
+                if let Some(path) =
+                    self.pick(ctx, PickKind::NewFolder, "pick-new-folder-title", parent)
+                {
+                    let r = self.create_and_open(&path);
+                    let ok = tr_args(
+                        ctx,
+                        "app-opened",
+                        &[("name", Arg::from(path.display().to_string().as_str()))],
+                    );
+                    self.report(ctx, r, Some(ok));
+                }
+            }
+            "file.new-from-psd" => {
+                let Some(psd) = self.pick(ctx, PickKind::Psd, "pick-psd-title", parent) else {
+                    return;
+                };
+                let Some(dir) =
+                    self.pick(ctx, PickKind::NewFolder, "pick-new-folder-title", parent)
+                else {
+                    return;
+                };
+                let r = self.new_from_psd(&psd, &dir);
+                self.report(ctx, r, None);
+            }
+            "file.import-psd" => {
+                if let Some(psd) = self.pick(ctx, PickKind::Psd, "pick-psd-title", parent) {
+                    let mut state = PsdImport::new();
+                    state.path = psd.display().to_string();
+                    state.start();
+                    self.dialog = Some(Dialog::PsdImport(Box::new(state)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn open_and_report(&mut self, ctx: &Context, path: &Path) {
+        let r = self.open(path);
+        let ok = tr_args(
+            ctx,
+            "app-opened",
+            &[("name", Arg::from(path.display().to_string().as_str()))],
+        );
+        self.report(ctx, r, Some(ok));
+    }
+
+    /// Saves the open document as a folder project.
+    pub fn save_as_folder(&mut self, path: &Path) -> Result<(), String> {
+        let Some(doc) = self.doc.as_mut() else {
+            return Ok(());
+        };
+        doc.save_to_folder(path)?;
+        self.recent.push(path);
+        self.persist_state()
+    }
+
+    /// Makes an empty folder project in `dir` and opens it.
+    pub fn create_and_open(&mut self, dir: &Path) -> Result<(), String> {
+        let written = crate::project::create_project(dir)?;
+        self.open(dir).inspect_err(|_| {
+            crate::project::discard_project(dir, &written);
+        })
+    }
+
+    /// Makes an empty folder project in `dir`, opens it and shows the import
+    /// dialog for `psd`. Cancelling the dialog removes the project again and
+    /// brings back the document that was open.
+    pub fn new_from_psd(&mut self, psd: &Path, dir: &Path) -> Result<(), String> {
+        let written = crate::project::create_project(dir)?;
+        let previous = self.doc.take();
+        if let Err(e) = self.open(dir) {
+            self.doc = previous;
+            crate::project::discard_project(dir, &written);
+            return Err(e);
+        }
+        self.stash = previous;
+        let mut state = PsdImport::new();
+        state.path = psd.display().to_string();
+        state.created = Some((dir.to_owned(), written));
+        state.start();
+        self.dialog = Some(Dialog::PsdImport(Box::new(state)));
+        Ok(())
+    }
+
+    /// The import dialog closed. A new project whose import was not confirmed
+    /// is removed and the earlier document comes back.
+    fn psd_dialog_closed(&mut self, state: &PsdImport) {
+        let Some((dir, written)) = &state.created else {
+            return;
+        };
+        if state.confirmed {
+            self.stash = None;
+            return;
+        }
+        crate::project::discard_project(dir, written);
+        self.recent.remove(dir);
+        self.doc = self.stash.take();
+        self.view = ViewState::default();
+        self.viewport = None;
+        let _ = self.persist_state();
     }
 
     /// Draws the open pie menu; the key's release picks the item under the
@@ -474,6 +684,8 @@ impl Editor {
             self.psd_dialog(ctx, state, &mut open);
             if open {
                 self.dialog = Some(dialog);
+            } else if let Dialog::PsdImport(state) = &dialog {
+                self.psd_dialog_closed(state);
             }
             return;
         }
@@ -494,6 +706,9 @@ impl Editor {
         let (title, id) = match &dialog {
             Dialog::Open(_) => (t("dialog-open-title"), "dialog-open"),
             Dialog::SaveAs(_) => (t("dialog-save-as-title"), "dialog-save-as"),
+            Dialog::NewProject(_) => (t("dialog-new-title"), "dialog-new"),
+            Dialog::NewFromPsd(..) => (t("dialog-new-from-psd-title"), "dialog-new-from-psd"),
+            Dialog::SaveAsFolder(_) => (t("dialog-save-folder-title"), "dialog-save-folder"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
             Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {
@@ -505,6 +720,16 @@ impl Editor {
                 Dialog::Open(text) | Dialog::SaveAs(text) => {
                     let name = t("dialog-path");
                     text_input(ui, text, &name, &name).request_focus();
+                }
+                Dialog::NewProject(text) | Dialog::SaveAsFolder(text) => {
+                    let name = t("dialog-folder-path");
+                    text_input(ui, text, &name, &name).request_focus();
+                }
+                Dialog::NewFromPsd(psd, folder) => {
+                    let name = t("dialog-psd-file-path");
+                    text_input(ui, psd, &name, &name).request_focus();
+                    let name = t("dialog-folder-path");
+                    text_input(ui, folder, &name, &name);
                 }
                 Dialog::SaveLayout(text) => {
                     let name = t("layout-name");
@@ -538,6 +763,26 @@ impl Editor {
                 }
                 Dialog::SaveAs(text) if !text.trim().is_empty() => {
                     let r = self.save_as(Path::new(text.trim()));
+                    self.report(ctx, r, Some(t("app-saved")));
+                }
+                Dialog::NewProject(text) if !text.trim().is_empty() => {
+                    let path = PathBuf::from(text.trim());
+                    let r = self.create_and_open(&path);
+                    let ok = tr_args(
+                        ctx,
+                        "app-opened",
+                        &[("name", Arg::from(path.display().to_string().as_str()))],
+                    );
+                    self.report(ctx, r, Some(ok));
+                }
+                Dialog::NewFromPsd(psd, folder)
+                    if !psd.trim().is_empty() && !folder.trim().is_empty() =>
+                {
+                    let r = self.new_from_psd(Path::new(psd.trim()), Path::new(folder.trim()));
+                    self.report(ctx, r, None);
+                }
+                Dialog::SaveAsFolder(text) if !text.trim().is_empty() => {
+                    let r = self.save_as_folder(Path::new(text.trim()));
                     self.report(ctx, r, Some(t("app-saved")));
                 }
                 Dialog::SaveLayout(text) => {
@@ -1109,8 +1354,15 @@ mod tests {
         assert!(editor.redo() && parts(&editor) == n);
     }
 
-    fn open_minimal() -> Editor {
+    /// An editor that opens its own path-input dialogs on every OS.
+    fn plain() -> Editor {
         let mut editor = Editor::new(None);
+        editor.picker = Box::new(crate::picker::PathInputPicker);
+        editor
+    }
+
+    fn open_minimal() -> Editor {
+        let mut editor = plain();
         editor
             .open(
                 &Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1130,7 +1382,7 @@ mod tests {
         std::fs::write(&file, write(&PsdSpec::new(8, 8, vec![layer]))).unwrap();
 
         let ctx = Context::default();
-        let mut none = Editor::new(None);
+        let mut none = plain();
         assert!(none.run_action(&ctx, "file.import-psd"));
         assert!(none.dialog.is_none(), "needs a project");
 
@@ -1161,7 +1413,7 @@ mod tests {
     #[test]
     fn menu_actions_open_their_dialogs_and_unknown_names_are_refused() {
         let ctx = Context::default();
-        let mut editor = Editor::new(None);
+        let mut editor = plain();
         assert!(editor.run_action(&ctx, "file.save-as"));
         assert!(editor.dialog.is_none(), "nothing to save without a project");
         let mut editor = open_minimal();
@@ -1323,5 +1575,161 @@ mod tests {
         let mut editor = Editor::new(None);
         assert!(editor.open(Path::new("/no/such")).is_err());
         assert!(editor.doc.is_none() && editor.recent.paths().is_empty());
+    }
+
+    fn fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tsukumoe-format/tests/fixtures/minimal")
+    }
+
+    fn with_fake(settings: Option<PathBuf>) -> (Editor, crate::picker::Fake, Context) {
+        let mut editor = Editor::new(settings);
+        let fake = crate::picker::Fake::default();
+        editor.picker = Box::new(fake.clone());
+        (editor, fake, Context::default())
+    }
+
+    fn run(editor: &mut Editor, ctx: &Context, action: &str) {
+        assert!(editor.run_action(ctx, action));
+        editor.process_pending(ctx, None);
+    }
+
+    #[test]
+    fn a_cancelled_dialog_does_nothing() {
+        let (mut editor, fake, ctx) = with_fake(None);
+        for action in [
+            "file.new",
+            "file.new-from-psd",
+            "file.open",
+            "file.open-folder",
+        ] {
+            run(&mut editor, &ctx, action);
+        }
+        assert!(editor.doc.is_none() && editor.dialog.is_none());
+        assert!(editor.last_dir.is_none());
+        assert_eq!(
+            fake.0.borrow().requests.len(),
+            4,
+            "new-from-psd stops after the PSD"
+        );
+    }
+
+    #[test]
+    fn new_project_creates_opens_and_remembers_the_folder() {
+        let dir = scratch("newproj");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut editor, fake, ctx) = with_fake(Some(dir.join("settings")));
+        fake.answer(dir.join("p"));
+        run(&mut editor, &ctx, "file.new");
+        let doc = editor.doc.as_ref().unwrap();
+        assert!(doc.dispatcher.model().meshes().is_empty());
+        assert!(dir.join("p/manifest.json").is_file());
+        assert_eq!(
+            fake.0.borrow().requests[0].kind,
+            crate::picker::PickKind::NewFolder
+        );
+        assert_eq!(editor.last_dir.as_deref(), Some(dir.join("p").as_path()));
+        // The next dialog starts there, also after a restart.
+        fake.answer(dir.join("p2"));
+        run(&mut editor, &ctx, "file.new");
+        assert_eq!(
+            fake.0.borrow().requests[1].start_dir.as_deref(),
+            Some(dir.join("p").as_path())
+        );
+        let again = Editor::new(Some(dir.join("settings")));
+        assert_eq!(again.last_dir, editor.last_dir);
+    }
+
+    #[test]
+    fn a_folder_that_is_not_empty_is_refused_and_nothing_changes() {
+        let dir = scratch("newfull");
+        std::fs::create_dir_all(dir.join("full")).unwrap();
+        std::fs::write(dir.join("full/keep.txt"), b"x").unwrap();
+        let (mut editor, fake, ctx) = with_fake(None);
+        editor.open(&fixture()).unwrap();
+        fake.answer(dir.join("full"));
+        run(&mut editor, &ctx, "file.new");
+        assert_eq!(editor.doc.as_ref().unwrap().name(), "minimal");
+        assert_eq!(std::fs::read_dir(dir.join("full")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn open_save_and_import_use_the_picked_paths() {
+        let dir = scratch("picked");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mut editor, fake, ctx) = with_fake(None);
+        fake.answer(fixture());
+        run(&mut editor, &ctx, "file.open-folder");
+        assert_eq!(editor.doc.as_ref().unwrap().name(), "minimal");
+        assert_eq!(
+            fake.0.borrow().requests[0].kind,
+            crate::picker::PickKind::OpenFolder
+        );
+        // Save as: the archive gets its extension; as folder: a folder even with a dot.
+        fake.answer(dir.join("saved"));
+        run(&mut editor, &ctx, "file.save-as");
+        assert!(dir.join("saved.tsukumoe").is_file());
+        fake.answer(dir.join("f.v1"));
+        run(&mut editor, &ctx, "file.save-as-folder");
+        assert!(dir.join("f.v1/manifest.json").is_file());
+        // Import PSD: the dialog opens on the picked file.
+        fake.answer(dir.join("x.psd"));
+        run(&mut editor, &ctx, "file.import-psd");
+        let Some(Dialog::PsdImport(state)) = &editor.dialog else {
+            panic!("no import dialog");
+        };
+        assert!(state.path.ends_with("x.psd"));
+        // Saving needs a project.
+        let (mut none, fake, ctx) = with_fake(None);
+        fake.answer(dir.join("y"));
+        run(&mut none, &ctx, "file.save-as");
+        run(&mut none, &ctx, "file.import-psd");
+        assert!(fake.0.borrow().requests.is_empty());
+    }
+
+    fn psd_file(dir: &Path) -> PathBuf {
+        use tsukumoe_psd::writer::{LayerSpec, Node, PsdSpec, write};
+        let layer = Node::Layer(LayerSpec::solid("bg", 0, 0, 8, 8, [1, 2, 3, 255]));
+        let file = dir.join("a.psd");
+        std::fs::write(&file, write(&PsdSpec::new(8, 8, vec![layer]))).unwrap();
+        file
+    }
+
+    #[test]
+    fn a_new_project_from_a_psd_imports_in_one_step_or_leaves_nothing() {
+        let dir = scratch("fromps");
+        std::fs::create_dir_all(&dir).unwrap();
+        let psd = psd_file(&dir);
+        let (mut editor, fake, ctx) = with_fake(None);
+        editor.open(&fixture()).unwrap();
+
+        // Confirmed: one undo reverts the import; the project folder stays.
+        fake.answer(&psd);
+        fake.answer(dir.join("p"));
+        run(&mut editor, &ctx, "file.new-from-psd");
+        let Some(Dialog::PsdImport(mut state)) = editor.dialog.take() else {
+            panic!("no import dialog");
+        };
+        state.load_blocking(editor.doc.as_ref().unwrap());
+        state.confirm(editor.doc.as_mut().unwrap()).unwrap();
+        editor.psd_dialog_closed(&state);
+        let doc = editor.doc.as_mut().unwrap();
+        assert_eq!(doc.dispatcher.model().meshes().len(), 1);
+        assert!(doc.dispatcher.undo());
+        assert!(doc.dispatcher.model().meshes().is_empty());
+        assert!(editor.stash.is_none() && dir.join("p/manifest.json").is_file());
+
+        // Cancelled: the folder is gone and the earlier project is back.
+        let (mut editor, fake, _) = with_fake(None);
+        editor.open(&fixture()).unwrap();
+        fake.answer(&psd);
+        fake.answer(dir.join("q"));
+        run(&mut editor, &ctx, "file.new-from-psd");
+        assert!(dir.join("q").is_dir());
+        let Some(Dialog::PsdImport(state)) = editor.dialog.take() else {
+            panic!("no import dialog");
+        };
+        editor.psd_dialog_closed(&state);
+        assert!(!dir.join("q").exists());
+        assert_eq!(editor.doc.as_ref().unwrap().name(), "minimal");
     }
 }

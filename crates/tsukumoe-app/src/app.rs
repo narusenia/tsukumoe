@@ -23,6 +23,8 @@ impl eframe::App for App {
             self.editor.run_action(ui.ctx(), &action);
         }
         self.editor.ui(ui, frame.wgpu_render_state());
+        // File dialogs block; they open here, where the window is known.
+        self.editor.process_pending(ui.ctx(), Some(&*frame));
         #[cfg(target_os = "macos")]
         {
             let ctx = ui.ctx();

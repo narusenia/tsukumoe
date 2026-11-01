@@ -8,7 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tsukumoe_format::{Project, read_model, write_model};
+use tsukumoe_core::model::Model;
+use tsukumoe_format::{Manifest, Project, read_model, write_model};
 
 use crate::dispatcher::Dispatcher;
 
@@ -73,9 +74,19 @@ impl Document {
     /// Saves to `path` (a folder when it is one or has no extension, otherwise
     /// a zip archive) and makes it the document's path.
     pub fn save_to(&mut self, path: &Path) -> Result<(), String> {
+        let folder = path.is_dir() || path.extension().is_none();
+        self.write_to(path, folder)
+    }
+
+    /// Saves as a folder project whatever the name looks like.
+    pub fn save_to_folder(&mut self, path: &Path) -> Result<(), String> {
+        self.write_to(path, true)
+    }
+
+    fn write_to(&mut self, path: &Path, folder: bool) -> Result<(), String> {
         let err = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
         write_model(self.dispatcher.model(), &mut self.project).map_err(|e| err(&e))?;
-        if path.is_dir() || path.extension().is_none() {
+        if folder {
             self.project.write_dir(path).map_err(|e| err(&e))?;
         } else {
             let bytes = self.project.write_zip().map_err(|e| err(&e))?;
@@ -85,6 +96,57 @@ impl Document {
         self.dispatcher.mark_saved();
         Ok(())
     }
+}
+
+/// Creates an empty folder project in `dir` and returns the files written
+/// (relative paths). `dir` must be missing (its parent must exist) or an empty
+/// folder; nothing outside `dir` is written and nothing existing is replaced.
+/// On failure nothing is left behind.
+pub fn create_project(dir: &Path) -> Result<Vec<String>, String> {
+    let err = |e: &dyn std::fmt::Display| format!("{}: {e}", dir.display());
+    let existed = dir.exists();
+    if existed {
+        if !dir.is_dir() {
+            return Err(err(&"not a folder"));
+        }
+        if fs::read_dir(dir).map_err(|e| err(&e))?.next().is_some() {
+            return Err(err(&"the folder is not empty"));
+        }
+    }
+    let mut project = Project::new(Manifest::new(None));
+    write_model(&Model::new(), &mut project).map_err(|e| err(&e))?;
+    let mut written: Vec<String> = vec![tsukumoe_format::MANIFEST_PATH.to_owned()];
+    written.extend(project.files.keys().cloned());
+    if !existed {
+        fs::create_dir(dir).map_err(|e| err(&e))?;
+    }
+    if let Err(e) = project.write_dir(dir) {
+        // `dir` was empty or ours: remove what was written.
+        if existed {
+            for name in &written {
+                let _ = fs::remove_file(dir.join(name));
+            }
+        } else {
+            let _ = fs::remove_dir_all(dir);
+        }
+        return Err(err(&e));
+    }
+    Ok(written)
+}
+
+/// Removes the files [`create_project`] wrote and the folder if it is empty
+/// afterwards (used when a new project is abandoned). Anything else in the
+/// folder is left alone.
+pub fn discard_project(dir: &Path, written: &[String]) {
+    for name in written {
+        let _ = fs::remove_file(dir.join(name));
+    }
+    // Only an empty folder goes (remove_dir fails otherwise); empty
+    // sub-folders such as `textures` are removed first.
+    for sub in ["textures", "sources"] {
+        let _ = fs::remove_dir(dir.join(sub));
+    }
+    let _ = fs::remove_dir(dir);
 }
 
 /// Most recently used first, no repeats, at most [`RECENT_MAX`].
@@ -203,5 +265,78 @@ mod tests {
         );
         assert_eq!(Recent::from_json(&r.to_json()), r);
         assert_eq!(Recent::from_json(&serde_json::json!(3)), Recent::default());
+    }
+
+    #[test]
+    fn a_new_project_is_made_in_an_empty_or_new_folder_and_opens() {
+        let out = scratch("new");
+        fs::create_dir_all(&out).unwrap();
+        // A new folder.
+        let a = out.join("a");
+        let written = create_project(&a).unwrap();
+        assert!(written.contains(&"manifest.json".to_owned()));
+        let doc = Document::open(&a).unwrap();
+        assert!(doc.dispatcher.model().meshes().is_empty());
+        // An existing empty folder.
+        let b = out.join("b");
+        fs::create_dir(&b).unwrap();
+        create_project(&b).unwrap();
+        Document::open(&b).unwrap();
+        fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn a_new_project_refuses_what_it_cannot_make_and_leaves_nothing() {
+        let out = scratch("new-bad");
+        fs::create_dir_all(&out).unwrap();
+        // Not empty: untouched.
+        let full = out.join("full");
+        fs::create_dir(&full).unwrap();
+        fs::write(full.join("keep.txt"), b"x").unwrap();
+        assert!(create_project(&full).unwrap_err().contains("not empty"));
+        assert_eq!(fs::read_dir(&full).unwrap().count(), 1);
+        // A file, and a folder whose parent is missing: nothing is created.
+        let file = out.join("f");
+        fs::write(&file, b"x").unwrap();
+        assert!(create_project(&file).is_err());
+        let deep = out.join("no/such/dir");
+        assert!(create_project(&deep).is_err());
+        assert!(!out.join("no").exists());
+        // Nothing but the chosen folders was written under `out`.
+        let mut names: Vec<_> = fs::read_dir(&out)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["f", "full"]);
+        fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn discarding_a_new_project_removes_its_files_and_keeps_other_files() {
+        let out = scratch("discard");
+        fs::create_dir_all(&out).unwrap();
+        let a = out.join("a");
+        let written = create_project(&a).unwrap();
+        discard_project(&a, &written);
+        assert!(!a.exists());
+        let b = out.join("b");
+        fs::create_dir(&b).unwrap();
+        let written = create_project(&b).unwrap();
+        fs::write(b.join("mine.txt"), b"x").unwrap();
+        discard_project(&b, &written);
+        assert_eq!(fs::read_dir(&b).unwrap().count(), 1);
+        fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn save_to_folder_writes_a_folder_even_with_an_extension() {
+        let out = scratch("folder-ext");
+        fs::create_dir_all(&out).unwrap();
+        let mut doc = Document::open(&fixture()).unwrap();
+        let target = out.join("model.v1");
+        doc.save_to_folder(&target).unwrap();
+        assert!(target.is_dir() && target.join("manifest.json").is_file());
+        fs::remove_dir_all(&out).unwrap();
     }
 }

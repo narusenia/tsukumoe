@@ -14,6 +14,7 @@ pub mod menu;
 #[cfg(target_os = "macos")]
 mod native;
 pub mod panels;
+pub mod picker;
 pub mod pie;
 pub mod project;
 pub mod psd_import;
