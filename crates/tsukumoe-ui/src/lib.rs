@@ -7,6 +7,7 @@
 //! `docs/specifications/ui-library.md` has the rules for adding one.
 
 mod components;
+pub mod dock;
 mod font;
 mod icons;
 mod keymap;

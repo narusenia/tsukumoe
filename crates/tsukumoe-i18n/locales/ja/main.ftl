@@ -38,3 +38,8 @@ spout-title = Spout 出力
 spout-name = 送信側の名前
 spout-status-no-clients = 受信側なし
 spout-status-publishing = 公開中
+
+dock-move-left = 左サイドへ移動
+dock-move-right = 右サイドへ移動
+dock-pin = パネルを固定
+dock-unpin = パネルの固定を解除

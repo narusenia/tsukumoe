@@ -42,3 +42,8 @@ spout-title = Spout output
 spout-name = Sender name
 spout-status-no-clients = No receiver
 spout-status-publishing = Publishing
+
+dock-move-left = Move to left side
+dock-move-right = Move to right side
+dock-pin = Pin panel
+dock-unpin = Unpin panel
