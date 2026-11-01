@@ -17,6 +17,7 @@ pub fn scratch(name: &str) -> PathBuf {
 }
 
 /// An empty project at `<name>/project` (a directory, or an archive with `zip`).
+#[allow(dead_code)]
 pub fn empty_project(name: &str, zip: bool) -> PathBuf {
     let dir = scratch(name);
     let mut project = Project::new(Manifest::new(None));

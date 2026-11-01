@@ -588,6 +588,10 @@ pub struct CompiledModel<'a> {
     pub blend_deltas: Cow<'a, [f32]>,
     /// Blend shape indices, grouped per mesh and per warp.
     pub blend_refs: Cow<'a, [u32]>,
+
+    /// Meshes left out of the draw list (the mesh or one of its parts is
+    /// hidden), as ascending mesh indices. Optional in `.tmod`.
+    pub mesh_hidden: Cow<'a, [u32]>,
 }
 
 impl CompiledModel<'_> {
@@ -636,6 +640,7 @@ impl CompiledModel<'_> {
             blend_weights: Cow::Owned(self.blend_weights.into_owned()),
             blend_deltas: Cow::Owned(self.blend_deltas.into_owned()),
             blend_refs: Cow::Owned(self.blend_refs.into_owned()),
+            mesh_hidden: Cow::Owned(self.mesh_hidden.into_owned()),
         }
     }
 
@@ -833,7 +838,17 @@ impl Model {
 
         let bone_index = compile_bones(self, &binding_index, &mut c)?;
 
-        for (_, name, mesh) in self.meshes.iter() {
+        for (i, (_, name, mesh)) in self.meshes.iter().enumerate() {
+            let mut shown = mesh.visible;
+            let mut part = Some(mesh.part);
+            while let Some(id) = part {
+                let p = self.parts.get(id).expect("validated part exists");
+                shown &= p.visible;
+                part = p.parent;
+            }
+            if !shown {
+                c.mesh_hidden.to_mut().push(idx(i));
+            }
             let vertex_start = c.mesh_base_positions.len() / 2;
             flatten(&mesh.positions, &mut c.mesh_base_positions);
             flatten(&mesh.uvs, &mut c.mesh_uvs);

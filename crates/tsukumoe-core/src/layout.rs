@@ -151,6 +151,16 @@ impl CompiledModel<'_> {
             "one opacity per part",
         )?;
         ensure(
+            self.mesh_hidden.windows(2).all(|w| w[0] < w[1])
+                && self
+                    .mesh_hidden
+                    .iter()
+                    .all(|&m| (m as usize) < self.meshes.len()),
+            "mesh_hidden",
+            0,
+            "not ascending mesh indices",
+        )?;
+        ensure(
             self.mesh_base_positions.len().is_multiple_of(2),
             "mesh_base_positions",
             0,

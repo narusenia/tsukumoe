@@ -269,6 +269,7 @@ impl Writer<'_> {
                 multiply_color: mesh.multiply_color,
                 screen_color: mesh.screen_color,
                 double_sided: mesh.double_sided,
+                visible: mesh.visible,
                 influences,
                 keyforms: self.grid(&mesh.keyforms, |k| MeshKeyformDto {
                     positions: k.positions.clone(),
@@ -730,6 +731,7 @@ impl Reader {
             mesh.multiply_color = d.multiply_color;
             mesh.screen_color = d.screen_color;
             mesh.double_sided = d.double_sided;
+            mesh.visible = d.visible;
             mesh.influences = influences;
             mesh.keyforms = self.grid(&d.keyforms, &owner, |k| MeshKeyform {
                 positions: k.positions.clone(),

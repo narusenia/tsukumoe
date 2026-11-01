@@ -66,6 +66,7 @@ All are UTF-8 JSON in the order of the field definitions in the Rust types (`tsu
 - Elements refer to each other by **persistent name**, never by an internal index. The one exception is a keyform grid's `binding`: the position in `bindings`, because bindings are shared and unnamed.
 - Files under `motions/` and `expressions/` are numbered in the order of the model's table so the order survives; the name part is the real name with every byte outside `A-Z a-z 0-9 - _` written as `%XX`. A reader takes the name from inside the file.
 - Fields with a natural default (opacity 1, draw order 500, colors, `visible`, empty lists) may be left out when a file is edited by hand; a writer always writes them.
+- Version 1.1 added the optional `visible` field of meshes (default true; a hidden mesh stays in the model and is left out of the draw list, as is every mesh of a hidden part). A 1.0 file reads as all meshes shown; a 1.0 reader ignores the field.
 - Reading validates the content as a model: a name that is not defined, a duplicate name, or a geometry that does not fit is an error that names the element.
 - Numbers must be finite; JSON has no NaN or infinity.
 
@@ -172,6 +173,7 @@ The distribution format. Designed for zero-copy loading: after validation, the e
 | `0x97` | `pose_groups` | `PoseGroupDef` | 8 | optional playback: groups of the pose |
 | `0x98` | `pose_entries` | `PoseEntryDef` | 12 | optional playback: entries of all groups |
 | `0x99` | `pose_links` | `u32` | 4 | optional playback: part indices linked to an entry |
+| `0x9A` | `mesh_hidden` | `u32` | 4 | optional: ascending indices of the meshes the draw list leaves out (a hidden mesh or a mesh of a hidden part); written only when there is one, so other files are unchanged |
 
 IDs from `0x2A` up to `0x7F` other than those listed are reserved for later minor versions; `0x80` and up are optional content. The texture sections are written together or not at all; texture `i` of a mesh (`texture` field) is entry `i` of the table, in the order of `textures/*.png` in the project.
 
@@ -257,7 +259,7 @@ A loader checks the following before it exposes the data, and rejects the file w
 2. Each known section: aligned offset not inside the header or table, range inside the file, `length == count * element size`.
 3. Strings: every `StrRef` lies inside its byte array and names are UTF-8; one name per parameter, mesh and bone.
 4. Numbers: every `f32` is finite; flags are 0 or 1; enumerations (`kind`, `channel`, `blend_mode`, op kind) have known values; part, bone and deformer parents come before their children.
-5. Ranges and indices: every `start + count` lies inside the array it addresses; every index (parameter, binding, part, mesh, warp, rotation, bone, blend, vertex in `mesh_indices` and glue nodes) is inside its array; keyform ranges cover `keyform_count` keyforms of the element's size; `deformer_order` lists each deformer once with parents first.
+5. Ranges and indices: every `start + count` lies inside the array it addresses; every index (parameter, binding, part, mesh, warp, rotation, bone, blend, vertex in `mesh_indices` and glue nodes, and `mesh_hidden`, which must also ascend strictly) is inside its array; keyform ranges cover `keyform_count` keyforms of the element's size; `deformer_order` lists each deformer once with parents first.
 6. Bindings: key lists strictly ascending; `keyform_count`, `max_corners` and `corner_start` agree with the axes; `corner_capacity` equals their sum.
 7. Drivers: the instruction rules of `Op` above.
 8. Textures (when present): both sections present, every entry inside `texture_data` and starting with the PNG signature.

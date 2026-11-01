@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/tsukumoe-core", "crates/tsukumoe-runtime", "crates/tsukumoe-ffi", "crates/tsukumoe-format", "crates/tsukumoe-gpu", "crates/tsukumoe-cli", "crates/tsukumoe-ui", "crates/tsukumoe-host", "crates/tsukumoe-i18n", "crates/tsukumoe-wasm", "crates/tsukumoe-tracking", "crates/tsukumoe-ai", "crates/tsukumoe-app"]
+members = ["crates/tsukumoe-core", "crates/tsukumoe-runtime", "crates/tsukumoe-ffi", "crates/tsukumoe-format", "crates/tsukumoe-gpu", "crates/tsukumoe-cli", "crates/tsukumoe-ui", "crates/tsukumoe-host", "crates/tsukumoe-i18n", "crates/tsukumoe-wasm", "crates/tsukumoe-tracking", "crates/tsukumoe-ai", "crates/tsukumoe-app", "crates/tsukumoe-psd"]
 
 [workspace.package]
 version = "0.1.0"
@@ -23,6 +23,7 @@ tsukumoe-tracking = { path = "crates/tsukumoe-tracking", version = "0.1.0" }
 tsukumoe-ai = { path = "crates/tsukumoe-ai", version = "0.1.0" }
 tsukumoe-cli = { path = "crates/tsukumoe-cli", version = "0.1.0" }
 tsukumoe-app = { path = "crates/tsukumoe-app", version = "0.1.0" }
+tsukumoe-psd = { path = "crates/tsukumoe-psd", version = "0.1.0" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

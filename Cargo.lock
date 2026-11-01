@@ -3877,6 +3877,7 @@ dependencies = [
  "tsukumoe-format",
  "tsukumoe-gpu",
  "tsukumoe-i18n",
+ "tsukumoe-psd",
  "tsukumoe-ui",
  "wgpu",
 ]
@@ -3894,6 +3895,7 @@ dependencies = [
  "tsukumoe-core",
  "tsukumoe-format",
  "tsukumoe-gpu",
+ "tsukumoe-psd",
  "tsukumoe-runtime",
  "tsukumoe-tracking",
 ]
@@ -3970,6 +3972,17 @@ dependencies = [
  "serde",
  "sys-locale",
  "unic-langid",
+]
+
+[[package]]
+name = "tsukumoe-psd"
+version = "0.1.0"
+dependencies = [
+ "png 0.18.1",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tsukumoe-core",
 ]
 
 [[package]]

@@ -93,6 +93,20 @@ Sets the opacity of a part.
 {"type":"set_part_opacity","name":"Face","opacity":0.5}
 ```
 
+### `set_part_visible`
+
+Shows or hides a part; a hidden part hides every mesh under it.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"set_part_visible"` | yes |  |
+| `visible` | boolean | yes |  |
+
+```json
+{"type":"set_part_visible","name":"Face","visible":false}
+```
+
 ### `add_mesh`
 
 Adds an art mesh to a part; positions and uvs are [x, y] pairs, indices are triangle vertex indices.
@@ -135,6 +149,105 @@ Replaces the vertex positions of a mesh; the count must match its uvs.
 
 ```json
 {"type":"set_mesh_positions","name":"Skin","positions":[[0.0,0.0],[2.0,0.0],[0.0,2.0]]}
+```
+
+### `set_mesh_texture`
+
+Sets the texture index of a mesh.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `texture` | integer | yes |  |
+| `type` | `"set_mesh_texture"` | yes |  |
+
+```json
+{"type":"set_mesh_texture","name":"Skin","texture":1}
+```
+
+### `set_mesh_blend_mode`
+
+Sets how a mesh blends with what is behind it.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `blend_mode` | string | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_mesh_blend_mode"` | yes |  |
+
+```json
+{"type":"set_mesh_blend_mode","name":"Skin","blend_mode":"multiply"}
+```
+
+### `set_mesh_opacity`
+
+Sets the opacity of a mesh.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `opacity` | number | yes |  |
+| `type` | `"set_mesh_opacity"` | yes |  |
+
+```json
+{"type":"set_mesh_opacity","name":"Skin","opacity":0.5}
+```
+
+### `set_mesh_draw_order`
+
+Sets the draw order of a mesh (ascending order is back to front).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `draw_order` | number | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_mesh_draw_order"` | yes |  |
+
+```json
+{"type":"set_mesh_draw_order","name":"Skin","draw_order":700.0}
+```
+
+### `set_mesh_uvs`
+
+Replaces the UVs of a mesh; the count must match its positions.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"set_mesh_uvs"` | yes |  |
+| `uvs` | number[2][] | yes |  |
+
+```json
+{"type":"set_mesh_uvs","name":"Skin","uvs":[[0.0,0.0],[1.0,0.0],[0.0,1.0]]}
+```
+
+### `set_mesh_masks`
+
+Sets the meshes that clip a mesh (by name) and whether the clip is inverted; an empty list removes the clipping.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `inverted` | boolean | no | `false` |
+| `masks` | string[] | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_mesh_masks"` | yes |  |
+
+```json
+{"type":"set_mesh_masks","name":"Skin","masks":["Clip"],"inverted":false}
+```
+
+### `set_mesh_visible`
+
+Shows or hides a mesh; a hidden mesh is not in the draw list.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"set_mesh_visible"` | yes |  |
+| `visible` | boolean | yes |  |
+
+```json
+{"type":"set_mesh_visible","name":"Skin","visible":false}
 ```
 
 ### `batch`

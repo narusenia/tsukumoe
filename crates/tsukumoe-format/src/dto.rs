@@ -171,6 +171,9 @@ pub struct MeshDto {
     pub screen_color: [f32; 3],
     #[serde(default)]
     pub double_sided: bool,
+    /// A hidden mesh is kept in the model but not drawn. Absent means shown.
+    #[serde(default = "yes")]
+    pub visible: bool,
     /// Empty, or one entry per vertex.
     #[serde(default)]
     pub influences: Vec<InfluenceDto>,

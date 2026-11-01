@@ -51,6 +51,9 @@ pub struct Frame {
     prev_attrs: Vec<MeshAttrs>,
     /// Mesh indices in drawing order (see `draw.rs`) and the previous frame's.
     pub(crate) order: Vec<u32>,
+    /// Hidden meshes sort after the shown ones; only `order[..shown]` is drawn.
+    pub(crate) shown: usize,
+    hidden: Vec<bool>,
     prev_order: Vec<u32>,
     evaluated: bool,
     physics: simulate::State,
@@ -89,6 +92,14 @@ impl Frame {
             prev_positions: vec![f32::NAN; model.mesh_base_positions.len()],
             prev_attrs: vec![[f32::NAN; 8]; model.meshes.len()],
             order: (0..model.meshes.len() as u32).collect(),
+            shown: model.meshes.len() - model.mesh_hidden.len(),
+            hidden: {
+                let mut hidden = vec![false; model.meshes.len()];
+                for &m in model.mesh_hidden.iter() {
+                    hidden[m as usize] = true;
+                }
+                hidden
+            },
             prev_order: (0..model.meshes.len() as u32).collect(),
             evaluated: false,
             physics: simulate::State::new(model),
@@ -158,6 +169,8 @@ impl Frame {
             prev_positions,
             prev_attrs,
             order,
+            shown: _,
+            hidden,
             prev_order,
             evaluated,
             physics,
@@ -400,7 +413,10 @@ impl Frame {
         std::mem::swap(order, prev_order);
         order.sort_unstable_by(|&a, &b| {
             let (a, b) = (a as usize, b as usize);
-            attrs[a][1].total_cmp(&attrs[b][1]).then(a.cmp(&b))
+            hidden[a]
+                .cmp(&hidden[b])
+                .then(attrs[a][1].total_cmp(&attrs[b][1]))
+                .then(a.cmp(&b))
         });
         *order_changed = !*evaluated || order != prev_order;
         *evaluated = true;

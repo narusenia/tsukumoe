@@ -17,7 +17,10 @@ pub type GlueId = Id<Glue>;
 pub type BoneId = Id<Bone>;
 pub type BlendShapeId = Id<BlendShape>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// In JSON, snake case: `normal`, `additive`, `multiply`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema), schemars(inline))]
+#[serde(rename_all = "snake_case")]
 pub enum BlendMode {
     #[default]
     Normal,
@@ -83,6 +86,8 @@ pub struct ArtMesh {
     pub multiply_color: [f32; 3],
     pub screen_color: [f32; 3],
     pub double_sided: bool,
+    /// A hidden mesh is kept in the model but left out of the draw list.
+    pub visible: bool,
     /// Empty, or one entry per vertex.
     pub influences: Vec<VertexInfluences>,
     pub keyforms: Option<KeyformGrid<MeshKeyform>>,
@@ -105,6 +110,7 @@ impl ArtMesh {
             multiply_color: [1.0; 3],
             screen_color: [0.0; 3],
             double_sided: false,
+            visible: true,
             influences: Vec::new(),
             keyforms: None,
         }

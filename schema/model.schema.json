@@ -589,6 +589,11 @@
             "type": "array"
           },
           "type": "array"
+        },
+        "visible": {
+          "default": true,
+          "description": "A hidden mesh is kept in the model but not drawn. Absent means shown.",
+          "type": "boolean"
         }
       },
       "required": [

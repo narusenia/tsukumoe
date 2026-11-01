@@ -8,6 +8,7 @@
 #  - tsukumoe-ffi depends on tsukumoe-runtime and tsukumoe-core only (dev
 #    dependencies such as cbindgen and cc are not looked at)
 #  - tsukumoe-wasm depends on tsukumoe-runtime, tsukumoe-gpu and tsukumoe-core only
+#  - tsukumoe-psd depends on tsukumoe-core only
 set -euo pipefail
 
 tree() { cargo tree -p "$1" --edges normal,build --prefix none; }
@@ -39,6 +40,10 @@ if tree tsukumoe-ffi | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(ffi|runtime
 fi
 if tree tsukumoe-wasm | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(wasm|runtime|gpu|core)( |$)'; then
   echo "error: tsukumoe-wasm must depend on tsukumoe-runtime, tsukumoe-gpu and tsukumoe-core only" >&2
+  fail=1
+fi
+if tree tsukumoe-psd | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(psd|core)( |$)'; then
+  echo "error: tsukumoe-psd must depend on tsukumoe-core only" >&2
   fail=1
 fi
 # `unsafe` lives in tsukumoe-ffi only (wasm-bindgen's generated code is not

@@ -1,0 +1,22 @@
+[package]
+name = "tsukumoe-psd"
+description = "Minimal PSD reader and import planner for Tsukumoe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# A minimal PSD writer for tests of this and other crates.
+test-writer = []
+
+[dependencies]
+tsukumoe-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

@@ -268,7 +268,7 @@ mod tests {
         let text = String::from_utf8(to_json(&Manifest::new(Some("g".into()))).unwrap()).unwrap();
         assert_eq!(
             text,
-            "{\n  \"format\": \"tsukumoe-project\",\n  \"version\": {\n    \"major\": 1,\n    \"minor\": 0\n  },\n  \"generator\": \"g\",\n  \"features\": []\n}\n"
+            "{\n  \"format\": \"tsukumoe-project\",\n  \"version\": {\n    \"major\": 1,\n    \"minor\": 1\n  },\n  \"generator\": \"g\",\n  \"features\": []\n}\n"
         );
     }
 
