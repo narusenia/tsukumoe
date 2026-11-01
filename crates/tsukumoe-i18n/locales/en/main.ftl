@@ -38,3 +38,7 @@ syphon-title = Syphon output
 syphon-name = Server name
 syphon-status-no-clients = No receiver
 syphon-status-publishing = Publishing
+spout-title = Spout output
+spout-name = Sender name
+spout-status-no-clients = No receiver
+spout-status-publishing = Publishing

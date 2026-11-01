@@ -16,8 +16,15 @@ use tsukumoe_ui::{
 use crate::live::{Live, Status};
 use crate::options::Options;
 use crate::output::Output;
+#[cfg(any(
+    all(feature = "syphon", target_os = "macos"),
+    all(feature = "spout", windows)
+))]
+use crate::output::SinkStatus;
+#[cfg(all(feature = "spout", windows))]
+use crate::output::SpoutSink;
 #[cfg(all(feature = "syphon", target_os = "macos"))]
-use crate::output::{SinkStatus, SyphonSink};
+use crate::output::SyphonSink;
 use crate::settings;
 use crate::viewer::{Viewer, open_project};
 
@@ -59,9 +66,14 @@ struct Host {
     applied: WindowMode,
     show_panel: bool,
     output: Output,
+    /// Why the output stopped; the next frame must not clear it.
+    output_error: Option<String>,
     /// The Syphon server name; editable while the output is off.
     #[cfg(all(feature = "syphon", target_os = "macos"))]
     syphon_name: String,
+    /// The Spout sender name; editable while the output is off.
+    #[cfg(all(feature = "spout", windows))]
+    spout_name: String,
 }
 
 /// The window's look. `transparent` clears the background to alpha 0 and drops
@@ -214,9 +226,9 @@ impl Host {
         match SyphonSink::new(self.syphon_name.trim()) {
             Ok(sink) => {
                 self.output.attach(Box::new(sink));
-                self.error = None;
+                self.output_error = None;
             }
-            Err(e) => self.error = Some(e),
+            Err(e) => self.output_error = Some(e),
         }
     }
 
@@ -241,6 +253,46 @@ impl Host {
         hint(ui, text("syphon-name"));
         ui.add_enabled_ui(!self.output.enabled(), |ui| {
             text_input(ui, &mut self.syphon_name, &text("syphon-name"), "Tsukumoe");
+        });
+    }
+
+    /// Starts or stops the Spout output; a failure is shown in the panel.
+    #[cfg(all(feature = "spout", windows))]
+    fn set_spout(&mut self, on: bool) {
+        if !on {
+            self.output.detach();
+            return;
+        }
+        match SpoutSink::new(self.spout_name.trim()) {
+            Ok(sink) => {
+                self.output.attach(Box::new(sink));
+                self.output_error = None;
+            }
+            Err(e) => self.output_error = Some(e),
+        }
+    }
+
+    #[cfg(all(feature = "spout", windows))]
+    fn spout_panel(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let text = |key: &str| tr(&ctx, key);
+        section_header(ui, &text("spout-title"));
+        ui.horizontal(|ui| {
+            let mut on = self.output.enabled();
+            if switch(ui, &mut on, &text("spout-title")).changed() {
+                self.set_spout(on);
+            }
+            if let Some(sink) = self.output.sink() {
+                let (key, tone) = match sink.status() {
+                    SinkStatus::NoClients => ("spout-status-no-clients", Tone::Warning),
+                    SinkStatus::Publishing => ("spout-status-publishing", Tone::Success),
+                };
+                badge(ui, &text(key), tone);
+            }
+        });
+        hint(ui, text("spout-name"));
+        ui.add_enabled_ui(!self.output.enabled(), |ui| {
+            text_input(ui, &mut self.spout_name, &text("spout-name"), "Tsukumoe");
         });
     }
 
@@ -339,8 +391,10 @@ impl Host {
             self.live_panel(ui);
             #[cfg(all(feature = "syphon", target_os = "macos"))]
             self.syphon_panel(ui);
+            #[cfg(all(feature = "spout", windows))]
+            self.spout_panel(ui);
             self.appearance(ui);
-            if let Some(e) = &self.error {
+            for e in self.error.iter().chain(&self.output_error) {
                 hint(ui, e.clone());
             }
             egui::ScrollArea::vertical()
@@ -400,7 +454,9 @@ impl Host {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: tsukumoe_gpu::OUTPUT_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
@@ -459,7 +515,7 @@ impl Host {
                                 viewer.draw(&rs.device, &rs.queue, view, size)
                             })
                     {
-                        self.error = Some(e);
+                        self.output_error = Some(e);
                         self.output.detach();
                     }
                 }
@@ -591,13 +647,23 @@ pub fn run(mut options: Options) -> Result<(), String> {
                 window,
                 applied: window,
                 show_panel: true,
-                output: Output::new(options.syphon_size),
+                output: Output::new(options.syphon_size.or(options.spout_size)),
+                output_error: None,
                 #[cfg(all(feature = "syphon", target_os = "macos"))]
                 syphon_name: options.syphon_name.clone(),
+                #[cfg(all(feature = "spout", windows))]
+                spout_name: options.spout_name.clone(),
             };
             #[cfg(all(feature = "syphon", target_os = "macos"))]
             if options.syphon {
                 host.set_syphon(true);
+                if let Some(e) = host.error.take() {
+                    return Err(e.into());
+                }
+            }
+            #[cfg(all(feature = "spout", windows))]
+            if options.spout {
+                host.set_spout(true);
                 if let Some(e) = host.error.take() {
                     return Err(e.into());
                 }
