@@ -140,6 +140,12 @@ pub fn examples() -> Vec<Command> {
             name: "Skin".into(),
             positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
         },
+        Command::SetMeshGeometry {
+            name: "Skin".into(),
+            positions: triangle.clone(),
+            uvs: triangle.clone(),
+            indices: vec![0, 1, 2],
+        },
         Command::SetMeshTexture {
             name: "Skin".into(),
             texture: 1,
@@ -189,6 +195,7 @@ pub fn tag(command: &Command) -> &'static str {
         Command::AddMesh { .. } => "add_mesh",
         Command::RemoveMesh { .. } => "remove_mesh",
         Command::SetMeshPositions { .. } => "set_mesh_positions",
+        Command::SetMeshGeometry { .. } => "set_mesh_geometry",
         Command::SetMeshTexture { .. } => "set_mesh_texture",
         Command::SetMeshBlendMode { .. } => "set_mesh_blend_mode",
         Command::SetMeshOpacity { .. } => "set_mesh_opacity",
