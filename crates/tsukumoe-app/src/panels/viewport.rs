@@ -21,7 +21,7 @@ use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
 use crate::panels::{deformer_overlay, mesh_overlay};
 use crate::project::Document;
-use crate::scene::{Scene, fit_view};
+use crate::scene::{Preview, Scene, fit_view};
 use crate::view::{Selection, ViewState};
 use tsukumoe_core::deformer_space::Space;
 
@@ -208,6 +208,13 @@ impl Viewport {
         }
         self.navigate(ui, &response, rect, view);
         self.drag_parameters(ui, &response, doc, view, drag);
+        // A shape being dragged is drawn as it will be committed, before it is.
+        let live = self.live_preview(rect, doc, view, mesh, deformer, size);
+        if let Some(scene) = &mut self.scene
+            && scene.set_preview(live.as_ref())
+        {
+            self.wake();
+        }
 
         let now = Instant::now();
         // The mesh the mesh tool edits, if the focus picture must show it.
@@ -290,6 +297,44 @@ impl Viewport {
             hint(ui, e.clone());
         }
         (response, ops, actions)
+    }
+
+    /// The drag in progress as a [`Preview`], from the active tool's state.
+    fn live_preview(
+        &self,
+        rect: Rect,
+        doc: &Document,
+        view: &ViewState,
+        mesh: &MeshTool,
+        deformer: &DeformerTool,
+        size: (u32, u32),
+    ) -> Option<Preview> {
+        let scene = self.scene.as_ref()?;
+        let model = doc.dispatcher.model();
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        match view.tool {
+            Tool::Mesh => {
+                let name = mesh.mesh()?;
+                let m = model.meshes().get(model.meshes().find(name)?)?;
+                let space = Space::of(model, m.parent).ok()?;
+                let positions = mesh.dragging_stored(&m.positions, &mapper, &space)?;
+                Some(Preview::Mesh {
+                    name: name.to_owned(),
+                    positions,
+                })
+            }
+            Tool::Deformer => {
+                let name = deformer.deformer()?;
+                let radius = (mapper.view[2] - mapper.view[0]) * 0.05;
+                let shape = deformer_tool::Shape::of(model, name, radius)?;
+                Some(deformer.dragging(&shape, &mapper)?.as_preview(name))
+            }
+            Tool::Select => None,
+        }
     }
 
     /// The select tool: a click picks the front mesh under the pointer, Shift
@@ -583,16 +628,9 @@ impl Viewport {
         }
         match &mesh {
             Some((_, m)) => {
-                let preview = tool.preview(&shown, &mapper);
-                mesh_overlay::paint(
-                    &painter,
-                    &theme,
-                    &mapper,
-                    &shown,
-                    &m.indices,
-                    tool,
-                    preview.as_deref(),
-                );
+                // The scene already shows the drag live, so `shown` is moved; the
+                // overlay needs no preview offset of its own.
+                mesh_overlay::paint(&painter, &theme, &mapper, &shown, &m.indices, tool, None);
                 mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-hint"));
             }
             None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),

@@ -499,10 +499,37 @@ impl DeformerTool {
         }
     }
 
+    /// The shape a release now would store, while a move is on.
+    pub fn dragging(&self, shape: &Shape, m: &Mapper) -> Option<Shape> {
+        let Some(Gesture::Move { from, to, .. }) = self.gesture else {
+            return None;
+        };
+        if from == to {
+            return None;
+        }
+        self.preview(shape, m)
+    }
+
     /// A click that selects, without a press and release in between.
     pub fn click(&mut self, shape: &Shape, m: &Mapper, at: [f32; 2], shift: bool) {
         let hit = hit_test(shape, m, at);
         self.select(hit, shift);
+    }
+}
+
+impl Shape {
+    /// The live preview of this shape for deformer `name`.
+    pub fn as_preview(&self, name: &str) -> crate::scene::Preview {
+        match self {
+            Self::Warp { points, .. } => crate::scene::Preview::Warp {
+                name: name.to_owned(),
+                points: points.clone(),
+            },
+            Self::Rotation { base, .. } => crate::scene::Preview::Rotation {
+                name: name.to_owned(),
+                base: *base,
+            },
+        }
     }
 }
 
@@ -665,7 +692,10 @@ mod tests {
         assert_ne!(preview, before);
         // The model is untouched until the command is applied.
         assert_eq!(Shape::of(&m, "Warp", 0.5).unwrap(), before);
+        let live = t.dragging(&before, &mapper()).unwrap();
         let (command, label) = t.release("Warp", &before, &mapper()).unwrap();
+        assert_eq!(command, live.command("Warp"));
+        assert!(t.dragging(&before, &mapper()).is_none());
         assert_eq!(label, "deformer_move_points: Warp");
         m.apply(command).unwrap();
         let after = Shape::of(&m, "Warp", 0.5).unwrap().world_points();

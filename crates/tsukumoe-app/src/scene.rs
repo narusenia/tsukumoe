@@ -5,7 +5,8 @@
 //! compiled for evaluation, one frame of its pose, and the fit of the view.
 //! Parameter values come from the view state, not from the model.
 
-use tsukumoe_core::compiled::CompiledModel;
+use tsukumoe_core::command::RotationBase;
+use tsukumoe_core::compiled::{CompiledModel, RotationKf};
 use tsukumoe_core::eval::Frame;
 use tsukumoe_core::model::Model;
 
@@ -47,15 +48,48 @@ pub fn fit_view(bounds: [f32; 4], width: u32, height: u32) -> [f32; 4] {
     [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
 }
 
+/// A shape shown while it is being dragged, before it is committed. It is
+/// laid over the compiled copy of the model that the scene draws; the edited
+/// model is not touched (ADR-0019), and a rebuilt scene starts without one.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Preview {
+    /// The stored vertex positions of a mesh.
+    Mesh {
+        name: String,
+        positions: Vec<[f32; 2]>,
+    },
+    /// The base control points of a warp deformer.
+    Warp { name: String, points: Vec<[f32; 2]> },
+    /// The base shape of a rotation deformer.
+    Rotation { name: String, base: RotationBase },
+}
+
+/// What a preview replaced, to put back.
+enum Saved {
+    Floats {
+        warp: bool,
+        start: usize,
+        data: Vec<f32>,
+    },
+    Rotation {
+        index: usize,
+        base: RotationKf,
+    },
+}
+
 pub struct Scene {
     pub model: CompiledModel<'static>,
     pub frame: Frame,
     bounds: [f32; 4],
+    warp_names: Vec<String>,
+    rotation_names: Vec<String>,
+    preview: Option<Preview>,
+    saved: Option<Saved>,
 }
 
 impl Scene {
-    pub fn new(model: &Model) -> Result<Self, String> {
-        let model = model.compile().map_err(|e| format!("{e:?}"))?;
+    pub fn new(source: &Model) -> Result<Self, String> {
+        let model = source.compile().map_err(|e| format!("{e:?}"))?;
         let mut frame = Frame::new(&model);
         frame.evaluate(&model);
         let bounds = bounds(frame.draw_list(&model).positions()).unwrap_or(FALLBACK_VIEW);
@@ -63,7 +97,103 @@ impl Scene {
             model,
             frame,
             bounds,
+            warp_names: source
+                .warps()
+                .iter()
+                .map(|(_, n, _)| n.to_owned())
+                .collect(),
+            rotation_names: source
+                .rotations()
+                .iter()
+                .map(|(_, n, _)| n.to_owned())
+                .collect(),
+            preview: None,
+            saved: None,
         })
+    }
+
+    /// Shows `preview` (or, with `None`, the model as it is). True if that
+    /// changed what is drawn; the next [`Scene::advance`] evaluates it.
+    pub fn set_preview(&mut self, preview: Option<&Preview>) -> bool {
+        if self.preview.as_ref() == preview {
+            return false;
+        }
+        match self.saved.take() {
+            Some(Saved::Floats { warp, start, data }) => {
+                let target = if warp {
+                    self.model.warp_base_points.to_mut()
+                } else {
+                    self.model.mesh_base_positions.to_mut()
+                };
+                target[start..start + data.len()].copy_from_slice(&data);
+            }
+            Some(Saved::Rotation { index, base }) => {
+                self.model.rotations.to_mut()[index].base = base;
+            }
+            None => {}
+        }
+        self.preview = preview.cloned();
+        let Some(preview) = preview else {
+            return true;
+        };
+        self.saved = match preview {
+            Preview::Mesh { name, positions } => self.model.mesh_index(name).and_then(|i| {
+                let def = self.model.meshes[i];
+                let (start, n) = (def.vertex_start as usize * 2, def.vertex_count as usize);
+                (n == positions.len()).then(|| {
+                    let target = self.model.mesh_base_positions.to_mut();
+                    let data = target[start..start + n * 2].to_vec();
+                    for (k, p) in positions.iter().enumerate() {
+                        target[start + 2 * k] = p[0];
+                        target[start + 2 * k + 1] = p[1];
+                    }
+                    Saved::Floats {
+                        warp: false,
+                        start,
+                        data,
+                    }
+                })
+            }),
+            Preview::Warp { name, points } => {
+                let i = self.warp_names.iter().position(|n| n == name);
+                i.and_then(|i| {
+                    let def = self.model.warps[i];
+                    let (start, n) = (def.point_start as usize, def.point_count as usize);
+                    (n == points.len()).then(|| {
+                        let target = self.model.warp_base_points.to_mut();
+                        let data = target[start..start + n * 2].to_vec();
+                        for (k, p) in points.iter().enumerate() {
+                            target[start + 2 * k] = p[0];
+                            target[start + 2 * k + 1] = p[1];
+                        }
+                        Saved::Floats {
+                            warp: true,
+                            start,
+                            data,
+                        }
+                    })
+                })
+            }
+            Preview::Rotation { name, base } => {
+                let i = self.rotation_names.iter().position(|n| n == name);
+                i.map(|i| {
+                    let old = self.model.rotations[i].base;
+                    self.model.rotations.to_mut()[i].base = RotationKf {
+                        origin: base.origin,
+                        angle_degrees: base.angle_degrees,
+                        scale: base.scale,
+                        reflect_x: base.reflect_x.into(),
+                        reflect_y: base.reflect_y.into(),
+                        opacity: old.opacity,
+                    };
+                    Saved::Rotation {
+                        index: i,
+                        base: old,
+                    }
+                })
+            }
+        };
+        true
     }
 
     pub fn bounds(&self) -> [f32; 4] {
@@ -223,5 +353,217 @@ mod tests {
             moved[1]
         );
         assert!(scene.drawn_positions("Nope").is_none());
+    }
+
+    fn live_model() -> Model {
+        use tsukumoe_core::command::RotationBase;
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let mut m = Model::new();
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddWarpDeformer {
+                name: "W".into(),
+                part: "P".into(),
+                parent: None,
+                rows: 1,
+                columns: 1,
+                base_points: vec![[0.0, 0.0], [4.0, 0.0], [0.0, 4.0], [4.0, 4.0]],
+            },
+            Command::AddRotationDeformer {
+                name: "R".into(),
+                part: "P".into(),
+                parent: None,
+                base: RotationBase {
+                    origin: [10.0, 0.0],
+                    angle_degrees: 0.0,
+                    scale: 1.0,
+                    reflect_x: false,
+                    reflect_y: false,
+                },
+            },
+            Command::AddMesh {
+                name: "Skin".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri.clone(),
+                indices: vec![0, 1, 2],
+            },
+            Command::AddMesh {
+                name: "Spin".into(),
+                part: "P".into(),
+                positions: vec![[1.0, 0.0], [2.0, 0.0], [1.0, 1.0]],
+                uvs: tri.clone(),
+                indices: vec![0, 1, 2],
+            },
+            Command::AddMesh {
+                name: "Clipped".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            },
+            Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: Some("W".into()),
+            },
+            Command::SetMeshParent {
+                name: "Spin".into(),
+                parent: Some("R".into()),
+            },
+            Command::SetMeshMasks {
+                name: "Clipped".into(),
+                masks: vec!["Skin".into()],
+                inverted: false,
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        m
+    }
+
+    type Drawn = Vec<Vec<[f32; 2]>>;
+
+    fn drawn_all(scene: &Scene) -> Drawn {
+        ["Skin", "Spin", "Clipped"]
+            .iter()
+            .map(|n| scene.drawn_positions(n).unwrap())
+            .collect()
+    }
+
+    fn settle(scene: &mut Scene) {
+        scene.advance(0.0);
+    }
+
+    #[test]
+    fn a_preview_changes_what_is_drawn_not_the_model_and_clears_back() {
+        use crate::dispatcher::Dispatcher;
+        let d = Dispatcher::new(live_model());
+        let (steps, rev) = (d.log().len(), d.revision());
+        let mut scene = Scene::new(d.model()).unwrap();
+        settle(&mut scene);
+        let before = drawn_all(&scene);
+        let preview = Preview::Mesh {
+            name: "Clipped".into(),
+            positions: vec![[5.0, 5.0], [6.0, 5.0], [5.0, 6.0]],
+        };
+        assert!(scene.set_preview(Some(&preview)));
+        assert!(
+            !scene.set_preview(Some(&preview)),
+            "the same preview changes nothing"
+        );
+        settle(&mut scene);
+        assert_eq!(scene.drawn_positions("Clipped").unwrap()[0], [5.0, 5.0]);
+        // The edited model, its history and its saved flag are untouched.
+        assert_eq!(
+            (d.log().len(), d.revision(), d.dirty()),
+            (steps, rev, false)
+        );
+        assert!(scene.set_preview(None));
+        settle(&mut scene);
+        assert_eq!(drawn_all(&scene), before);
+        // A preview of the wrong size or for an unknown name is ignored.
+        let bad = Preview::Mesh {
+            name: "Clipped".into(),
+            positions: vec![[0.0, 0.0]],
+        };
+        scene.set_preview(Some(&bad));
+        settle(&mut scene);
+        assert_eq!(drawn_all(&scene), before);
+        scene.set_preview(Some(&Preview::Warp {
+            name: "Nope".into(),
+            points: vec![],
+        }));
+        assert_eq!(drawn_all(&scene), before);
+    }
+
+    /// Previews `preview`, then commits `command` and draws the new model: the
+    /// two pictures are the same.
+    fn preview_matches_commit(preview: Preview, command: Command) -> (Drawn, Drawn) {
+        let mut d = crate::dispatcher::Dispatcher::new(live_model());
+        let mut scene = Scene::new(d.model()).unwrap();
+        settle(&mut scene);
+        let before = drawn_all(&scene);
+        scene.set_preview(Some(&preview));
+        settle(&mut scene);
+        let live = drawn_all(&scene);
+        assert_ne!(live, before, "the preview changes the picture");
+        d.submit(command).unwrap();
+        let mut committed = Scene::new(d.model()).unwrap();
+        settle(&mut committed);
+        let after = drawn_all(&committed);
+        // Esc: dropping the preview returns the old picture.
+        scene.set_preview(None);
+        settle(&mut scene);
+        assert_eq!(drawn_all(&scene), before);
+        (live, after)
+    }
+
+    fn close(a: &Drawn, b: &Drawn) {
+        for (x, y) in a.iter().flatten().zip(b.iter().flatten()) {
+            assert!(
+                (x[0] - y[0]).abs() < 1e-4 && (x[1] - y[1]).abs() < 1e-4,
+                "{x:?} vs {y:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_mesh_preview_is_the_committed_picture() {
+        let positions = vec![[0.5, 0.5], [1.5, 0.0], [0.0, 1.0]];
+        let (live, after) = preview_matches_commit(
+            Preview::Mesh {
+                name: "Skin".into(),
+                positions: positions.clone(),
+            },
+            Command::SetMeshPositions {
+                name: "Skin".into(),
+                positions,
+            },
+        );
+        close(&live, &after);
+    }
+
+    #[test]
+    fn a_warp_preview_moves_its_children_and_is_the_committed_picture() {
+        let points = vec![[0.0, 0.0], [6.0, 0.0], [0.0, 4.0], [6.0, 5.0]];
+        let (live, after) = preview_matches_commit(
+            Preview::Warp {
+                name: "W".into(),
+                points: points.clone(),
+            },
+            Command::SetWarpBasePoints {
+                name: "W".into(),
+                points,
+            },
+        );
+        close(&live, &after);
+        // The child (Skin, index 0) moved with its parent.
+        assert!(live[0][1][0] > 1.0 + 1e-3);
+    }
+
+    #[test]
+    fn a_rotation_preview_turns_its_children_and_is_the_committed_picture() {
+        use tsukumoe_core::command::RotationBase;
+        let base = RotationBase {
+            origin: [10.0, 1.0],
+            angle_degrees: 90.0,
+            scale: 2.0,
+            reflect_x: false,
+            reflect_y: true,
+        };
+        let (live, after) = preview_matches_commit(
+            Preview::Rotation {
+                name: "R".into(),
+                base,
+            },
+            Command::SetRotationBase {
+                name: "R".into(),
+                base,
+            },
+        );
+        close(&live, &after);
     }
 }

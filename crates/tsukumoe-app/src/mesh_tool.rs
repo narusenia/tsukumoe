@@ -526,6 +526,39 @@ impl MeshTool {
         Some(out)
     }
 
+    /// The stored positions after the drag from `from` to `to`.
+    fn moved_stored(
+        &self,
+        stored: &[Point],
+        m: &Mapper,
+        from: [f32; 2],
+        to: [f32; 2],
+        space: &Space,
+    ) -> Option<Vec<Point>> {
+        if matches!(space, Space::Drawing) {
+            Some(self.shifted(stored, m, from, to))
+        } else {
+            self.shifted_through(stored, space, m, from, to)
+        }
+    }
+
+    /// The stored positions a release now would send, while a move is on:
+    /// what the viewport shows live.
+    pub fn dragging_stored(
+        &self,
+        stored: &[Point],
+        m: &Mapper,
+        space: &Space,
+    ) -> Option<Vec<Point>> {
+        let Some(Gesture::Move { from, to }) = self.gesture else {
+            return None;
+        };
+        if from == to {
+            return None;
+        }
+        self.moved_stored(stored, m, from, to, space)
+    }
+
     /// The vertex positions with the dragged ones moved, while a move is on.
     /// The model is not changed.
     pub fn preview(&self, positions: &[Point], m: &Mapper) -> Option<Vec<Point>> {
@@ -566,11 +599,7 @@ impl MeshTool {
                 if from == to {
                     return None;
                 }
-                let moved = if matches!(space, Space::Drawing) {
-                    self.shifted(stored, m, from, to)
-                } else {
-                    self.shifted_through(stored, space, m, from, to)?
-                };
+                let moved = self.moved_stored(stored, m, from, to, space)?;
                 Some((
                     Command::SetMeshPositions {
                         name: name.to_owned(),
@@ -1313,9 +1342,19 @@ mod tests {
         t.drag(to);
         let preview = t.preview(&shown, &m).unwrap();
         assert!((preview[2][0] - 14.5).abs() < 1e-3 && (preview[2][1] - 25.0).abs() < 1e-3);
+        // What is shown live while dragging is what the release stores.
+        let live = t.dragging_stored(&g.positions, &m, &space).unwrap();
         let (command, _) = t
             .release_in("Skin", &g.positions, &shown, &m, &space)
             .unwrap();
+        assert_eq!(
+            command,
+            Command::SetMeshPositions {
+                name: "Skin".into(),
+                positions: live
+            }
+        );
+        assert!(t.dragging_stored(&g.positions, &m, &space).is_none());
         model.apply(command).unwrap();
         let (after, _) = drawn(&model);
         assert!(
