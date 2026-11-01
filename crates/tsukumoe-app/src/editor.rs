@@ -60,6 +60,8 @@ pub struct Editor {
     pub keymap: Keymap,
     pub drag: DragAssignment,
     pub pie_config: PieConfig,
+    /// Whether the system draws the menus (macOS), leaving only the tabs here.
+    pub native_menu: bool,
     /// The open pie menu, while its key is held.
     pie: Option<tsukumoe_ui::PieMenu>,
     /// Whether the pointer was over the viewport last frame (a keymap context).
@@ -101,6 +103,7 @@ impl Editor {
             keymap,
             drag,
             pie_config,
+            native_menu: false,
             pie: None,
             viewport_hovered: false,
             viewport: None,
@@ -385,7 +388,7 @@ impl Editor {
         let entries = self.menu_entries(&ctx);
         let mut chosen = None;
         egui::MenuBar::new().ui(ui, |ui| {
-            for entry in &entries {
+            for entry in entries.iter().filter(|_| !self.native_menu) {
                 if let menu::Entry::Sub { label, entries } = entry {
                     ui.menu_button(label, |ui| show_entries(ui, entries, &mut chosen));
                 }

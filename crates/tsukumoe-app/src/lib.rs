@@ -11,6 +11,8 @@ pub mod dispatcher;
 pub mod drag;
 pub mod editor;
 pub mod menu;
+#[cfg(target_os = "macos")]
+mod native;
 pub mod panels;
 pub mod pie;
 pub mod project;
