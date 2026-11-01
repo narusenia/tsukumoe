@@ -27,6 +27,9 @@ serde.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+muda.workspace = true
+
 [dev-dependencies]
 tsukumoe-cli.workspace = true
 egui_kittest.workspace = true

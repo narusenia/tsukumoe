@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::actions::{self, ACTIONS, Tool};
 use crate::drag::{AxisTarget, DragAssignment, Modifier};
+use crate::menu;
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use crate::pie::{Entry, PieConfig};
@@ -59,6 +60,8 @@ pub struct Editor {
     pub keymap: Keymap,
     pub drag: DragAssignment,
     pub pie_config: PieConfig,
+    /// Whether the system draws the menus (macOS), leaving only the tabs here.
+    pub native_menu: bool,
     /// The open pie menu, while its key is held.
     pie: Option<tsukumoe_ui::PieMenu>,
     /// Whether the pointer was over the viewport last frame (a keymap context).
@@ -100,6 +103,7 @@ impl Editor {
             keymap,
             drag,
             pie_config,
+            native_menu: false,
             pie: None,
             viewport_hovered: false,
             viewport: None,
@@ -182,11 +186,18 @@ impl Editor {
         }
     }
 
-    /// Runs an action by name (a key press, a menu item, a pie menu item).
-    /// Unknown names, e.g. from a hand-edited keymap, do nothing.
-    pub fn run_action(&mut self, ctx: &Context, action: &str) {
+    /// Runs an action by name (a key press, a menu item, a pie menu item) and
+    /// says whether it knows the name. Unknown names, e.g. from a hand-edited
+    /// keymap, do nothing. `file.open-recent:<path>` and `layout.load:<name>`
+    /// carry their argument after the colon.
+    pub fn run_action(&mut self, ctx: &Context, action: &str) -> bool {
         match action {
             "file.open" => self.dialog = Some(Dialog::Open(String::new())),
+            "file.save-as" => {
+                if self.doc.is_some() {
+                    self.dialog = Some(Dialog::SaveAs(String::new()));
+                }
+            }
             "file.save" => {
                 let r = self.save();
                 self.report(ctx, r, Some(tr(ctx, "app-saved")));
@@ -194,6 +205,20 @@ impl Editor {
             "edit.undo" => drop(self.undo()),
             "edit.redo" => drop(self.redo()),
             "view.palette" => self.open_palette(),
+            "view.pie-settings" => self.dialog = Some(Dialog::Pie),
+            "view.drag-settings" => self.dialog = Some(Dialog::Drag),
+            "view.keymap-settings" => {
+                let texts = ACTIONS
+                    .iter()
+                    .map(|a| {
+                        self.keymap
+                            .keys_text(a, actions::context_of(a))
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                self.dialog = Some(Dialog::Keymap(texts, None));
+            }
+            "layout.save" => self.dialog = Some(Dialog::SaveLayout(String::new())),
             // Holding the key repeats the press; reopening would move the menu
             // to the pointer every time.
             "view.pie-menu" => {
@@ -214,9 +239,27 @@ impl Editor {
             other => {
                 if let Some(tool) = Tool::from_action(other) {
                     self.view.tool = tool;
+                } else if let Some(path) = other.strip_prefix("file.open-recent:") {
+                    let path = PathBuf::from(path);
+                    let r = self.open(&path);
+                    let name = path.display().to_string();
+                    let ok = tr_args(ctx, "app-opened", &[("name", Arg::from(name.as_str()))]);
+                    self.report(ctx, r, Some(ok));
+                } else if let Some(name) = other.strip_prefix("layout.load:") {
+                    if self.layouts.load_named(self.workspace, name) {
+                        self.layouts_dirty = true;
+                    }
+                } else if let Some(preset) = other
+                    .strip_prefix("layout.preset.")
+                    .and_then(|k| Preset::ALL.into_iter().find(|p| p.key() == k))
+                {
+                    self.dialog = Some(Dialog::ConfirmPreset(preset));
+                } else {
+                    return false;
                 }
             }
         }
+        true
     }
 
     /// Draws the open pie menu; the key's release picks the item under the
@@ -311,130 +354,45 @@ impl Editor {
         self.toasts.show(&ctx);
     }
 
+    /// The menu as shown now, from [`menu::MENU`] and the editor's state.
+    pub fn menu_entries(&self, ctx: &Context) -> Vec<menu::Entry> {
+        let (can_undo, can_redo) = self.doc.as_ref().map_or((false, false), |d| {
+            (d.dispatcher.can_undo(), d.dispatcher.can_redo())
+        });
+        let state = menu::State {
+            has_doc: self.doc.is_some(),
+            can_undo,
+            can_redo,
+            recent: self
+                .recent
+                .paths()
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect(),
+            saved_layouts: self
+                .layouts
+                .saved
+                .iter()
+                .filter(|s| s.workspace == self.workspace)
+                .map(|s| s.name.clone())
+                .collect(),
+        };
+        menu::resolve(menu::MENU, &state, &|key| tr(ctx, key), &|action| {
+            self.keymap.shortcut_text(ctx, action)
+        })
+    }
+
     fn menu_bar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let t = |key: &str| tr(&ctx, key);
+        let entries = self.menu_entries(&ctx);
+        let mut chosen = None;
         egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button(t("menu-file"), |ui| {
-                if tsukumoe_ui::menu_item(ui, &t("menu-open"), None).clicked() {
-                    self.dialog = Some(Dialog::Open(String::new()));
-                    ui.close();
+            for entry in entries.iter().filter(|_| !self.native_menu) {
+                if let menu::Entry::Sub { label, entries } = entry {
+                    ui.menu_button(label, |ui| show_entries(ui, entries, &mut chosen));
                 }
-                let has_doc = self.doc.is_some();
-                ui.add_enabled_ui(has_doc, |ui| {
-                    if tsukumoe_ui::menu_item(ui, &t("menu-save"), None).clicked() {
-                        let r = self.save();
-                        self.report(&ctx, r, Some(t("app-saved")));
-                        ui.close();
-                    }
-                    if tsukumoe_ui::menu_item(ui, &t("menu-save-as"), None).clicked() {
-                        self.dialog = Some(Dialog::SaveAs(String::new()));
-                        ui.close();
-                    }
-                });
-                ui.menu_button(t("menu-recent"), |ui| {
-                    if self.recent.paths().is_empty() {
-                        ui.add_enabled(false, egui::Label::new(t("menu-no-recent")));
-                    }
-                    for path in self.recent.paths().to_vec() {
-                        let name = path.display().to_string();
-                        if tsukumoe_ui::menu_item(ui, &name, None).clicked() {
-                            let r = self.open(&path);
-                            let ok =
-                                tr_args(&ctx, "app-opened", &[("name", Arg::from(name.as_str()))]);
-                            self.report(&ctx, r, Some(ok));
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            ui.menu_button(t("menu-edit"), |ui| {
-                let (can_undo, can_redo) = self.doc.as_ref().map_or((false, false), |d| {
-                    (d.dispatcher.can_undo(), d.dispatcher.can_redo())
-                });
-                ui.add_enabled_ui(can_undo, |ui| {
-                    if tsukumoe_ui::menu_item(ui, &t("menu-undo"), None).clicked() {
-                        self.undo();
-                        ui.close();
-                    }
-                });
-                ui.add_enabled_ui(can_redo, |ui| {
-                    if tsukumoe_ui::menu_item(ui, &t("menu-redo"), None).clicked() {
-                        self.redo();
-                        ui.close();
-                    }
-                });
-            });
-            ui.menu_button(t("menu-view"), |ui| {
-                if tsukumoe_ui::menu_item(
-                    ui,
-                    &t("menu-palette"),
-                    self.keymap.shortcut_text(&ctx, "view.palette").as_deref(),
-                )
-                .clicked()
-                {
-                    self.open_palette();
-                    ui.close();
-                }
-                if tsukumoe_ui::menu_item(ui, &t("pie-title"), None).clicked() {
-                    self.dialog = Some(Dialog::Pie);
-                    ui.close();
-                }
-                if tsukumoe_ui::menu_item(ui, &t("drag-title"), None).clicked() {
-                    self.dialog = Some(Dialog::Drag);
-                    ui.close();
-                }
-                if tsukumoe_ui::menu_item(ui, &t("keymap-title"), None).clicked() {
-                    let texts = ACTIONS
-                        .iter()
-                        .map(|a| {
-                            self.keymap
-                                .keys_text(a, actions::context_of(a))
-                                .unwrap_or_default()
-                        })
-                        .collect();
-                    self.dialog = Some(Dialog::Keymap(texts, None));
-                    ui.close();
-                }
-            });
-            ui.menu_button(t("menu-layout"), |ui| {
-                for preset in Preset::ALL {
-                    if tsukumoe_ui::menu_item(
-                        ui,
-                        &t(&format!("layout-preset-{}", preset.key())),
-                        None,
-                    )
-                    .clicked()
-                    {
-                        self.dialog = Some(Dialog::ConfirmPreset(preset));
-                        ui.close();
-                    }
-                }
-                if tsukumoe_ui::menu_item(ui, &t("layout-save-named"), None).clicked() {
-                    self.dialog = Some(Dialog::SaveLayout(String::new()));
-                    ui.close();
-                }
-                ui.menu_button(t("layout-load-named"), |ui| {
-                    let names: Vec<String> = self
-                        .layouts
-                        .saved
-                        .iter()
-                        .filter(|s| s.workspace == self.workspace)
-                        .map(|s| s.name.clone())
-                        .collect();
-                    if names.is_empty() {
-                        ui.add_enabled(false, egui::Label::new(t("layout-none-saved")));
-                    }
-                    for name in names {
-                        if tsukumoe_ui::menu_item(ui, &name, None).clicked() {
-                            if self.layouts.load_named(self.workspace, &name) {
-                                self.layouts_dirty = true;
-                            }
-                            ui.close();
-                        }
-                    }
-                });
-            });
+            }
             ui.separator();
             let mut selected = Workspace::ALL
                 .iter()
@@ -449,6 +407,9 @@ impl Editor {
                 self.switch_workspace(Workspace::ALL[selected]);
             }
         });
+        if let Some(action) = chosen {
+            self.run_action(&ctx, &action);
+        }
     }
 
     fn status_bar(&mut self, ui: &mut Ui) {
@@ -762,6 +723,33 @@ impl Editor {
 }
 
 /// The dock's view of the editor: panel names and their contents.
+/// Draws `entries` as egui menu items; the action of a clicked one goes to `chosen`.
+fn show_entries(ui: &mut Ui, entries: &[menu::Entry], chosen: &mut Option<String>) {
+    for entry in entries {
+        match entry {
+            menu::Entry::Separator => {
+                ui.separator();
+            }
+            menu::Entry::Sub { label, entries } => {
+                ui.menu_button(label, |ui| show_entries(ui, entries, chosen));
+            }
+            menu::Entry::Item {
+                action,
+                label,
+                enabled,
+                shortcut,
+            } => {
+                ui.add_enabled_ui(*enabled, |ui| {
+                    if tsukumoe_ui::menu_item(ui, label, shortcut.as_deref()).clicked() {
+                        *chosen = Some(action.clone());
+                        ui.close();
+                    }
+                });
+            }
+        }
+    }
+}
+
 struct Panels<'a> {
     editor: &'a mut Editor,
     rs: Option<&'a RenderState>,
@@ -964,6 +952,28 @@ mod tests {
             )
             .unwrap();
         editor
+    }
+
+    #[test]
+    fn menu_actions_open_their_dialogs_and_unknown_names_are_refused() {
+        let ctx = Context::default();
+        let mut editor = Editor::new(None);
+        assert!(editor.run_action(&ctx, "file.save-as"));
+        assert!(editor.dialog.is_none(), "nothing to save without a project");
+        let mut editor = open_minimal();
+        assert!(editor.run_action(&ctx, "file.save-as"));
+        assert!(matches!(editor.dialog, Some(Dialog::SaveAs(_))));
+        assert!(editor.run_action(&ctx, "layout.preset.cubism"));
+        assert!(matches!(
+            editor.dialog,
+            Some(Dialog::ConfirmPreset(Preset::Cubism))
+        ));
+        assert!(editor.run_action(&ctx, "view.keymap-settings"));
+        assert!(matches!(editor.dialog, Some(Dialog::Keymap(..))));
+        assert!(editor.run_action(&ctx, "layout.save"));
+        assert!(matches!(editor.dialog, Some(Dialog::SaveLayout(_))));
+        assert!(!editor.run_action(&ctx, "layout.preset.nope"));
+        assert!(!editor.run_action(&ctx, "nonsense.action"));
     }
 
     #[test]

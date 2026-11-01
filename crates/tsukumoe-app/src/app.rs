@@ -12,11 +12,25 @@ use crate::settings;
 
 struct App {
     editor: Editor,
+    #[cfg(target_os = "macos")]
+    native_menu: crate::native::NativeMenu,
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        for action in self.native_menu.drain() {
+            self.editor.run_action(ui.ctx(), &action);
+        }
         self.editor.ui(ui, frame.wgpu_render_state());
+        #[cfg(target_os = "macos")]
+        {
+            let ctx = ui.ctx();
+            self.native_menu
+                .sync(self.editor.menu_entries(ctx), &|key| {
+                    tsukumoe_ui::tr(ctx, key)
+                });
+        }
     }
 }
 
@@ -46,7 +60,16 @@ pub fn run(project: Option<PathBuf>) -> Result<(), String> {
             if let Some(path) = project {
                 editor.open(&path)?;
             }
-            Ok(Box::new(App { editor }))
+            #[cfg(target_os = "macos")]
+            {
+                // The menu bar is the system's; the window keeps only the tabs.
+                editor.native_menu = true;
+            }
+            Ok(Box::new(App {
+                editor,
+                #[cfg(target_os = "macos")]
+                native_menu: crate::native::NativeMenu::new(&cc.egui_ctx),
+            }))
         }),
     )
     .map_err(|e| e.to_string())
