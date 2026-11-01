@@ -819,4 +819,43 @@ mod tests {
             })
             .unwrap();
     }
+
+    #[test]
+    fn changing_the_vertex_count_is_rejected_for_a_mesh_with_keyforms() {
+        use crate::keyform::{Axis, Binding, KeyformGrid};
+        use crate::rig::MeshKeyform;
+        let mut model = built(vec![
+            add_param("P"),
+            add_part("Face"),
+            add_mesh("A", "Face"),
+        ]);
+        let p = model.parameters().find("P").unwrap();
+        let binding = model.bindings.insert(
+            Binding::new(vec![Axis {
+                parameter: p,
+                keys: vec![0.0, 1.0],
+            }])
+            .unwrap(),
+        );
+        let keyform = MeshKeyform {
+            positions: tri().0,
+            opacity: 1.0,
+            draw_order: 500.0,
+            multiply_color: [1.0; 3],
+            screen_color: [0.0; 3],
+        };
+        let id = model.meshes().find("A").unwrap();
+        model.meshes.get_mut(id).unwrap().keyforms =
+            Some(KeyformGrid::new(binding, vec![keyform; 2]));
+        let steps = model.history().commands().count();
+        let grow = Command::SetMeshGeometry {
+            name: "A".into(),
+            positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            indices: vec![0, 1, 2, 2, 1, 3],
+        };
+        assert!(matches!(model.apply(grow), Err(CommandError::Invalid(_))));
+        assert_eq!(model.history().commands().count(), steps);
+        assert_eq!(model.meshes().get(id).unwrap().positions.len(), 3);
+    }
 }
