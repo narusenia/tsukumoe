@@ -11,6 +11,7 @@ repository.workspace = true
 tsukumoe-core.workspace = true
 tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true
+tsukumoe-tracking.workspace = true
 tsukumoe-ui.workspace = true
 wgpu.workspace = true
 eframe.workspace = true
