@@ -10,6 +10,10 @@
 //! release:
 //!
 //! `cargo test --release -p tsukumoe-app --test mesh_frame_time -- --nocapture`
+//!
+//! A drag frame also shows the drag live in the picture: the preview is laid
+//! over the compiled model, the frame is evaluated and, when a hardware GPU
+//! is there, the whole model is drawn and waited for.
 
 use std::time::{Duration, Instant};
 
@@ -17,8 +21,9 @@ use egui::{Context, LayerId, RawInput, Rect, pos2, vec2};
 use tsukumoe_app::dispatcher::Dispatcher;
 use tsukumoe_app::mesh_tool::{Mapper, MeshTool};
 use tsukumoe_app::panels::mesh_overlay;
-use tsukumoe_app::scene::{Scene, fit_view};
+use tsukumoe_app::scene::{Preview, Scene, fit_view};
 use tsukumoe_cli::generate::{Table, project};
+use tsukumoe_gpu::{Headless, Texture};
 use tsukumoe_ui::Theme;
 
 const BUDGET: Duration = Duration::from_millis(16);
@@ -32,14 +37,26 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
         "/../../assets/reference-model/parts.json"
     );
     let table: Table = serde_json::from_slice(&std::fs::read(table).unwrap()).unwrap();
-    let (_, model) = project(&table).unwrap();
+    let (project, model) = project(&table).unwrap();
     let (name, mesh) = model
         .meshes()
         .iter()
         .map(|(_, n, m)| (n.to_owned(), m.clone()))
         .max_by_key(|(_, m)| m.positions.len())
         .unwrap();
-    let scene = Scene::new(&model).unwrap();
+    let mut scene = Scene::new(&model).unwrap();
+    let full_view = fit_view(scene.bounds(), SIZE.0 as u32, SIZE.1 as u32);
+    let mut gpu = Headless::hardware().ok();
+    if let Some(g) = &mut gpu {
+        let textures: Vec<Texture> = project
+            .files
+            .iter()
+            .filter(|(p, _)| p.starts_with("textures/") && p.ends_with(".png"))
+            .map(|(_, b)| Texture::from_png(b).unwrap())
+            .collect();
+        g.set_textures(&textures).unwrap();
+    }
+    let parent_space = tsukumoe_core::deformer_space::Space::of(&model, mesh.parent).unwrap();
     let mapper = Mapper {
         origin: [0.0, 0.0],
         size: [SIZE.0, SIZE.1],
@@ -77,6 +94,23 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
         } as f32;
         tool.drag([start[0] + sweep, start[1] + sweep * 0.5]);
         let preview = tool.preview(&mesh.positions, &mapper);
+        // The drag live in the picture: preview, evaluate, draw.
+        let stored = tool.dragging_stored(&mesh.positions, &mapper, &parent_space);
+        scene.set_preview(
+            stored
+                .map(|positions| Preview::Mesh {
+                    name: name.clone(),
+                    positions,
+                })
+                .as_ref(),
+        );
+        scene.advance(1.0 / 60.0);
+        if let Some(g) = &mut gpu {
+            let list = scene.frame.draw_list(&scene.model);
+            g.draw(&list, full_view, true, SIZE.0 as u32, SIZE.1 as u32)
+                .unwrap();
+            g.wait().unwrap();
+        }
         let mut output = ctx.run_ui(RawInput::default(), |ui| {
             let painter = ui
                 .ctx()
@@ -100,6 +134,7 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     times.sort();
     let p = |q: f64| times[((times.len() - 1) as f64 * q).round() as usize];
 
+    scene.set_preview(None);
     // The release frame: one command, then the evaluated scene is rebuilt.
     let mut dispatcher = Dispatcher::new(model);
     let t0 = Instant::now();
@@ -209,9 +244,14 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     );
 
     eprintln!(
-        "mesh_frame_time: '{name}' has {} vertices, {} triangles; drag frame median {:.2} ms, p99 {:.2} ms, max {:.2} ms; release frame {:.2} ms (budget {} ms)",
+        "mesh_frame_time: '{name}' has {} vertices, {} triangles; GPU {}; drag frame median {:.2} ms, p99 {:.2} ms, max {:.2} ms; release frame {:.2} ms (budget {} ms)",
         mesh.positions.len(),
         mesh.indices.len() / 3,
+        if gpu.is_some() {
+            "included"
+        } else {
+            "not available"
+        },
         p(0.5).as_secs_f64() * 1e3,
         p(0.99).as_secs_f64() * 1e3,
         p(1.0).as_secs_f64() * 1e3,

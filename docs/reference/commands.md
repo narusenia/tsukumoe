@@ -266,6 +266,113 @@ Shows or hides a mesh; a hidden mesh is not in the draw list.
 {"type":"set_mesh_visible","name":"Skin","visible":false}
 ```
 
+### `add_warp_deformer`
+
+Adds a warp deformer: a grid of `(rows + 1) * (columns + 1)` control points
+(row by row) in the space of its parent deformer, or in the drawing
+space without one. Deformer names are shared by warp and rotation deformers.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `base_points` | number[2][] | yes |  |
+| `columns` | integer | yes |  |
+| `name` | string | yes |  |
+| `parent` | string or null | no | `null` |
+| `part` | string | yes |  |
+| `rows` | integer | yes |  |
+| `type` | `"add_warp_deformer"` | yes |  |
+
+```json
+{"type":"add_warp_deformer","name":"FaceWarp","part":"Face","parent":null,"rows":1,"columns":1,"base_points":[[0.0,0.0],[1.0,0.0],[0.0,1.0],[1.0,1.0]]}
+```
+
+### `add_rotation_deformer`
+
+Adds a rotation deformer with its base shape.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `base` | Command | yes |  |
+| `name` | string | yes |  |
+| `parent` | string or null | no | `null` |
+| `part` | string | yes |  |
+| `type` | `"add_rotation_deformer"` | yes |  |
+
+```json
+{"type":"add_rotation_deformer","name":"HeadRotation","part":"Face","parent":"FaceWarp","base":{"origin":[0.0,0.0],"angle_degrees":0.0,"scale":1.0,"reflect_x":false,"reflect_y":false}}
+```
+
+### `remove_deformer`
+
+Removes a deformer (warp or rotation) by name; fails while a mesh or a deformer hangs from it.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_deformer"` | yes |  |
+
+```json
+{"type":"remove_deformer","name":"HeadRotation"}
+```
+
+### `set_deformer_parent`
+
+Sets the parent deformer of a deformer (`null` for none). The command
+does not convert coordinates; fails if it makes a cycle or if the
+deformer has keyforms.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `parent` | string or null | no | `null` |
+| `type` | `"set_deformer_parent"` | yes |  |
+
+```json
+{"type":"set_deformer_parent","name":"HeadRotation","parent":"FaceWarp"}
+```
+
+### `set_mesh_parent`
+
+Sets the parent deformer of a mesh (`null` for none). Fails if the mesh has keyforms.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `parent` | string or null | no | `null` |
+| `type` | `"set_mesh_parent"` | yes |  |
+
+```json
+{"type":"set_mesh_parent","name":"Skin","parent":"FaceWarp"}
+```
+
+### `set_warp_base_points`
+
+Replaces the base control points of a warp deformer; the count must stay `(rows + 1) * (columns + 1)`. Fails if it has keyforms.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `points` | number[2][] | yes |  |
+| `type` | `"set_warp_base_points"` | yes |  |
+
+```json
+{"type":"set_warp_base_points","name":"FaceWarp","points":[[0.0,0.0],[2.0,0.0],[0.0,2.0],[2.0,2.0]]}
+```
+
+### `set_rotation_base`
+
+Replaces the base shape of a rotation deformer. Fails if it has keyforms.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `base` | Command | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_rotation_base"` | yes |  |
+
+```json
+{"type":"set_rotation_base","name":"HeadRotation","base":{"origin":[0.0,0.0],"angle_degrees":15.0,"scale":1.0,"reflect_x":false,"reflect_y":false}}
+```
+
 ### `batch`
 
 Applies the commands in order as one undo step; if one fails, none

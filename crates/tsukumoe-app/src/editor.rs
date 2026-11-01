@@ -8,6 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::actions::{self, ACTIONS, Tool};
+use crate::deformer_ops::{self, Target};
+use crate::deformer_tool::DeformerTool;
 use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::menu;
 use crate::mesh_tool::{self, MeshTool, Op, ToolError};
@@ -72,6 +74,8 @@ pub struct Editor {
     pub drag: DragAssignment,
     /// The mesh edit tool's selection and drag; view state, not model.
     pub mesh_tool: MeshTool,
+    /// The deformer tool's selection and drag; view state, not model.
+    pub deformer_tool: DeformerTool,
     pub pie_config: PieConfig,
     /// Whether the system draws the menus (macOS), leaving only the tabs here.
     pub native_menu: bool,
@@ -126,6 +130,7 @@ impl Editor {
             keymap,
             drag,
             mesh_tool: MeshTool::default(),
+            deformer_tool: DeformerTool::default(),
             pie_config,
             native_menu: false,
             pie: None,
@@ -169,6 +174,7 @@ impl Editor {
                 self.doc = Some(doc);
                 self.view = ViewState::default();
                 self.mesh_tool = MeshTool::default();
+                self.deformer_tool = DeformerTool::default();
                 self.recent.push(path);
                 self.persist_state()
             }
@@ -223,6 +229,62 @@ impl Editor {
         match op {
             Ok((command, label)) => {
                 self.submit_labeled(ctx, command, Some(label));
+            }
+            Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+        }
+    }
+
+    /// The elements the selection names, for making a deformer around them: a
+    /// mesh, every mesh under a part, or a deformer.
+    fn deformer_targets(&self) -> Vec<Target> {
+        let Some(doc) = &self.doc else {
+            return Vec::new();
+        };
+        let model = doc.dispatcher.model();
+        match &self.view.selection {
+            Some(Selection::Mesh(_)) => self
+                .view
+                .selected_meshes()
+                .into_iter()
+                .map(Target::Mesh)
+                .collect(),
+            Some(Selection::Warp(n) | Selection::Rotation(n)) => vec![Target::Deformer(n.clone())],
+            Some(Selection::Part(_)) => self
+                .view
+                .meshes_of(model)
+                .into_iter()
+                .map(Target::Mesh)
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Makes a warp or a rotation deformer around the selection and selects it.
+    fn run_deformer_action(&mut self, ctx: &Context, action: &str) {
+        let targets = self.deformer_targets();
+        let Some(doc) = &self.doc else {
+            return;
+        };
+        let model = doc.dispatcher.model();
+        let warp = action == "deformer.create-warp";
+        let result = if warp {
+            let (rows, columns) = self.deformer_tool.grid;
+            deformer_ops::create_warp(model, &targets, rows, columns)
+        } else {
+            deformer_ops::create_rotation(model, &targets)
+        };
+        match result {
+            Ok((command, label)) => {
+                let name = label.rsplit(": ").next().unwrap_or_default().to_owned();
+                if self.submit_labeled(ctx, command, Some(label)) {
+                    self.view.select_only(if warp {
+                        Selection::Warp(name)
+                    } else {
+                        Selection::Rotation(name)
+                    });
+                    self.view.tool = Tool::Deformer;
+                    self.view.touch();
+                }
             }
             Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
         }
@@ -354,6 +416,9 @@ impl Editor {
             | "mesh.fill-grid"
             | "mesh.contour" => {
                 self.run_mesh_action(ctx, action);
+            }
+            "deformer.create-warp" | "deformer.create-rotation" => {
+                self.run_deformer_action(ctx, action);
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
                 let f = if action.ends_with("in") { 1.25 } else { 0.8 };
@@ -1272,14 +1337,36 @@ impl PanelHost for Panels<'_> {
         match id {
             "history" => history::show(ui, &mut doc.dispatcher),
             "tree" => {
-                if let Some(command) = tree::show(ui, doc.dispatcher.model(), &mut editor.view) {
-                    editor.submit(&ctx, command);
+                for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    match out {
+                        tree::Out::Command(command) => {
+                            editor.submit(&ctx, command);
+                        }
+                        tree::Out::Reparent(target, parent) => {
+                            let model = editor.doc.as_ref().map(|d| d.dispatcher.model());
+                            match model
+                                .map(|m| deformer_ops::set_parent(m, &target, parent.as_deref()))
+                            {
+                                Some(Ok((command, label))) => {
+                                    editor.submit_labeled(&ctx, command, Some(label));
+                                }
+                                Some(Err(e)) => {
+                                    editor.toasts.push(&ctx, Tone::Error, tr(&ctx, e.key()));
+                                }
+                                None => {}
+                            }
+                        }
+                    }
                 }
             }
             "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
             "inspector" => {
-                let command =
-                    inspector::show(ui, doc.dispatcher.model(), editor.view.selection.as_ref());
+                let command = inspector::show(
+                    ui,
+                    doc.dispatcher.model(),
+                    editor.view.selection.as_ref(),
+                    Some(&editor.deformer_tool),
+                );
                 if let Some(command) = command {
                     editor.submit(&ctx, command);
                 }
@@ -1306,6 +1393,13 @@ impl PanelHost for Panels<'_> {
                             _ => None,
                         };
                         editor.mesh_tool.set_mesh(target);
+                        let deformer = match &editor.view.selection {
+                            Some(Selection::Warp(name) | Selection::Rotation(name)) => {
+                                Some(name.as_str())
+                            }
+                            _ => None,
+                        };
+                        editor.deformer_tool.set_deformer(deformer);
                         let (response, ops, actions) = vp.show(
                             ui,
                             rs,
@@ -1313,6 +1407,7 @@ impl PanelHost for Panels<'_> {
                             &mut editor.view,
                             &editor.drag,
                             &mut editor.mesh_tool,
+                            &mut editor.deformer_tool,
                             &editor.keymap,
                         );
                         editor.viewport_hovered = response.hovered();
@@ -1630,6 +1725,91 @@ mod tests {
         // D outside the mesh tool still picks the deformer tool.
         assert!(editor.run_action(&ctx, "mesh.retriangulate"));
         assert_eq!(editor.view.tool, Tool::Deformer);
+    }
+
+    #[test]
+    fn the_deformer_keys_wrap_the_selection_and_undo_in_one_step() {
+        use crate::view::Selection;
+        use tsukumoe_core::command::Command;
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        for command in [
+            Command::AddPart {
+                name: "DefPart".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "DefMesh".into(),
+                part: "DefPart".into(),
+                positions: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 3.0]],
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            assert!(editor.submit(&ctx, command));
+        }
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let base = steps(&editor);
+        // Nothing selected: a message and no command.
+        assert!(editor.run_action(&ctx, "deformer.create-warp"));
+        assert_eq!(steps(&editor), base);
+        // A mesh selected: one command, the warp is selected and the tool switches.
+        editor.view.selection = Some(Selection::Mesh("DefMesh".into()));
+        editor.deformer_tool.grid = (2, 3);
+        assert!(editor.run_action(&ctx, "deformer.create-warp"));
+        assert_eq!(steps(&editor), base + 1);
+        assert_eq!(editor.view.selection, Some(Selection::Warp("Warp".into())));
+        assert_eq!(editor.view.tool, Tool::Deformer);
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(
+            d.name_of(base).as_deref(),
+            Some("deformer_create_warp: Warp")
+        );
+        let warp = d.model().warps().find("Warp").unwrap();
+        assert_eq!(d.model().warps().get(warp).unwrap().base_points.len(), 12);
+        assert!(d.undo());
+        assert!(d.model().warps().find("Warp").is_none());
+        // Several meshes selected: one warp around all of them, one undo step.
+        assert!(editor.submit(
+            &ctx,
+            Command::AddMesh {
+                name: "DefMesh2".into(),
+                part: "DefPart".into(),
+                positions: vec![[8.0, 0.0], [10.0, 0.0], [10.0, 3.0]],
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            }
+        ));
+        editor
+            .view
+            .select_meshes(vec!["DefMesh".into(), "DefMesh2".into()]);
+        let before = steps(&editor);
+        assert!(editor.run_action(&ctx, "deformer.create-warp"));
+        assert_eq!(steps(&editor), before + 1);
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        let warp = d.model().warps().find("Warp").unwrap();
+        let mesh_parent = |d: &crate::dispatcher::Dispatcher, n: &str| {
+            let id = d.model().meshes().find(n).unwrap();
+            d.model().meshes().get(id).unwrap().parent
+        };
+        use tsukumoe_core::rig::DeformerRef;
+        assert_eq!(mesh_parent(d, "DefMesh"), Some(DeformerRef::Warp(warp)));
+        assert_eq!(mesh_parent(d, "DefMesh2"), Some(DeformerRef::Warp(warp)));
+        let grid = &d.model().warps().get(warp).unwrap().base_points;
+        assert!(grid[0][0] < 0.0 && grid.last().unwrap()[0] > 10.0);
+        assert!(d.undo());
+        assert_eq!(mesh_parent(d, "DefMesh"), None);
+        assert_eq!(mesh_parent(d, "DefMesh2"), None);
+        // A part selected: the rotation deformer wraps the meshes under it.
+        editor.view.selection = Some(Selection::Part("DefPart".into()));
+        assert!(editor.run_action(&ctx, "deformer.create-rotation"));
+        assert_eq!(
+            editor.view.selection,
+            Some(Selection::Rotation("Rotation".into()))
+        );
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        let mesh = d.model().meshes().find("DefMesh").unwrap();
+        assert!(d.model().meshes().get(mesh).unwrap().parent.is_some());
     }
 
     #[test]

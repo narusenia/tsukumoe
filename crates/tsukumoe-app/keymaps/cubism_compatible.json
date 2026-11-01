@@ -16,6 +16,8 @@
     { "action": "mesh.retriangulate", "context": "viewport", "keys": "D" },
     { "action": "mesh.fill-grid", "context": "viewport", "keys": "G" },
     { "action": "mesh.contour", "context": "viewport", "keys": "C" },
+    { "action": "deformer.create-warp", "context": "viewport", "keys": "W" },
+    { "action": "deformer.create-rotation", "context": "viewport", "keys": "R" },
     { "action": "viewport.zoom-in", "context": "viewport", "keys": "Equals" },
     { "action": "viewport.zoom-out", "context": "viewport", "keys": "Minus" },
     { "action": "viewport.reset-camera", "context": "viewport", "keys": "0" }

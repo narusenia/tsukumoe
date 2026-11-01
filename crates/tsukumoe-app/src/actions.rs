@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 18] = [
+pub const ACTIONS: [&str; 20] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -29,6 +29,8 @@ pub const ACTIONS: [&str; 18] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
+    "deformer.create-warp",
+    "deformer.create-rotation",
     "viewport.zoom-in",
     "viewport.zoom-out",
     "viewport.reset-camera",
@@ -36,7 +38,10 @@ pub const ACTIONS: [&str; 18] = [
 
 /// The context a binding of `action` belongs to (`None` is global).
 pub fn context_of(action: &str) -> Option<&'static str> {
-    (action.starts_with("viewport.") || action.starts_with("mesh.")).then_some("viewport")
+    (action.starts_with("viewport.")
+        || action.starts_with("mesh.")
+        || action.starts_with("deformer."))
+    .then_some("viewport")
 }
 
 /// The translation key of an action's name: `edit.undo` -> `action-edit-undo`.

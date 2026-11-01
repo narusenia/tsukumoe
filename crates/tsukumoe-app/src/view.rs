@@ -76,7 +76,19 @@ impl Camera {
 
 #[derive(Clone, Debug, Default)]
 pub struct ViewState {
+    /// What is selected; with several meshes, the one chosen last.
     pub selection: Option<Selection>,
+    /// The other meshes of a multiple selection, and the `selection` they
+    /// were chosen next to: when anything else sets `selection`, they no longer count.
+    others: Vec<String>,
+    others_of: Option<Selection>,
+    /// Where a Shift click range starts.
+    pub anchor: Option<String>,
+    /// The selection the tree last showed, to tell a change made elsewhere
+    /// (the viewport, a menu) from one made by a click on a tree row.
+    pub tree_seen: Option<Selection>,
+    /// Scroll offset and height of the tree panel as of the last frame.
+    pub tree_scroll: (f32, f32),
     pub tool: Tool,
     pub camera: Camera,
     /// Current parameter values by name; absent means the default.
@@ -88,6 +100,134 @@ pub struct ViewState {
 }
 
 impl ViewState {
+    /// The meshes selected, in the order they were chosen; the last is `selection`.
+    pub fn selected_meshes(&self) -> Vec<String> {
+        let mut out: Vec<String> = if self.others_of == self.selection {
+            self.others.clone()
+        } else {
+            Vec::new()
+        };
+        if let Some(Selection::Mesh(n)) = &self.selection {
+            out.retain(|o| o != n);
+            out.push(n.clone());
+        }
+        out
+    }
+
+    /// Whether `s` is selected (any mesh of a multiple selection counts).
+    pub fn is_selected(&self, s: &Selection) -> bool {
+        if self.selection.as_ref() == Some(s) {
+            return true;
+        }
+        matches!(s, Selection::Mesh(n) if self.others_of == self.selection && self.others.contains(n))
+    }
+
+    /// Selects `s` alone.
+    pub fn select_only(&mut self, s: Selection) {
+        if let Selection::Mesh(n) = &s {
+            self.anchor = Some(n.clone());
+        }
+        self.others.clear();
+        self.others_of = None;
+        self.selection = Some(s);
+        self.touch();
+    }
+
+    /// Selects exactly these meshes; the last one is `selection`.
+    pub fn select_meshes(&mut self, mut names: Vec<String>) {
+        let Some(last) = names.pop() else {
+            self.selection = None;
+            self.others.clear();
+            self.others_of = None;
+            self.touch();
+            return;
+        };
+        self.selection = Some(Selection::Mesh(last));
+        self.others = names;
+        self.others_of = self.selection.clone();
+        self.touch();
+    }
+
+    /// Ctrl / Cmd click: adds the mesh to the selection, or takes it out if it is in.
+    pub fn toggle_mesh(&mut self, name: &str) {
+        let mut names = self.selected_meshes();
+        if let Some(i) = names.iter().position(|n| n == name) {
+            names.remove(i);
+        } else {
+            names.push(name.to_owned());
+        }
+        self.anchor = Some(name.to_owned());
+        self.select_meshes(names);
+    }
+
+    /// The meshes a selection stands for: the selected meshes, or every mesh
+    /// under a part, or those hanging from a deformer (down the whole tree).
+    pub fn meshes_of(&self, model: &tsukumoe_core::model::Model) -> Vec<String> {
+        use tsukumoe_core::rig::DeformerRef;
+        match &self.selection {
+            Some(Selection::Mesh(_)) => self.selected_meshes(),
+            Some(Selection::Part(name)) => {
+                let Some(part) = model.parts().find(name) else {
+                    return Vec::new();
+                };
+                let mut parts = vec![part];
+                let mut i = 0;
+                while i < parts.len() {
+                    let at = parts[i];
+                    let below: Vec<_> = model
+                        .parts()
+                        .iter()
+                        .filter(|(id, _, p)| p.parent == Some(at) && !parts.contains(id))
+                        .map(|(id, _, _)| id)
+                        .collect();
+                    parts.extend(below);
+                    i += 1;
+                }
+                model
+                    .meshes()
+                    .iter()
+                    .filter(|(_, _, m)| parts.contains(&m.part))
+                    .map(|(_, n, _)| n.to_owned())
+                    .collect()
+            }
+            Some(Selection::Warp(name) | Selection::Rotation(name)) => {
+                let root = model
+                    .warps()
+                    .find(name)
+                    .map(DeformerRef::Warp)
+                    .or_else(|| model.rotations().find(name).map(DeformerRef::Rotation));
+                let Some(root) = root else {
+                    return Vec::new();
+                };
+                let mut tree = vec![root];
+                let mut i = 0;
+                while i < tree.len() {
+                    let at = tree[i];
+                    let warps = model
+                        .warps()
+                        .iter()
+                        .filter(|(_, _, d)| d.parent == Some(at))
+                        .map(|(id, _, _)| DeformerRef::Warp(id));
+                    let rots = model
+                        .rotations()
+                        .iter()
+                        .filter(|(_, _, d)| d.parent == Some(at))
+                        .map(|(id, _, _)| DeformerRef::Rotation(id));
+                    let below: Vec<_> = warps.chain(rots).filter(|d| !tree.contains(d)).collect();
+                    tree.extend(below);
+                    i += 1;
+                }
+                model
+                    .meshes()
+                    .iter()
+                    .filter(|(_, _, m)| m.parent.is_some_and(|p| tree.contains(&p)))
+                    .map(|(_, n, _)| n.to_owned())
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -188,5 +328,43 @@ mod tests {
         assert_eq!(v.param("a", &p), -3.0);
         v.reset_params();
         assert_eq!(v.param("a", &p), 5.0);
+    }
+
+    #[test]
+    fn meshes_toggle_in_and_out_and_a_single_click_returns_to_one() {
+        let mesh = |n: &str| Selection::Mesh(n.into());
+        let mut v = ViewState::default();
+        v.select_only(mesh("A"));
+        v.toggle_mesh("B");
+        v.toggle_mesh("C");
+        assert_eq!(v.selected_meshes(), ["A", "B", "C"]);
+        assert_eq!(v.selection, Some(mesh("C")));
+        assert!(
+            v.is_selected(&mesh("A")) && v.is_selected(&mesh("C")) && !v.is_selected(&mesh("D"))
+        );
+        // Taking one out keeps the others; the last chosen stays the main one.
+        v.toggle_mesh("B");
+        assert_eq!(v.selected_meshes(), ["A", "C"]);
+        v.toggle_mesh("C");
+        assert_eq!(v.selected_meshes(), ["A"]);
+        assert_eq!(v.selection, Some(mesh("A")));
+        v.toggle_mesh("A");
+        assert!(v.selected_meshes().is_empty() && v.selection.is_none());
+        // Back to one.
+        v.toggle_mesh("A");
+        v.toggle_mesh("B");
+        v.select_only(mesh("B"));
+        assert_eq!(v.selected_meshes(), ["B"]);
+        assert!(!v.is_selected(&mesh("A")));
+    }
+
+    #[test]
+    fn setting_the_selection_directly_drops_the_others() {
+        let mut v = ViewState::default();
+        v.select_meshes(vec!["A".into(), "B".into()]);
+        assert_eq!(v.selected_meshes(), ["A", "B"]);
+        v.selection = Some(Selection::Part("P".into()));
+        assert!(v.selected_meshes().is_empty());
+        assert!(!v.is_selected(&Selection::Mesh("A".into())));
     }
 }

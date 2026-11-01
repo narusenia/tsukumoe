@@ -16,12 +16,14 @@ use tsukumoe_gpu::{DrawOptions, Renderer, Texture};
 use tsukumoe_ui::{Keymap, Theme, hint, tr};
 
 use crate::actions::Tool;
+use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
-use crate::mesh_tool::{self, Hit, Mapper, MeshTool, Op, ToolError};
-use crate::panels::mesh_overlay;
+use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
+use crate::panels::{deformer_overlay, mesh_overlay, selection_overlay};
 use crate::project::Document;
-use crate::scene::{Scene, fit_view};
+use crate::scene::{Preview, Scene, fit_view};
 use crate::view::{Selection, ViewState};
+use tsukumoe_core::deformer_space::Space;
 
 /// How long to keep drawing after a change, so physics can settle.
 const SETTLE: Duration = Duration::from_secs(3);
@@ -167,6 +169,7 @@ impl Viewport {
         view: &mut ViewState,
         drag: &DragAssignment,
         mesh: &mut MeshTool,
+        deformer: &mut DeformerTool,
         keymap: &Keymap,
     ) -> (
         egui::Response,
@@ -205,6 +208,13 @@ impl Viewport {
         }
         self.navigate(ui, &response, rect, view);
         self.drag_parameters(ui, &response, doc, view, drag);
+        // A shape being dragged is drawn as it will be committed, before it is.
+        let live = self.live_preview(rect, doc, view, mesh, deformer, size);
+        if let Some(scene) = &mut self.scene
+            && scene.set_preview(live.as_ref())
+        {
+            self.wake();
+        }
 
         let now = Instant::now();
         // The mesh the mesh tool edits, if the focus picture must show it.
@@ -272,15 +282,230 @@ impl Viewport {
                 egui::Color32::WHITE,
             );
         }
-        let (ops, actions) = if view.tool == Tool::Mesh {
-            self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size, keymap)
-        } else {
-            (Vec::new(), Vec::new())
+        let (ops, actions) = match view.tool {
+            Tool::Mesh => {
+                self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size, keymap)
+            }
+            Tool::Deformer => self
+                .deformer_tool_frame(ui, &response, rect, doc, view, drag, deformer, size, keymap),
+            Tool::Select => {
+                self.select_tool_frame(ui, &response, rect, view, drag, size);
+                (Vec::new(), Vec::new())
+            }
         };
+        // The box around the selection, where no vertex-level overlay is open.
+        if selection_overlay::shown_with(view.tool)
+            && let Some(scene) = &self.scene
+            && let Some(bounds) =
+                selection_overlay::selection_bounds(scene, doc.dispatcher.model(), view)
+        {
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            selection_overlay::paint(&ui.painter_at(rect), &Theme::get(ui.ctx()), &mapper, bounds);
+        }
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }
         (response, ops, actions)
+    }
+
+    /// The drag in progress as a [`Preview`], from the active tool's state.
+    fn live_preview(
+        &self,
+        rect: Rect,
+        doc: &Document,
+        view: &ViewState,
+        mesh: &MeshTool,
+        deformer: &DeformerTool,
+        size: (u32, u32),
+    ) -> Option<Preview> {
+        let scene = self.scene.as_ref()?;
+        let model = doc.dispatcher.model();
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        match view.tool {
+            Tool::Mesh => {
+                let name = mesh.mesh()?;
+                let m = model.meshes().get(model.meshes().find(name)?)?;
+                let space = Space::of(model, m.parent).ok()?;
+                let positions = mesh.dragging_stored(&m.positions, &mapper, &space)?;
+                Some(Preview::Mesh {
+                    name: name.to_owned(),
+                    positions,
+                })
+            }
+            Tool::Deformer => {
+                let name = deformer.deformer()?;
+                let radius = (mapper.view[2] - mapper.view[0]) * 0.05;
+                let shape = deformer_tool::Shape::of(model, name, radius)?;
+                Some(deformer.dragging(&shape, &mapper)?.as_preview(name))
+            }
+            Tool::Select => None,
+        }
+    }
+
+    /// The select tool: a click picks the front mesh under the pointer, Shift
+    /// adds it to (or takes it out of) the selection, and empty space clears it.
+    #[allow(clippy::too_many_arguments)]
+    fn select_tool_frame(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        size: (u32, u32),
+    ) {
+        let (Some(scene), true) = (&self.scene, response.clicked_by(PointerButton::Primary)) else {
+            return;
+        };
+        let modifiers = ui.input(|i| i.modifiers);
+        let Some(p) = response.interact_pointer_pos() else {
+            return;
+        };
+        if drag.modifier_down(modifiers) {
+            return;
+        }
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        let picked = mesh_tool::pick_drawn(
+            &scene.frame.draw_list(&scene.model),
+            mapper.to_model([p.x, p.y]),
+        );
+        match picked {
+            Some(name) if modifiers.shift => view.toggle_mesh(&name),
+            Some(name) => view.select_only(Selection::Mesh(name)),
+            None if !modifiers.shift => {
+                view.selection = None;
+                view.touch();
+            }
+            None => {}
+        }
+    }
+
+    /// The deformer tool for one frame: pointer input, then the overlay.
+    #[allow(clippy::too_many_arguments)]
+    fn deformer_tool_frame(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        doc: &Document,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        tool: &mut DeformerTool,
+        size: (u32, u32),
+        keymap: &Keymap,
+    ) -> (Vec<Result<Op, ToolError>>, Vec<&'static str>) {
+        let mut ops = Vec::new();
+        let mut actions = Vec::new();
+        let Some(scene) = &self.scene else {
+            return (ops, actions);
+        };
+        let theme = Theme::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        let model = doc.dispatcher.model();
+        // Rotation handles are a twentieth of the view wide.
+        let radius = (mapper.view[2] - mapper.view[0]) * 0.05;
+        let name = tool.deformer().map(str::to_owned);
+        let shape = name
+            .as_deref()
+            .and_then(|n| deformer_tool::Shape::of(model, n, radius));
+        let (modifiers, escape) = ui.input(|i| (i.modifiers, i.key_pressed(egui::Key::Escape)));
+        let arrow = |p: Option<egui::Pos2>| p.map(|p| [p.x, p.y]);
+        let pressed = arrow(ui.input(|i| i.pointer.press_origin()));
+        let now = arrow(response.interact_pointer_pos());
+        let primary = PointerButton::Primary;
+        let tool_input = !drag.modifier_down(modifiers);
+        if let (Some(name), Some(shape)) = (&name, &shape) {
+            tool.sanitize(shape.world_points().len());
+            if escape {
+                tool.cancel();
+            }
+            if tool_input
+                && response.drag_started_by(primary)
+                && let Some(at) = pressed
+            {
+                tool.press(shape, &mapper, at, modifiers.shift);
+            }
+            if response.dragged_by(primary)
+                && let Some(at) = now
+            {
+                tool.drag(at);
+            }
+            if response.drag_stopped_by(primary)
+                && let Some(op) = tool.release(name, shape, &mapper)
+            {
+                ops.push(Ok(op));
+            }
+        }
+        if tool_input
+            && response.clicked_by(primary)
+            && let Some(at) = now
+        {
+            let on_shape = shape.as_ref().is_some_and(|s| {
+                deformer_tool::hit_test(s, &mapper, at) != deformer_tool::Hit::Nothing
+            });
+            match (&shape, on_shape) {
+                (Some(shape), true) => tool.click(shape, &mapper, at, modifiers.shift),
+                _ => match deformer_tool::pick_deformer(model, &mapper, at, radius) {
+                    Some(picked) if !modifiers.shift => {
+                        view.select_only(if model.warps().find(&picked).is_some() {
+                            Selection::Warp(picked)
+                        } else {
+                            Selection::Rotation(picked)
+                        });
+                    }
+                    _ => {
+                        if let Some(shape) = &shape {
+                            tool.click(shape, &mapper, at, modifiers.shift);
+                        }
+                    }
+                },
+            }
+        }
+        let ctx = ui.ctx().clone();
+        response.context_menu(|ui| {
+            let shortcut = |a: &str| keymap.shortcut_text(&ctx, a);
+            if let Some(action) =
+                mesh_overlay::menu_ui(ui, &deformer_tool::MENU_ACTIONS, &|_| true, &shortcut)
+            {
+                actions.push(action);
+                ui.close();
+            }
+        });
+        match (&name, &shape) {
+            (Some(name), Some(shape)) => {
+                let related = deformer_tool::related(model, name, radius);
+                let preview = tool.preview(shape, &mapper);
+                deformer_overlay::paint(
+                    &painter,
+                    &theme,
+                    &mapper,
+                    preview.as_ref().unwrap_or(shape),
+                    &related,
+                    tool,
+                );
+                deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-hint"));
+            }
+            _ => deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-pick")),
+        }
+        deformer_overlay::options(ui.ctx(), rect, tool);
+        (ops, actions)
     }
 
     /// The mesh edit tool for one frame: pointer input, then the overlay.
@@ -313,6 +538,21 @@ impl Viewport {
         let mesh = tool
             .mesh()
             .and_then(|n| Some((n.to_owned(), model.meshes().get(model.meshes().find(n)?)?)));
+        // The vertices as drawn (deformers, keyforms and parameters applied) are
+        // what the pointer meets; the stored ones are only for the commands.
+        let shown: Vec<[f32; 2]> = mesh
+            .as_ref()
+            .map(|(n, m)| {
+                scene
+                    .drawn_positions(n)
+                    .filter(|p| p.len() == m.positions.len())
+                    .unwrap_or_else(|| m.positions.clone())
+            })
+            .unwrap_or_default();
+        let space = mesh
+            .as_ref()
+            .and_then(|(_, m)| Space::of(model, m.parent).ok())
+            .unwrap_or(Space::Drawing);
         // The edited mesh is drawn again above the veil so it stays bright.
         let focus = self
             .focus
@@ -336,7 +576,7 @@ impl Viewport {
                 && response.drag_started_by(primary)
                 && let Some(at) = pressed
             {
-                tool.press(&mesh.positions, &mesh.indices, &mapper, at, modifiers.shift);
+                tool.press(&shown, &mesh.indices, &mapper, at, modifiers.shift);
             }
             if response.dragged_by(primary)
                 && let Some(at) = now
@@ -344,7 +584,7 @@ impl Viewport {
                 tool.drag(at);
             }
             if response.drag_stopped_by(primary)
-                && let Some(op) = tool.release(name, &mesh.positions, &mapper)
+                && let Some(op) = tool.release_in(name, &mesh.positions, &shown, &mapper, &space)
             {
                 ops.push(Ok(op));
             }
@@ -353,24 +593,24 @@ impl Viewport {
             && response.clicked_by(primary)
             && let Some(at) = now
         {
-            let positions = mesh.as_ref().map_or(&[][..], |(_, m)| &m.positions[..]);
+            let positions = &shown[..];
             let indices = mesh.as_ref().map_or(&[][..], |(_, m)| &m.indices[..]);
             let empty = mesh_tool::hit_test(positions, indices, &mapper, at) == Hit::Nothing;
             let picked = (empty && !modifiers.shift && !modifiers.command)
-                .then(|| mesh_tool::pick_mesh(model, mapper.to_model(at)))
+                .then(|| {
+                    mesh_tool::pick_drawn(&scene.frame.draw_list(&scene.model), mapper.to_model(at))
+                })
                 .flatten();
             match (&mesh, picked) {
                 (Some((name, _)), Some(p)) if &p != name => {
-                    view.selection = Some(Selection::Mesh(p));
-                    view.touch();
+                    view.select_only(Selection::Mesh(p));
                 }
                 (None, Some(p)) => {
-                    view.selection = Some(Selection::Mesh(p));
-                    view.touch();
+                    view.select_only(Selection::Mesh(p));
                 }
                 (Some((name, _)), _) if modifiers.command => {
                     if let Some(g) = mesh_tool::geometry_of(model, name) {
-                        ops.push(tool.add_at(name, &g, &mapper, at));
+                        ops.push(tool.add_at_in(name, &g, &shown, &mapper, at, &space));
                     }
                 }
                 (Some(_), _) => tool.click(positions, indices, &mapper, at, modifiers.shift),
@@ -386,12 +626,14 @@ impl Viewport {
             if response.secondary_clicked()
                 && let Some(at) = arrow(response.interact_pointer_pos())
             {
-                tool.context_select(&m.positions, &m.indices, &mapper, at);
+                tool.context_select(&shown, &m.indices, &mapper, at);
             }
             let ctx = ui.ctx().clone();
             response.context_menu(|ui| {
                 let shortcut = |a: &str| keymap.shortcut_text(&ctx, a);
-                if let Some(action) = mesh_overlay::menu_ui(ui, tool, &shortcut) {
+                if let Some(action) =
+                    mesh_overlay::menu_ui(ui, &MENU_ACTIONS, &|a| tool.menu_enabled(a), &shortcut)
+                {
                     actions.push(action);
                     ui.close();
                 }
@@ -399,16 +641,9 @@ impl Viewport {
         }
         match &mesh {
             Some((_, m)) => {
-                let preview = tool.preview(&m.positions, &mapper);
-                mesh_overlay::paint(
-                    &painter,
-                    &theme,
-                    &mapper,
-                    &m.positions,
-                    &m.indices,
-                    tool,
-                    preview.as_deref(),
-                );
+                // The scene already shows the drag live, so `shown` is moved; the
+                // overlay needs no preview offset of its own.
+                mesh_overlay::paint(&painter, &theme, &mapper, &shown, &m.indices, tool, None);
                 mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-hint"));
             }
             None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),

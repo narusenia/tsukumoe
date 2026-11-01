@@ -11,6 +11,7 @@ pub mod arena;
 pub mod command;
 pub mod compiled;
 pub mod contour;
+pub mod deformer_space;
 pub mod draw;
 pub mod driver;
 pub mod elements;

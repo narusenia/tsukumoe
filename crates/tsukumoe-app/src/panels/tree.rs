@@ -10,8 +10,10 @@ use tsukumoe_core::arena::Id;
 use tsukumoe_core::command::Command;
 use tsukumoe_core::elements::Part;
 use tsukumoe_core::model::Model;
+use tsukumoe_core::rig::DeformerRef;
 use tsukumoe_ui::{Icon, Theme, Variant, icon_button, selectable_row, text_input, tr};
 
+use crate::deformer_ops::Target;
 use crate::view::{Selection, ViewState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +33,8 @@ pub struct Row {
     pub visible: Option<bool>,
     /// Hidden itself or through a hidden part above it.
     pub dimmed: bool,
+    /// The deformer this mesh or deformer hangs from.
+    pub parent: Option<String>,
 }
 
 pub fn matches(name: &str, filter: &str) -> bool {
@@ -69,32 +73,144 @@ fn collect(
         name,
         visible: Some(own),
         dimmed: hidden,
+        parent: None,
     });
     for (id, _, p) in model.parts().iter() {
         if p.parent == Some(part) {
             any |= collect(model, id, depth + 1, hidden, filter, out);
         }
     }
-    let mut leaf = |kind, name: &str, visible: Option<bool>| {
+    // Meshes and deformers hang under a deformer of the same part; a parent in
+    // another part leaves them at the top of this one.
+    let part_of = |r: DeformerRef| match r {
+        DeformerRef::Warp(id) => model.warps().get(id).map(|d| d.part),
+        DeformerRef::Rotation(id) => model.rotations().get(id).map(|d| d.part),
+    };
+    let nested = |parent: Option<DeformerRef>| parent.and_then(part_of) == Some(part);
+    for (_, name, m) in model
+        .meshes()
+        .iter()
+        .filter(|(_, _, m)| m.part == part && !nested(m.parent))
+    {
         if matches(name, filter) {
             any = true;
-            out.push(Row {
-                depth: depth + 1,
-                kind,
-                name: name.to_owned(),
-                visible,
-                dimmed: hidden || visible == Some(false),
-            });
+            out.push(mesh_row(
+                model,
+                name,
+                m.visible,
+                m.parent,
+                depth + 1,
+                hidden,
+            ));
         }
+    }
+    let roots: Vec<DeformerRef> = model
+        .warps()
+        .iter()
+        .filter(|(_, _, d)| d.part == part && !nested(d.parent))
+        .map(|(id, _, _)| DeformerRef::Warp(id))
+        .chain(
+            model
+                .rotations()
+                .iter()
+                .filter(|(_, _, d)| d.part == part && !nested(d.parent))
+                .map(|(id, _, _)| DeformerRef::Rotation(id)),
+        )
+        .collect();
+    for r in roots {
+        any |= collect_deformer(model, r, part, depth + 1, hidden, filter, out);
+    }
+    if !any {
+        out.truncate(start);
+    }
+    any
+}
+
+fn deformer_name(model: &Model, r: DeformerRef) -> Option<String> {
+    crate::deformer_tool::name_of(model, r)
+}
+
+fn mesh_row(
+    model: &Model,
+    name: &str,
+    visible: bool,
+    parent: Option<DeformerRef>,
+    depth: usize,
+    hidden: bool,
+) -> Row {
+    Row {
+        depth,
+        kind: Kind::Mesh,
+        name: name.to_owned(),
+        visible: Some(visible),
+        dimmed: hidden || !visible,
+        parent: parent.and_then(|r| deformer_name(model, r)),
+    }
+}
+
+/// Pushes a deformer and what hangs under it in the same part (child
+/// deformers, then meshes); returns whether anything in it matched.
+fn collect_deformer(
+    model: &Model,
+    deformer: DeformerRef,
+    part: Id<Part>,
+    depth: usize,
+    hidden: bool,
+    filter: &str,
+    out: &mut Vec<Row>,
+) -> bool {
+    let Some(name) = deformer_name(model, deformer) else {
+        return false;
     };
-    for (_, name, m) in model.meshes().iter().filter(|(_, _, m)| m.part == part) {
-        leaf(Kind::Mesh, name, Some(m.visible));
+    let (kind, parent) = match deformer {
+        DeformerRef::Warp(id) => (Kind::Warp, model.warps().get(id).and_then(|d| d.parent)),
+        DeformerRef::Rotation(id) => (
+            Kind::Rotation,
+            model.rotations().get(id).and_then(|d| d.parent),
+        ),
+    };
+    let start = out.len();
+    let mut any = matches(&name, filter);
+    out.push(Row {
+        depth,
+        kind,
+        name,
+        visible: None,
+        dimmed: hidden,
+        parent: parent.and_then(|r| deformer_name(model, r)),
+    });
+    let children: Vec<DeformerRef> = model
+        .warps()
+        .iter()
+        .filter(|(_, _, d)| d.part == part && d.parent == Some(deformer))
+        .map(|(id, _, _)| DeformerRef::Warp(id))
+        .chain(
+            model
+                .rotations()
+                .iter()
+                .filter(|(_, _, d)| d.part == part && d.parent == Some(deformer))
+                .map(|(id, _, _)| DeformerRef::Rotation(id)),
+        )
+        .collect();
+    for child in children {
+        any |= collect_deformer(model, child, part, depth + 1, hidden, filter, out);
     }
-    for (_, name, _) in model.warps().iter().filter(|(_, _, w)| w.part == part) {
-        leaf(Kind::Warp, name, None);
-    }
-    for (_, name, _) in model.rotations().iter().filter(|(_, _, r)| r.part == part) {
-        leaf(Kind::Rotation, name, None);
+    for (_, name, m) in model
+        .meshes()
+        .iter()
+        .filter(|(_, _, m)| m.part == part && m.parent == Some(deformer))
+    {
+        if matches(name, filter) {
+            any = true;
+            out.push(mesh_row(
+                model,
+                name,
+                m.visible,
+                m.parent,
+                depth + 1,
+                hidden,
+            ));
+        }
     }
     if !any {
         out.truncate(start);
@@ -123,54 +239,213 @@ pub fn toggle_command(row: &Row) -> Option<Command> {
     }
 }
 
+/// What the tree asks for: a command to send, or an element to move under a
+/// deformer (the editor converts the coordinates and sends one batch).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Out {
+    Command(Command),
+    Reparent(Target, Option<String>),
+}
+
+/// The element a mesh or deformer row stands for.
+pub fn target_of(row: &Row) -> Option<Target> {
+    match row.kind {
+        Kind::Mesh => Some(Target::Mesh(row.name.clone())),
+        Kind::Warp | Kind::Rotation => Some(Target::Deformer(row.name.clone())),
+        Kind::Part => None,
+    }
+}
+
+/// The meshes from `anchor` to `target` among the rows shown (a Shift click),
+/// ending with `target`. Without an anchor in the rows, just `target`. Rows
+/// that a filter hides are not in `rows`, so they are not in the range.
+pub fn range_names(rows: &[Row], anchor: Option<&str>, target: &str) -> Vec<String> {
+    let meshes: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.kind == Kind::Mesh)
+        .map(|r| r.name.as_str())
+        .collect();
+    let (Some(a), Some(t)) = (
+        anchor.and_then(|a| meshes.iter().position(|&n| n == a)),
+        meshes.iter().position(|&n| n == target),
+    ) else {
+        return vec![target.to_owned()];
+    };
+    let mut range: Vec<String> = meshes[a.min(t)..=a.max(t)]
+        .iter()
+        .map(|&n| n.to_owned())
+        .collect();
+    if t < a {
+        range.reverse();
+    }
+    range
+}
+
+/// The row to bring into view: the one of `selection` when it changed
+/// since the tree last saw it (a change made elsewhere). `None` when it did not
+/// change, or when the row is not among `rows` (hidden by the name filter, or not a row).
+pub fn scroll_row(
+    rows: &[Row],
+    selection: Option<&Selection>,
+    seen: Option<&Selection>,
+) -> Option<usize> {
+    let selection = selection?;
+    if Some(selection) == seen {
+        return None;
+    }
+    rows.iter().position(|r| selection_of(r) == *selection)
+}
+
+/// The scroll offset that shows row `index` of `total` (each `row_height`
+/// tall) in a panel `viewport` tall now scrolled to `offset`: `None` if the
+/// row is fully in view already, else the row centred, within the content.
+pub fn scroll_offset_for(
+    index: usize,
+    total: usize,
+    row_height: f32,
+    offset: f32,
+    viewport: f32,
+) -> Option<f32> {
+    let (top, bottom) = (index as f32 * row_height, (index + 1) as f32 * row_height);
+    if viewport > 0.0 && top >= offset && bottom <= offset + viewport {
+        return None;
+    }
+    let content = total as f32 * row_height;
+    let centred = top - (viewport - row_height).max(0.0) / 2.0;
+    Some(centred.clamp(0.0, (content - viewport).max(0.0)))
+}
+
 /// Draws the tree. Only the rows in view are built (`show_rows`), so a model
-/// with hundreds of meshes scrolls cheaply. Returns the visibility command
-/// the user asked for, to be sent through the editor's dispatcher.
-pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Option<Command> {
+/// with hundreds of meshes scrolls cheaply. Returns what the user asked for,
+/// to be sent through the editor's dispatcher. Meshes and deformers can be
+/// dragged onto a deformer row to hang them from it, and a right click gives
+/// a menu to set or clear the parent and to remove a deformer.
+pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let ctx = ui.ctx().clone();
     let name = tr(&ctx, "filter-name");
     text_input(ui, &mut view.tree_filter, &name, &name);
     let rows = rows(model, &view.tree_filter);
+    let all = rows.clone();
     let control = Theme::get(&ctx).metrics.control;
     let row_height = control + ui.spacing().item_spacing.y;
-    let mut command = None;
-    egui::ScrollArea::vertical().auto_shrink(false).show_rows(
-        ui,
-        row_height,
-        rows.len(),
-        |ui, range| {
-            for row in &rows[range] {
-                let selection = selection_of(row);
-                let icon = match row.kind {
-                    Kind::Part => Icon::Folder,
-                    Kind::Mesh => Icon::Image,
-                    Kind::Warp | Kind::Rotation => Icon::Settings,
-                };
-                ui.horizontal(|ui| {
-                    if row.dimmed {
-                        ui.set_opacity(0.45);
+    let mut outs = Vec::new();
+    let deformers: Vec<String> = model
+        .warps()
+        .iter()
+        .map(|(_, n, _)| n.to_owned())
+        .chain(model.rotations().iter().map(|(_, n, _)| n.to_owned()))
+        .collect();
+    // A selection made elsewhere is scrolled to; one made by a click here
+    // is already in view (and `tree_seen` is brought up to date below).
+    let mut area = egui::ScrollArea::vertical().auto_shrink(false);
+    if let Some(index) = scroll_row(&all, view.selection.as_ref(), view.tree_seen.as_ref())
+        && let Some(offset) = scroll_offset_for(
+            index,
+            all.len(),
+            // `show_rows` puts the item spacing between the rows it counts.
+            row_height + ui.spacing().item_spacing.y,
+            view.tree_scroll.0,
+            view.tree_scroll.1,
+        )
+    {
+        area = area.vertical_scroll_offset(offset);
+    }
+    let scrolled = area.show_rows(ui, row_height, rows.len(), |ui, range| {
+        for row in &rows[range] {
+            let selection = selection_of(row);
+            let icon = match row.kind {
+                Kind::Part => Icon::Folder,
+                Kind::Mesh => Icon::Image,
+                Kind::Warp | Kind::Rotation => Icon::Settings,
+            };
+            ui.horizontal(|ui| {
+                if row.dimmed {
+                    ui.set_opacity(0.45);
+                }
+                ui.add_space(row.depth as f32 * 12.0);
+                if let Some(visible) = row.visible {
+                    let (eye, key) = if visible {
+                        (Icon::Eye, "tree-hide")
+                    } else {
+                        (Icon::EyeOff, "tree-show")
+                    };
+                    if icon_button(ui, eye, &tr(&ctx, key), Variant::Ghost).clicked() {
+                        outs.extend(toggle_command(row).map(Out::Command));
                     }
-                    ui.add_space(row.depth as f32 * 12.0);
-                    if let Some(visible) = row.visible {
-                        let (eye, key) = if visible {
-                            (Icon::Eye, "tree-hide")
-                        } else {
-                            (Icon::EyeOff, "tree-show")
-                        };
-                        if icon_button(ui, eye, &tr(&ctx, key), Variant::Ghost).clicked() {
-                            command = toggle_command(row);
+                }
+                let selected = view.is_selected(&selection);
+                let response = selectable_row(ui, selected, Some(icon), &row.name);
+                if response.clicked() {
+                    let modifiers = ui.input(|i| i.modifiers);
+                    match &selection {
+                        Selection::Mesh(n) if modifiers.command => view.toggle_mesh(n),
+                        Selection::Mesh(n) if modifiers.shift => {
+                            let from = view
+                                .anchor
+                                .clone()
+                                .or_else(|| view.selected_meshes().last().cloned());
+                            let names = range_names(&all, from.as_deref(), n);
+                            view.select_meshes(names);
                         }
+                        _ => view.select_only(selection),
                     }
-                    let selected = view.selection.as_ref() == Some(&selection);
-                    if selectable_row(ui, selected, Some(icon), &row.name).clicked() {
-                        view.selection = Some(selection);
-                        view.touch();
+                }
+                let Some(target) = target_of(row) else {
+                    return;
+                };
+                // Drag a row onto a deformer row to hang it there.
+                let response = response.interact(egui::Sense::click_and_drag());
+                response.dnd_set_drag_payload(target.clone());
+                if matches!(row.kind, Kind::Warp | Kind::Rotation) {
+                    if response.dnd_hover_payload::<Target>().is_some() {
+                        ui.painter().rect_stroke(
+                            response.rect,
+                            2.0,
+                            egui::Stroke::new(1.5, Theme::get(&ctx).colors.accent),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if let Some(dropped) = response.dnd_release_payload::<Target>()
+                        && *dropped != target
+                    {
+                        outs.push(Out::Reparent((*dropped).clone(), Some(row.name.clone())));
+                    }
+                }
+                response.context_menu(|ui| {
+                    ui.menu_button(tr(&ctx, "tree-set-parent"), |ui| {
+                        for parent in deformers.iter().filter(|d| **d != row.name) {
+                            if ui.button(parent).clicked() {
+                                outs.push(Out::Reparent(target.clone(), Some(parent.clone())));
+                                ui.close();
+                            }
+                        }
+                    });
+                    let unparent = ui.add_enabled(
+                        row.parent.is_some(),
+                        egui::Button::new(tr(&ctx, "tree-unparent")),
+                    );
+                    if unparent.clicked() {
+                        outs.push(Out::Reparent(target.clone(), None));
+                        ui.close();
+                    }
+                    if matches!(row.kind, Kind::Warp | Kind::Rotation)
+                        && ui.button(tr(&ctx, "tree-remove-deformer")).clicked()
+                    {
+                        outs.push(Out::Command(Command::RemoveDeformer {
+                            name: row.name.clone(),
+                        }));
+                        ui.close();
                     }
                 });
-            }
-        },
+            });
+        }
+    });
+    view.tree_scroll = (
+        scrolled.state.clamped_offset().y,
+        scrolled.inner_rect.height(),
     );
-    command
+    view.tree_seen = view.selection.clone();
+    outs
 }
 
 #[cfg(test)]
@@ -330,8 +605,10 @@ mod tests {
             .build_ui_state(
                 |ui, state: &mut (Model, ViewState, Option<Command>)| {
                     tsukumoe_ui::init(ui.ctx());
-                    if let Some(c) = show(ui, &state.0, &mut state.1) {
-                        state.2 = Some(c);
+                    for out in show(ui, &state.0, &mut state.1) {
+                        if let Out::Command(c) = out {
+                            state.2 = Some(c);
+                        }
                     }
                 },
                 (m, ViewState::default(), None),
@@ -350,5 +627,330 @@ mod tests {
             Some(Command::SetPartVisible { .. })
         ));
         eprintln!("631-mesh tree: first frames {drawn:?}");
+    }
+
+    fn deformer_model() -> Model {
+        let mut m = model();
+        m.apply(Command::AddPart {
+            name: "Face".into(),
+            parent: None,
+        })
+        .unwrap();
+        let grid = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let base = tsukumoe_core::command::RotationBase {
+            origin: [0.0, 0.0],
+            angle_degrees: 0.0,
+            scale: 1.0,
+            reflect_x: false,
+            reflect_y: false,
+        };
+        for command in [
+            Command::AddWarpDeformer {
+                name: "W".into(),
+                part: "Face".into(),
+                parent: None,
+                rows: 1,
+                columns: 1,
+                base_points: grid,
+            },
+            Command::AddRotationDeformer {
+                name: "R".into(),
+                part: "Face".into(),
+                parent: Some("W".into()),
+                base,
+            },
+            // A deformer of another part under W: it stays at the top of its part.
+            Command::AddRotationDeformer {
+                name: "Far".into(),
+                part: "Arm".into(),
+                parent: Some("W".into()),
+                base,
+            },
+        ] {
+            m.apply(command).unwrap();
+        }
+        for (name, parent) in [("M1", Some("R")), ("M2", None)] {
+            m.apply(Command::AddMesh {
+                name: name.into(),
+                part: "Face".into(),
+                positions: tri.clone(),
+                uvs: tri.clone(),
+                indices: vec![0, 1, 2],
+            })
+            .unwrap();
+            if let Some(p) = parent {
+                m.apply(Command::SetMeshParent {
+                    name: name.into(),
+                    parent: Some(p.into()),
+                })
+                .unwrap();
+            }
+        }
+        m
+    }
+
+    #[test]
+    fn deformers_nest_under_their_parent_in_the_same_part_with_their_meshes() {
+        let m = deformer_model();
+        let r = rows(&m, "");
+        let face: Vec<_> = r
+            .iter()
+            .skip_while(|x| x.name != "Face")
+            .map(|x| (x.depth, x.name.as_str(), x.kind))
+            .collect();
+        assert_eq!(
+            face,
+            [
+                (0, "Face", Kind::Part),
+                (1, "M2", Kind::Mesh),
+                (1, "W", Kind::Warp),
+                (2, "R", Kind::Rotation),
+                (3, "M1", Kind::Mesh),
+            ]
+        );
+        // The parent is on the row; a parent in another part leaves the row at the top.
+        let get = |n: &str| r.iter().find(|x| x.name == n).unwrap();
+        assert_eq!(get("R").parent.as_deref(), Some("W"));
+        assert_eq!(get("M1").parent.as_deref(), Some("R"));
+        assert_eq!(get("M2").parent, None);
+        assert_eq!(
+            (get("Far").depth, get("Far").parent.as_deref()),
+            (2, Some("W"))
+        );
+        assert_eq!(get("Arm").depth, 1);
+    }
+
+    #[test]
+    fn a_filter_keeps_the_deformers_above_a_match() {
+        let m = deformer_model();
+        let r = rows(&m, "m1");
+        let names: Vec<_> = r.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, ["Face", "W", "R", "M1"]);
+    }
+
+    #[test]
+    fn the_context_menu_sends_a_reparent_and_a_removal() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let m = deformer_model();
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(320.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, ViewState, Vec<Out>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    let outs = show(ui, &state.0, &mut state.1);
+                    state.2.extend(outs);
+                },
+                (m, ViewState::default(), Vec::new()),
+            );
+        harness.run();
+        // Remove: a right click on the row of R.
+        harness.get_by_label("R").click_secondary();
+        harness.run();
+        harness.get_by_label("Remove deformer").click();
+        harness.run();
+        assert_eq!(
+            harness.state().2,
+            [Out::Command(Command::RemoveDeformer { name: "R".into() })]
+        );
+        // Clear the parent of M1.
+        harness.state_mut().2.clear();
+        harness.get_by_label("M1").click_secondary();
+        harness.run();
+        harness.get_by_label("Clear parent").click();
+        harness.run();
+        assert_eq!(
+            harness.state().2,
+            [Out::Reparent(Target::Mesh("M1".into()), None)]
+        );
+        // Set the parent of M2 to W.
+        harness.state_mut().2.clear();
+        harness.get_by_label("M2").click_secondary();
+        harness.run();
+        harness.get_by_label("Set parent").click();
+        harness.run();
+        // The row of W and the menu entry share the label; the menu is on top.
+        harness.get_all_by_label("W").next().unwrap().click();
+        harness.run();
+        assert_eq!(
+            harness.state().2,
+            [Out::Reparent(Target::Mesh("M2".into()), Some("W".into()))]
+        );
+    }
+
+    fn many_meshes() -> Model {
+        let mut m = model();
+        for n in ["a1", "a2", "b1", "a3", "b2"] {
+            m.apply(Command::AddMesh {
+                name: n.into(),
+                part: "Arm".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2],
+            })
+            .unwrap();
+        }
+        m
+    }
+
+    #[test]
+    fn a_range_runs_between_the_anchor_and_the_target_over_the_rows_shown() {
+        let m = many_meshes();
+        let all = rows(&m, "");
+        assert_eq!(range_names(&all, Some("a1"), "b1"), ["a1", "a2", "b1"]);
+        // Upwards: the target is still last.
+        assert_eq!(
+            range_names(&all, Some("b2"), "a2"),
+            ["b2", "a3", "b1", "a2"]
+        );
+        // No anchor, or one that is not shown: just the target.
+        assert_eq!(range_names(&all, None, "a3"), ["a3"]);
+        assert_eq!(range_names(&all, Some("gone"), "a3"), ["a3"]);
+        // A filter hides rows, and they are not in the range.
+        let shown = rows(&m, "a");
+        assert_eq!(range_names(&shown, Some("a1"), "a3"), ["a1", "a2", "a3"]);
+        assert_eq!(range_names(&shown, Some("a1"), "b1"), ["b1"]);
+    }
+
+    #[test]
+    fn ctrl_and_shift_clicks_select_several_meshes_in_the_drawn_tree() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(320.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, ViewState)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    show(ui, &state.0, &mut state.1);
+                },
+                (many_meshes(), ViewState::default()),
+            );
+        harness.run();
+        harness.get_by_label("a1").click();
+        harness.run();
+        harness
+            .get_by_label("b1")
+            .click_modifiers(egui::Modifiers::COMMAND);
+        harness.run();
+        assert_eq!(harness.state().1.selected_meshes(), ["a1", "b1"]);
+        harness
+            .get_by_label("a3")
+            .click_modifiers(egui::Modifiers::SHIFT);
+        harness.run();
+        // The anchor is a1 (the last plain or Ctrl click was on b1, so b1).
+        assert_eq!(harness.state().1.selected_meshes(), ["b1", "a3"]);
+        harness.get_by_label("a2").click();
+        harness.run();
+        assert_eq!(harness.state().1.selected_meshes(), ["a2"]);
+    }
+
+    #[test]
+    fn the_row_to_scroll_to_follows_a_selection_made_elsewhere() {
+        let m = many_meshes();
+        let all = rows(&m, "");
+        let a2 = Selection::Mesh("a2".into());
+        let index = all.iter().position(|r| r.name == "a2").unwrap();
+        // Changed since the tree last saw it: its row.
+        assert_eq!(scroll_row(&all, Some(&a2), None), Some(index));
+        assert_eq!(
+            scroll_row(&all, Some(&a2), Some(&Selection::Mesh("b1".into()))),
+            Some(index)
+        );
+        // Unchanged (also what a click in the tree leaves behind): nothing.
+        assert_eq!(scroll_row(&all, Some(&a2), Some(&a2)), None);
+        assert_eq!(scroll_row(&all, None, Some(&a2)), None);
+        // Hidden by the filter, or not a row at all: nothing, and the filter stays.
+        let shown = rows(&m, "b");
+        assert_eq!(scroll_row(&shown, Some(&a2), None), None);
+        assert_eq!(
+            scroll_row(&all, Some(&Selection::Parameter("P".into())), None),
+            None
+        );
+    }
+
+    #[test]
+    fn the_offset_is_only_set_when_the_row_is_not_fully_in_view() {
+        let h = 26.0;
+        // 100 rows; the panel shows rows 10..20 (offset 260, 260 tall).
+        let (offset, view) = (260.0, 260.0);
+        assert_eq!(scroll_offset_for(10, 100, h, offset, view), None);
+        assert_eq!(scroll_offset_for(19, 100, h, offset, view), None);
+        // Partly cut off at the top or bottom: scrolled.
+        assert!(scroll_offset_for(9, 100, h, offset, view).is_some());
+        assert!(scroll_offset_for(20, 100, h, offset, view).is_some());
+        // Far away: the row ends up in the middle of the panel.
+        let to = scroll_offset_for(60, 100, h, offset, view).unwrap();
+        let top = 60.0 * h - to;
+        assert!(top > 0.0 && top + h < view, "{top}");
+        // Near the ends the offset stays inside the content.
+        assert_eq!(scroll_offset_for(0, 100, h, offset, view), Some(0.0));
+        let last = scroll_offset_for(99, 100, h, 0.0, view).unwrap();
+        assert!((last - (100.0 * h - view)).abs() < 1e-3);
+        // A panel not measured yet: always set.
+        assert!(scroll_offset_for(3, 100, h, 0.0, 0.0).is_some());
+    }
+
+    #[test]
+    fn a_selection_made_elsewhere_scrolls_the_big_tree_but_a_click_in_it_does_not() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut m = model();
+        for i in 0..631 {
+            m.apply(Command::AddMesh {
+                name: format!("m{i}"),
+                part: "Arm".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2],
+            })
+            .unwrap();
+        }
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(320.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, ViewState)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    show(ui, &state.0, &mut state.1);
+                },
+                (m, ViewState::default()),
+            );
+        harness.run();
+        assert!(
+            harness.query_by_label("m600").is_none(),
+            "far below the first rows"
+        );
+        // Selected in the viewport, say: the tree brings the row into view.
+        harness
+            .state_mut()
+            .1
+            .select_only(Selection::Mesh("m600".into()));
+        harness.run();
+        harness.run();
+        harness.get_by_label("m600");
+        let offset = harness.state().1.tree_scroll.0;
+        assert!(offset > 1000.0, "{offset}");
+        // A click on a row that is in view does not move the panel.
+        harness.get_by_label("m601").click();
+        harness.run();
+        harness.run();
+        assert_eq!(
+            harness.state().1.selection,
+            Some(Selection::Mesh("m601".into()))
+        );
+        assert!((harness.state().1.tree_scroll.0 - offset).abs() < 1e-3);
+        // A selection with no row (hidden by the filter) leaves the panel alone.
+        harness.state_mut().1.tree_filter = "m1".into();
+        harness.run();
+        let before = harness.state().1.tree_scroll.0;
+        harness
+            .state_mut()
+            .1
+            .select_only(Selection::Mesh("m500".into()));
+        harness.run();
+        harness.run();
+        assert_eq!(harness.state().1.tree_filter, "m1");
+        assert_eq!(harness.state().1.tree_scroll.0, before);
     }
 }

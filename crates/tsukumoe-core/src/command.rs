@@ -14,9 +14,45 @@ use crate::arena::Id;
 use crate::elements::{Parameter, Part, Point};
 use crate::history::{Change, Edit, Editable, Record};
 use crate::model::Model;
-use crate::rig::{ArtMesh, BlendMode};
+use crate::rig::{
+    ArtMesh, BlendMode, DeformerRef, RotationDeformer, RotationKeyform, WarpDeformer,
+};
 use crate::table::InsertError;
 use crate::validate::ModelError;
+
+/// The base shape of a rotation deformer: origin, angle in degrees, scale and
+/// reflections (the part of a rotation keyform that is not opacity).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RotationBase {
+    pub origin: Point,
+    pub angle_degrees: f32,
+    pub scale: f32,
+    #[serde(default)]
+    pub reflect_x: bool,
+    #[serde(default)]
+    pub reflect_y: bool,
+}
+
+impl RotationBase {
+    pub fn of(base: &RotationKeyform) -> Self {
+        Self {
+            origin: base.origin,
+            angle_degrees: base.angle_degrees,
+            scale: base.scale,
+            reflect_x: base.reflect_x,
+            reflect_y: base.reflect_y,
+        }
+    }
+
+    fn apply_to(&self, base: &mut RotationKeyform) {
+        base.origin = self.origin;
+        base.angle_degrees = self.angle_degrees;
+        base.scale = self.scale;
+        base.reflect_x = self.reflect_x;
+        base.reflect_y = self.reflect_y;
+    }
+}
 
 /// An edit to a model. In JSON, `type` names the variant in snake case.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,6 +127,46 @@ pub enum Command {
     },
     /// Shows or hides a mesh; a hidden mesh is not in the draw list.
     SetMeshVisible { name: String, visible: bool },
+    /// Adds a warp deformer: a grid of `(rows + 1) * (columns + 1)` control points
+    /// (row by row) in the space of its parent deformer, or in the drawing
+    /// space without one. Deformer names are shared by warp and rotation deformers.
+    AddWarpDeformer {
+        name: String,
+        part: String,
+        #[serde(default)]
+        parent: Option<String>,
+        rows: u32,
+        columns: u32,
+        base_points: Vec<Point>,
+    },
+    /// Adds a rotation deformer with its base shape.
+    AddRotationDeformer {
+        name: String,
+        part: String,
+        #[serde(default)]
+        parent: Option<String>,
+        base: RotationBase,
+    },
+    /// Removes a deformer (warp or rotation) by name; fails while a mesh or a deformer hangs from it.
+    RemoveDeformer { name: String },
+    /// Sets the parent deformer of a deformer (`null` for none). The command
+    /// does not convert coordinates; fails if it makes a cycle or if the
+    /// deformer has keyforms.
+    SetDeformerParent {
+        name: String,
+        #[serde(default)]
+        parent: Option<String>,
+    },
+    /// Sets the parent deformer of a mesh (`null` for none). Fails if the mesh has keyforms.
+    SetMeshParent {
+        name: String,
+        #[serde(default)]
+        parent: Option<String>,
+    },
+    /// Replaces the base control points of a warp deformer; the count must stay `(rows + 1) * (columns + 1)`. Fails if it has keyforms.
+    SetWarpBasePoints { name: String, points: Vec<Point> },
+    /// Replaces the base shape of a rotation deformer. Fails if it has keyforms.
+    SetRotationBase { name: String, base: RotationBase },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
     Batch { commands: Vec<Command> },
@@ -109,6 +185,11 @@ pub enum CommandError {
     EmptyName {
         kind: &'static str,
     },
+    /// The element has keyforms, whose coordinates this edit would invalidate.
+    HasKeyforms {
+        kind: &'static str,
+        name: String,
+    },
     /// The command would leave the model with problems it did not have.
     Invalid(Vec<ModelError>),
 }
@@ -119,6 +200,12 @@ impl fmt::Display for CommandError {
             Self::NotFound { kind, name } => write!(f, "no {kind} named '{name}'"),
             Self::AlreadyExists { kind, name } => write!(f, "{kind} '{name}' already exists"),
             Self::EmptyName { kind } => write!(f, "{kind} name is empty"),
+            Self::HasKeyforms { kind, name } => {
+                write!(
+                    f,
+                    "{kind} '{name}' has keyforms; its shape cannot be edited here"
+                )
+            }
             Self::Invalid(errors) => write!(f, "command would break the model: {errors:?}"),
         }
     }
@@ -330,11 +417,136 @@ impl Model {
                     m.indices = indices.clone();
                 });
             }
+            Command::AddWarpDeformer {
+                name,
+                part,
+                parent,
+                rows,
+                columns,
+                base_points,
+            } => {
+                self.check_deformer_name(name)?;
+                let part = self.resolve::<Part>(part)?;
+                let parent = self.resolve_parent(parent.as_deref())?;
+                if *rows == 0 || *columns == 0 {
+                    return Err(CommandError::Invalid(vec![ModelError::GeometryMismatch {
+                        owner: format!("warp deformer '{name}'"),
+                        field: "rows",
+                    }]));
+                }
+                let warp = WarpDeformer {
+                    part,
+                    parent,
+                    rows: *rows,
+                    columns: *columns,
+                    bezier: false,
+                    base_points: base_points.clone(),
+                    keyforms: None,
+                };
+                self.insert(changes, name, warp)?;
+            }
+            Command::AddRotationDeformer {
+                name,
+                part,
+                parent,
+                base,
+            } => {
+                self.check_deformer_name(name)?;
+                let part = self.resolve::<Part>(part)?;
+                let parent = self.resolve_parent(parent.as_deref())?;
+                let mut keyform = RotationKeyform::default();
+                base.apply_to(&mut keyform);
+                let rotation = RotationDeformer {
+                    part,
+                    parent,
+                    base: keyform,
+                    keyforms: None,
+                };
+                self.insert(changes, name, rotation)?;
+            }
+            Command::RemoveDeformer { name } => match self.resolve_deformer(name)? {
+                DeformerRef::Warp(id) => self.remove(changes, id),
+                DeformerRef::Rotation(id) => self.remove(changes, id),
+            },
+            Command::SetDeformerParent { name, parent } => {
+                let parent = self.resolve_parent(parent.as_deref())?;
+                match self.resolve_deformer(name)? {
+                    DeformerRef::Warp(id) => {
+                        self.reject_keyforms::<WarpDeformer>(id, name, |d| d.keyforms.is_some())?;
+                        self.modify(changes, id, |d| d.parent = parent);
+                    }
+                    DeformerRef::Rotation(id) => {
+                        self.reject_keyforms::<RotationDeformer>(id, name, |d| {
+                            d.keyforms.is_some()
+                        })?;
+                        self.modify(changes, id, |d| d.parent = parent);
+                    }
+                }
+            }
+            Command::SetMeshParent { name, parent } => {
+                let parent = self.resolve_parent(parent.as_deref())?;
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.reject_keyforms::<ArtMesh>(id, name, |m| m.keyforms.is_some())?;
+                self.modify(changes, id, |m| m.parent = parent);
+            }
+            Command::SetWarpBasePoints { name, points } => {
+                let id = self.resolve::<WarpDeformer>(name)?;
+                self.reject_keyforms::<WarpDeformer>(id, name, |d| d.keyforms.is_some())?;
+                self.modify(changes, id, |d| d.base_points = points.clone());
+            }
+            Command::SetRotationBase { name, base } => {
+                let id = self.resolve::<RotationDeformer>(name)?;
+                self.reject_keyforms::<RotationDeformer>(id, name, |d| d.keyforms.is_some())?;
+                self.modify(changes, id, |d| base.apply_to(&mut d.base));
+            }
             Command::Batch { commands } => {
                 for command in commands {
                     self.run(command, changes)?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A deformer by name: warp and rotation deformers share one namespace.
+    fn resolve_deformer(&self, name: &str) -> Result<DeformerRef, CommandError> {
+        if let Some(id) = self.warps.find(name) {
+            Ok(DeformerRef::Warp(id))
+        } else if let Some(id) = self.rotations.find(name) {
+            Ok(DeformerRef::Rotation(id))
+        } else {
+            Err(CommandError::NotFound {
+                kind: "deformer",
+                name: name.to_owned(),
+            })
+        }
+    }
+
+    fn resolve_parent(&self, name: Option<&str>) -> Result<Option<DeformerRef>, CommandError> {
+        name.map(|n| self.resolve_deformer(n)).transpose()
+    }
+
+    fn check_deformer_name(&self, name: &str) -> Result<(), CommandError> {
+        if self.warps.find(name).is_some() || self.rotations.find(name).is_some() {
+            return Err(CommandError::AlreadyExists {
+                kind: "deformer",
+                name: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    fn reject_keyforms<T: Editable>(
+        &self,
+        id: Id<T>,
+        name: &str,
+        has: impl Fn(&T) -> bool,
+    ) -> Result<(), CommandError> {
+        if T::table(self).get(id).is_some_and(has) {
+            return Err(CommandError::HasKeyforms {
+                kind: T::KIND,
+                name: name.to_owned(),
+            });
         }
         Ok(())
     }
@@ -503,7 +715,62 @@ mod tests {
                 name: "Face".into(),
                 visible: false,
             },
+            warp("Warp"),
+            rotation("Rot", Some("Warp")),
+            Command::SetWarpBasePoints {
+                name: "Warp".into(),
+                points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 2.0], [1.0, 2.0]],
+            },
+            Command::SetRotationBase {
+                name: "Rot".into(),
+                base: RotationBase {
+                    origin: [0.5, 0.5],
+                    angle_degrees: 30.0,
+                    scale: 2.0,
+                    reflect_x: true,
+                    reflect_y: false,
+                },
+            },
+            Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: Some("Rot".into()),
+            },
+            Command::SetDeformerParent {
+                name: "Rot".into(),
+                parent: None,
+            },
+            Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: None,
+            },
+            Command::RemoveDeformer { name: "Rot".into() },
         ]
+    }
+
+    fn warp(name: &str) -> Command {
+        Command::AddWarpDeformer {
+            name: name.into(),
+            part: "Face".into(),
+            parent: None,
+            rows: 1,
+            columns: 1,
+            base_points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        }
+    }
+
+    fn rotation(name: &str, parent: Option<&str>) -> Command {
+        Command::AddRotationDeformer {
+            name: name.into(),
+            part: "Face".into(),
+            parent: parent.map(Into::into),
+            base: RotationBase {
+                origin: [0.0, 0.0],
+                angle_degrees: 0.0,
+                scale: 1.0,
+                reflect_x: false,
+                reflect_y: false,
+            },
+        }
     }
 
     fn built(commands: Vec<Command>) -> Model {
@@ -857,5 +1124,144 @@ mod tests {
         assert!(matches!(model.apply(grow), Err(CommandError::Invalid(_))));
         assert_eq!(model.history().commands().count(), steps);
         assert_eq!(model.meshes().get(id).unwrap().positions.len(), 3);
+    }
+
+    fn deformer_scene() -> Model {
+        built(vec![
+            add_part("Face"),
+            add_mesh("Skin", "Face"),
+            warp("Warp"),
+            rotation("Rot", Some("Warp")),
+        ])
+    }
+
+    #[test]
+    fn deformer_commands_that_cannot_apply_change_nothing() {
+        let mut model = deformer_scene();
+        let steps = model.history().commands().count();
+        let bad_points = Command::SetWarpBasePoints {
+            name: "Warp".into(),
+            points: vec![[0.0, 0.0]],
+        };
+        let cycle = Command::SetDeformerParent {
+            name: "Warp".into(),
+            parent: Some("Rot".into()),
+        };
+        let unknown_parent = Command::SetMeshParent {
+            name: "Skin".into(),
+            parent: Some("Nope".into()),
+        };
+        // Warp and rotation deformers share their names.
+        let clash = rotation("Warp", None);
+        let in_use = Command::RemoveDeformer {
+            name: "Warp".into(),
+        };
+        let no_cells = Command::AddWarpDeformer {
+            name: "Flat".into(),
+            part: "Face".into(),
+            parent: None,
+            rows: 0,
+            columns: 1,
+            base_points: vec![],
+        };
+        for command in [bad_points, cycle, in_use, no_cells] {
+            assert!(matches!(
+                model.apply(command),
+                Err(CommandError::Invalid(_))
+            ));
+        }
+        assert_eq!(
+            model.apply(unknown_parent),
+            Err(CommandError::NotFound {
+                kind: "deformer",
+                name: "Nope".into()
+            })
+        );
+        assert_eq!(
+            model.apply(clash),
+            Err(CommandError::AlreadyExists {
+                kind: "deformer",
+                name: "Warp".into()
+            })
+        );
+        assert_eq!(model.history().commands().count(), steps);
+        assert!(model.validate().is_empty());
+    }
+
+    #[test]
+    fn a_deformer_with_children_cannot_be_removed_until_they_are_gone() {
+        let mut model = deformer_scene();
+        model
+            .apply(Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: Some("Rot".into()),
+            })
+            .unwrap();
+        let remove = || Command::RemoveDeformer { name: "Rot".into() };
+        assert!(model.apply(remove()).is_err());
+        model
+            .apply(Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: None,
+            })
+            .unwrap();
+        model.apply(remove()).unwrap();
+        assert!(model.rotations().find("Rot").is_none());
+        assert!(model.undo());
+        assert!(model.rotations().find("Rot").is_some());
+    }
+
+    #[test]
+    fn deformers_with_keyforms_are_not_edited() {
+        use crate::keyform::{Axis, Binding, KeyformGrid};
+        use crate::rig::WarpKeyform;
+        let mut model = deformer_scene();
+        model.apply(add_param("P")).unwrap();
+        let p = model.parameters().find("P").unwrap();
+        let binding = model.bindings.insert(
+            Binding::new(vec![Axis {
+                parameter: p,
+                keys: vec![-30.0, 30.0],
+            }])
+            .unwrap(),
+        );
+        let keyform = WarpKeyform {
+            points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            opacity: 1.0,
+        };
+        let id = model.warps().find("Warp").unwrap();
+        model.warps.get_mut(id).unwrap().keyforms =
+            Some(KeyformGrid::new(binding, vec![keyform; 2]));
+        for command in [
+            Command::SetWarpBasePoints {
+                name: "Warp".into(),
+                points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
+            },
+            Command::SetDeformerParent {
+                name: "Warp".into(),
+                parent: None,
+            },
+        ] {
+            assert!(matches!(
+                model.apply(command),
+                Err(CommandError::HasKeyforms { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn deformer_commands_are_tagged_in_json() {
+        let json = serde_json::to_value(rotation("Rot", None)).unwrap();
+        assert_eq!(json["type"], "add_rotation_deformer");
+        assert_eq!(json["base"]["scale"], 1.0);
+        let parsed: Command =
+            serde_json::from_str(r#"{"type":"set_mesh_parent","name":"Skin"}"#).unwrap();
+        assert_eq!(
+            parsed,
+            Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: None
+            }
+        );
     }
 }
