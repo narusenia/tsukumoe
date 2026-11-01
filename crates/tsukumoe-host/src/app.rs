@@ -12,6 +12,7 @@ use tsukumoe_ui::{
     panel, select, slider, tr, tr_args,
 };
 
+use crate::options::Options;
 use crate::settings;
 use crate::viewer::{Viewer, open_project};
 
@@ -287,7 +288,8 @@ impl eframe::App for Host {
 }
 
 /// Opens `path` and shows it until the window closes.
-pub fn run(path: PathBuf) -> Result<(), String> {
+pub fn run(options: Options) -> Result<(), String> {
+    let path = options.project.clone();
     let project = open_project(&path)?;
     let name = path.file_name().map_or_else(
         || path.display().to_string(),

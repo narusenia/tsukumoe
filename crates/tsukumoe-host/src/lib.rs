@@ -8,5 +8,6 @@
 
 pub mod app;
 pub mod live;
+pub mod options;
 pub mod settings;
 pub mod viewer;
