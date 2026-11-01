@@ -104,6 +104,19 @@ pub struct Renaming {
     pub kind: Kind,
     pub name: String,
     pub text: String,
+    /// The field has taken the keyboard.
+    pub focused: bool,
+}
+
+impl Renaming {
+    pub fn new(kind: Kind, name: &str) -> Self {
+        Self {
+            kind,
+            name: name.to_owned(),
+            text: name.to_owned(),
+            focused: false,
+        }
+    }
 }
 
 /// The state of one panel.
@@ -176,6 +189,28 @@ impl TreeView {
             if r.depth < depth {
                 self.collapsed.remove(&r.key());
                 depth = r.depth;
+            }
+        }
+    }
+}
+
+impl TreeView {
+    /// Opens or closes `key` and every folder below it in `panel`.
+    pub fn set_subtree_open(&mut self, model: &Model, panel: Panel, key: &str, open: bool) {
+        let all = TreeView::default();
+        let rows = rows(model, &all, panel);
+        let Some(at) = rows.iter().position(|r| r.key() == key) else {
+            return;
+        };
+        let depth = rows[at].depth;
+        for r in rows[at..]
+            .iter()
+            .enumerate()
+            .take_while(|(i, r)| *i == 0 || r.depth > depth)
+            .map(|(_, r)| r)
+        {
+            if r.expandable {
+                self.set_open(&r.key(), open);
             }
         }
     }

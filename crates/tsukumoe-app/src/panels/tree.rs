@@ -14,9 +14,10 @@ use tsukumoe_ui::{Icon, Theme, Variant, button, hint, select, text_input, tr};
 
 use crate::deformer_ops::Target;
 use crate::tree_model::{
-    self, Kind, Panel, Row, Sort, accepted, range_selection, scroll_offset_for, scroll_row,
+    self, Kind, Panel, Renaming, Row, Sort, accepted, range_selection, scroll_offset_for,
+    scroll_row,
 };
-use crate::view::ViewState;
+use crate::view::{Selection, ViewState};
 
 /// The indent of one depth, in points.
 pub const INDENT: f32 = 14.0;
@@ -27,6 +28,18 @@ pub const INDENT: f32 = 14.0;
 pub enum Out {
     Command(Command),
     Reparent(Target, Option<String>),
+    /// Rename an element; an empty or unchanged name is dropped by the panel.
+    Rename {
+        kind: Kind,
+        from: String,
+        to: String,
+    },
+    /// Delete these (a part takes what is under it; the editor asks first).
+    Delete(Vec<Selection>),
+    /// Copy these.
+    Duplicate(Vec<Selection>),
+    /// Move the element to a part (a part: to a parent part, or none).
+    SetPart(Selection, Option<String>),
 }
 
 /// The element a mesh or deformer row stands for.
@@ -144,6 +157,15 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
         .map(|i| held[i].clone())
         .unwrap_or_default();
 
+    let lists = Lists {
+        parts: model.parts().iter().map(|(_, n, _)| n.to_owned()).collect(),
+        deformers: model
+            .warps()
+            .iter()
+            .map(|(_, n, _)| n.to_owned())
+            .chain(model.rotations().iter().map(|(_, n, _)| n.to_owned()))
+            .collect(),
+    };
     // Empty space below the rows clears the selection.
     let area = ui.available_rect_before_wrap();
     let background = ui.interact(area, ui.next_auto_id(), Sense::click());
@@ -258,32 +280,143 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
             kind_icon(row.kind)
                 .image(tone(ui, row, selected), icon_size)
                 .paint_at(ui, cols.icon);
-            // The name, cut short before the right edge; deformer rows also show their part.
-            let right = rect.right() - 4.0;
+            // The name, cut short before the right edge (and before the "..." button);
+            // deformer rows also show their part. While renamed, a field takes its place.
+            let more_rect = Rect::from_min_size(
+                pos2(rect.right() - control, rect.top()),
+                vec2(control, rect.height()),
+            );
+            let hovered = response.hovered() || ui.rect_contains_pointer(more_rect);
+            let right = if hovered {
+                more_rect.left()
+            } else {
+                rect.right() - 4.0
+            };
             let name_clip =
                 Rect::from_min_max(pos2(cols.name_x, rect.top()), pos2(right, rect.bottom()));
-            let font = FontId::proportional(theme.metrics.text);
-            let name_color = tone(ui, row, selected);
-            let galley = ui
-                .painter()
-                .layout_no_wrap(row.name.clone(), font.clone(), name_color);
-            let name_width = galley.size().x;
-            ui.painter_at(name_clip).galley(
-                pos2(cols.name_x, rect.center().y - galley.size().y / 2.0),
-                galley,
-                name_color,
-            );
-            if let Some(part) = &row.part {
-                let x = cols.name_x + name_width + 8.0;
-                if x < right - 20.0 {
-                    ui.painter_at(name_clip).text(
-                        pos2(x, rect.center().y),
-                        Align2::LEFT_CENTER,
-                        part,
-                        FontId::proportional(theme.metrics.text - 1.0),
-                        theme.colors.disabled,
+            let renaming_here = view
+                .tree(panel)
+                .renaming
+                .as_ref()
+                .is_some_and(|r| r.kind == row.kind && r.name == row.name);
+            if renaming_here {
+                let mut done = None;
+                if let Some(r) = view.tree_mut(panel).renaming.as_mut() {
+                    let edit = ui.put(
+                        name_clip,
+                        egui::TextEdit::singleline(&mut r.text).desired_width(name_clip.width()),
                     );
+                    let edit = edit.accessible_name(tr(&ctx, "tree-rename"));
+                    if !r.focused {
+                        edit.request_focus();
+                        r.focused = true;
+                    }
+                    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    if escape {
+                        done = Some(false);
+                    } else if edit.lost_focus() {
+                        done = Some(true);
+                    }
                 }
+                if let Some(commit) = done
+                    && let Some(r) = view.tree_mut(panel).renaming.take()
+                    && commit
+                    && !r.text.trim().is_empty()
+                    && r.text != r.name
+                {
+                    outs.push(Out::Rename {
+                        kind: r.kind,
+                        from: r.name,
+                        to: r.text.trim().to_owned(),
+                    });
+                }
+            } else {
+                let font = FontId::proportional(theme.metrics.text);
+                let name_color = tone(ui, row, selected);
+                let galley =
+                    ui.painter()
+                        .layout_no_wrap(row.name.clone(), font.clone(), name_color);
+                let name_width = galley.size().x;
+                ui.painter_at(name_clip).galley(
+                    pos2(cols.name_x, rect.center().y - galley.size().y / 2.0),
+                    galley,
+                    name_color,
+                );
+                if let Some(part) = &row.part {
+                    let x = cols.name_x + name_width + 8.0;
+                    if x < right - 20.0 {
+                        ui.painter_at(name_clip).text(
+                            pos2(x, rect.center().y),
+                            Align2::LEFT_CENTER,
+                            part,
+                            FontId::proportional(theme.metrics.text - 1.0),
+                            theme.colors.disabled,
+                        );
+                    }
+                }
+            }
+            // The "..." button, with what the right-click menu has.
+            if hovered && !renaming_here {
+                let more = ui.interact(more_rect, response.id.with("more"), Sense::click());
+                let color = if more.hovered() {
+                    theme.colors.text
+                } else {
+                    theme.colors.text_muted
+                };
+                Icon::More.image(color, icon_size).paint_at(
+                    ui,
+                    Rect::from_center_size(more_rect.center(), vec2(icon_size, icon_size)),
+                );
+                more.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "..."));
+                egui::Popup::menu(&more).show(|ui| {
+                    row_menu(ui, model, view, panel, row, &lists, &mut outs);
+                });
+            }
+            // Drag a row onto another to move it: onto a deformer row it hangs from
+            // it, onto a part row it goes into that part (a part under it).
+            response.dnd_set_drag_payload(selection.clone());
+            let can_drop = |dragged: &Selection| match row.kind {
+                Kind::Warp | Kind::Rotation => {
+                    matches!(
+                        dragged,
+                        Selection::Mesh(_) | Selection::Warp(_) | Selection::Rotation(_)
+                    ) && *dragged != selection
+                }
+                Kind::Part => !matches!(dragged, Selection::Parameter(_)) && *dragged != selection,
+                Kind::Mesh => false,
+            };
+            if let Some(dragged) = response.dnd_hover_payload::<Selection>()
+                && can_drop(&dragged)
+            {
+                ui.painter().rect_stroke(
+                    rect,
+                    2.0,
+                    Stroke::new(1.5, theme.colors.accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if let Some(dragged) = response.dnd_release_payload::<Selection>()
+                && can_drop(&dragged)
+            {
+                match row.kind {
+                    Kind::Warp | Kind::Rotation => {
+                        let target = match &*dragged {
+                            Selection::Mesh(n) => Some(Target::Mesh(n.clone())),
+                            Selection::Warp(n) | Selection::Rotation(n) => {
+                                Some(Target::Deformer(n.clone()))
+                            }
+                            _ => None,
+                        };
+                        outs.extend(target.map(|t| Out::Reparent(t, Some(row.name.clone()))));
+                    }
+                    _ => outs.push(Out::SetPart((*dragged).clone(), Some(row.name.clone()))),
+                }
+            }
+            response.context_menu(|ui| {
+                row_menu(ui, model, view, panel, row, &lists, &mut outs);
+            });
+            if response.double_clicked() {
+                activate(model, view, panel, row);
             }
             if response.clicked() {
                 let modifiers = ui.input(|i| i.modifiers);
@@ -304,6 +437,114 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
     view.tree_mut(panel).scroll = (shown.state.clamped_offset().y, shown.inner_rect.height());
     view.tree_mut(panel).seen = view.selection.clone();
     outs
+}
+
+/// A double click on a row: a part selects the meshes under it, anything else
+/// starts renaming.
+pub fn activate(model: &Model, view: &mut ViewState, panel: Panel, row: &Row) {
+    if row.kind == Kind::Part {
+        let meshes = tree_model::meshes_under_part(model, &row.name);
+        if !meshes.is_empty() {
+            view.select_meshes(meshes);
+        }
+    } else {
+        view.tree_mut(panel).renaming = Some(Renaming::new(row.kind, &row.name));
+    }
+}
+
+/// The names the row menus offer as parents and parts.
+struct Lists {
+    parts: Vec<String>,
+    deformers: Vec<String>,
+}
+
+/// What a row's menu (right click, or the "..." button) offers. It acts on
+/// the whole selection when the row is part of it, else on the row alone.
+fn row_menu(
+    ui: &mut Ui,
+    model: &Model,
+    view: &mut ViewState,
+    panel: Panel,
+    row: &Row,
+    lists: &Lists,
+    outs: &mut Vec<Out>,
+) {
+    let ctx = ui.ctx().clone();
+    let me = row.selection();
+    let targets: Vec<Selection> = if view.is_selected(&me) {
+        view.selected()
+    } else {
+        vec![me.clone()]
+    };
+    let target = target_of(row);
+    if ui.button(tr(&ctx, "tree-rename")).clicked() {
+        view.tree_mut(panel).renaming = Some(Renaming::new(row.kind, &row.name));
+        ui.close();
+    }
+    if row.kind != Kind::Part && ui.button(tr(&ctx, "tree-duplicate")).clicked() {
+        outs.push(Out::Duplicate(targets.clone()));
+        ui.close();
+    }
+    if ui.button(tr(&ctx, "tree-delete")).clicked() {
+        outs.push(Out::Delete(targets));
+        ui.close();
+    }
+    ui.separator();
+    if let Some(target) = target {
+        ui.menu_button(tr(&ctx, "tree-set-parent"), |ui| {
+            for parent in lists.deformers.iter().filter(|d| **d != row.name) {
+                if ui.button(parent).clicked() {
+                    outs.push(Out::Reparent(target.clone(), Some(parent.clone())));
+                    ui.close();
+                }
+            }
+        });
+        let unparent = ui.add_enabled(
+            row.parent.is_some(),
+            egui::Button::new(tr(&ctx, "tree-unparent")),
+        );
+        if unparent.clicked() {
+            outs.push(Out::Reparent(target.clone(), None));
+            ui.close();
+        }
+    }
+    let part_key = if row.kind == Kind::Part {
+        "tree-set-parent-part"
+    } else {
+        "tree-set-part"
+    };
+    ui.menu_button(tr(&ctx, part_key), |ui| {
+        if row.kind == Kind::Part && ui.button(tr(&ctx, "tree-no-part")).clicked() {
+            outs.push(Out::SetPart(me.clone(), None));
+            ui.close();
+        }
+        for part in lists.parts.iter().filter(|p| **p != row.name) {
+            if ui.button(part).clicked() {
+                outs.push(Out::SetPart(me.clone(), Some(part.clone())));
+                ui.close();
+            }
+        }
+    });
+    if row.kind == Kind::Part && ui.button(tr(&ctx, "tree-select-children")).clicked() {
+        let meshes = tree_model::meshes_under_part(model, &row.name);
+        if !meshes.is_empty() {
+            view.select_meshes(meshes);
+        }
+        ui.close();
+    }
+    if row.expandable {
+        let key = row.key();
+        if ui.button(tr(&ctx, "tree-open-children")).clicked() {
+            view.tree_mut(panel)
+                .set_subtree_open(model, panel, &key, true);
+            ui.close();
+        }
+        if ui.button(tr(&ctx, "tree-close-children")).clicked() {
+            view.tree_mut(panel)
+                .set_subtree_open(model, panel, &key, false);
+            ui.close();
+        }
+    }
 }
 
 /// The filter field, the kind toggles, the sort order and the folder buttons.
@@ -678,5 +919,125 @@ mod tests {
         h.get_all_by_label("Hide").next().unwrap().click();
         h.run();
         assert!(matches!(h.state().2, Some(Command::SetPartVisible { .. })));
+    }
+
+    fn collecting(m: Model, panel: Panel) -> Harness<'static, (Model, ViewState, Vec<Out>)> {
+        Harness::builder()
+            .with_size(egui::vec2(320.0, 400.0))
+            .build_ui_state(
+                move |ui, state: &mut (Model, ViewState, Vec<Out>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    let outs = show(ui, &state.0, &mut state.1, panel);
+                    state.2.extend(outs);
+                },
+                (m, ViewState::default(), Vec::new()),
+            )
+    }
+
+    #[test]
+    fn the_menu_deletes_and_duplicates_the_selection_when_the_row_is_in_it_else_the_row() {
+        let mut h = collecting(many(), Panel::Parts);
+        h.run();
+        h.get_by_label("a1").click();
+        h.get_by_label("a2")
+            .click_modifiers(egui::Modifiers::COMMAND);
+        h.run();
+        // Right click on a selected row: both.
+        h.get_by_label("a2").click_secondary();
+        h.run();
+        h.get_by_label("Delete").click();
+        h.run();
+        let deleted = h.state().2.clone();
+        assert_eq!(
+            deleted,
+            [Out::Delete(vec![
+                Selection::Mesh("a1".into()),
+                Selection::Mesh("a2".into())
+            ])]
+        );
+        // Right click on a row outside the selection: that row alone.
+        h.state_mut().2.clear();
+        h.get_by_label("b1").click_secondary();
+        h.run();
+        h.get_by_label("Duplicate").click();
+        h.run();
+        assert_eq!(
+            h.state().2,
+            [Out::Duplicate(vec![Selection::Mesh("b1".into())])]
+        );
+        // A part has no Duplicate, but can select what is under it.
+        h.state_mut().2.clear();
+        h.get_by_label("Arm").click_secondary();
+        h.run();
+        assert!(h.query_by_label("Duplicate").is_none());
+        h.get_by_label("Select children").click();
+        h.run();
+        assert_eq!(h.state().1.selected_meshes().len(), 5);
+    }
+
+    #[test]
+    fn a_double_click_renames_a_mesh_and_selects_the_meshes_under_a_part() {
+        let m = many();
+        let mut view = ViewState::default();
+        let row = |n: &str| {
+            tree_model::rows(&m, &Default::default(), Panel::Parts)
+                .into_iter()
+                .find(|r| r.name == n)
+                .unwrap()
+        };
+        activate(&m, &mut view, Panel::Parts, &row("a3"));
+        let renaming = view.parts.renaming.clone().unwrap();
+        assert_eq!(
+            (
+                renaming.kind,
+                renaming.name.as_str(),
+                renaming.text.as_str()
+            ),
+            (Kind::Mesh, "a3", "a3")
+        );
+        activate(&m, &mut view, Panel::Parts, &row("Arm"));
+        assert_eq!(view.selected_meshes(), ["a1", "a2", "b1", "a3", "b2"]);
+        // The field is drawn; changing the text and leaving it commits.
+        let mut h = collecting(many(), Panel::Parts);
+        h.run();
+        h.state_mut().1.parts.renaming = Some(Renaming {
+            kind: Kind::Mesh,
+            name: "a3".into(),
+            text: "a3x".into(),
+            focused: false,
+        });
+        h.run();
+        h.run();
+        h.get_by_label("Body").click();
+        h.run();
+        assert!(h.state().2.contains(&Out::Rename {
+            kind: Kind::Mesh,
+            from: "a3".into(),
+            to: "a3x".into()
+        }));
+        assert!(h.state().1.parts.renaming.is_none());
+    }
+
+    #[test]
+    fn an_empty_or_unchanged_name_is_dropped() {
+        let mut h = collecting(many(), Panel::Parts);
+        h.run();
+        for text in ["", "   ", "a1"] {
+            h.state_mut().2.clear();
+            h.state_mut().1.parts.renaming = Some(Renaming {
+                kind: Kind::Mesh,
+                name: "a1".into(),
+                text: text.into(),
+                focused: true,
+            });
+            h.run();
+            h.get_by_label("Body").click();
+            h.run();
+            assert!(
+                h.state().2.iter().all(|o| !matches!(o, Out::Rename { .. })),
+                "{text:?}"
+            );
+        }
     }
 }

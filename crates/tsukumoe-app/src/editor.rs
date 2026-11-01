@@ -18,6 +18,7 @@ use crate::panels::{history, inspector, parameters, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
 use crate::tree_model;
+use crate::tree_ops;
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
 use tsukumoe_ui::dock::{self, PanelHost};
@@ -44,6 +45,8 @@ pub enum Dialog {
     SaveAs(String),
     SaveLayout(String),
     ConfirmPreset(Preset),
+    /// Deleting these takes `count` elements with it.
+    ConfirmDelete(Vec<Selection>, usize),
     /// The shortcut list: the text of each action's field, and the last error.
     Keymap(Vec<String>, Option<String>),
     /// The drag-to-parameter assignment being edited.
@@ -290,6 +293,100 @@ impl Editor {
                 }
             }
             Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+        }
+    }
+
+    /// What a tree panel asked for, sent through the one door.
+    pub fn apply_tree_out(&mut self, ctx: &Context, out: tree::Out) {
+        match out {
+            tree::Out::Command(command) => {
+                self.submit(ctx, command);
+            }
+            tree::Out::Reparent(target, parent) => {
+                let made = self.doc.as_ref().map(|d| {
+                    deformer_ops::set_parent(d.dispatcher.model(), &target, parent.as_deref())
+                });
+                match made {
+                    Some(Ok((command, label))) => {
+                        self.submit_labeled(ctx, command, Some(label));
+                    }
+                    Some(Err(e)) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+                    None => {}
+                }
+            }
+            tree::Out::Rename { kind, from, to } => {
+                let command = tree_ops::rename_command(kind, &from, &to);
+                let old = tree_ops::renamed(kind, &from);
+                let was_selected = self.view.is_selected(&old);
+                if self.submit_labeled(ctx, command, Some(format!("tree_rename: {from} -> {to}")))
+                    && was_selected
+                {
+                    self.view.select_only(tree_ops::renamed(kind, &to));
+                }
+            }
+            tree::Out::Delete(items) => {
+                let Some(doc) = &self.doc else { return };
+                let plan = tree_ops::delete_plan(doc.dispatcher.model(), &items);
+                if plan.commands.is_empty() {
+                    return;
+                }
+                if plan.needs_confirm {
+                    self.dialog = Some(Dialog::ConfirmDelete(items, plan.count));
+                } else {
+                    self.delete_items(ctx, &items);
+                }
+            }
+            tree::Out::Duplicate(items) => {
+                let Some(doc) = &self.doc else { return };
+                match tree_ops::duplicate_commands(doc.dispatcher.model(), &items) {
+                    Ok((commands, made)) if !commands.is_empty() => {
+                        let label = match made.as_slice() {
+                            [one] => format!("tree_duplicate: {}", selection_name(one)),
+                            many => format!("tree_duplicate: {} items", many.len()),
+                        };
+                        if self.submit_labeled(
+                            ctx,
+                            tsukumoe_core::command::Command::Batch { commands },
+                            Some(label),
+                        ) {
+                            self.view.select_all(made);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        let text = format!("{} ({e})", tr(ctx, e.key()));
+                        self.toasts.push(ctx, Tone::Error, text);
+                    }
+                }
+            }
+            tree::Out::SetPart(item, part) => {
+                if let Some(command) = tree_ops::set_part_command(&item, part.as_deref()) {
+                    let label = format!("tree_set_part: {}", selection_name(&item));
+                    self.submit_labeled(ctx, command, Some(label));
+                }
+            }
+        }
+    }
+
+    /// Deletes `items` (a part with what is under it) as one undo step.
+    fn delete_items(&mut self, ctx: &Context, items: &[Selection]) {
+        let Some(doc) = &self.doc else { return };
+        let plan = tree_ops::delete_plan(doc.dispatcher.model(), items);
+        if plan.commands.is_empty() {
+            return;
+        }
+        let label = match items {
+            [one] => format!("tree_delete: {}", selection_name(one)),
+            many => format!("tree_delete: {} items", many.len()),
+        };
+        if self.submit_labeled(
+            ctx,
+            tsukumoe_core::command::Command::Batch {
+                commands: plan.commands,
+            },
+            Some(label),
+        ) {
+            self.view.clear_selection();
         }
     }
 
@@ -856,6 +953,7 @@ impl Editor {
             Dialog::SaveAsFolder(_) => (t("dialog-save-folder-title"), "dialog-save-folder"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
+            Dialog::ConfirmDelete(..) => (t("tree-delete-title"), "dialog-confirm-delete"),
             Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {
                 unreachable!("handled above")
             }
@@ -882,6 +980,12 @@ impl Editor {
                 }
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
+                }
+                Dialog::ConfirmDelete(_, count) => {
+                    hint(
+                        ui,
+                        tr_args(ctx, "tree-delete-body", &[("count", Arg::from(*count))]),
+                    );
                 }
                 Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {}
             }
@@ -936,6 +1040,7 @@ impl Editor {
                     }
                 }
                 Dialog::ConfirmPreset(preset) => self.apply_preset(*preset),
+                Dialog::ConfirmDelete(items, _) => self.delete_items(ctx, items),
                 _ => {}
             }
             open = false;
@@ -1347,25 +1452,7 @@ impl PanelHost for Panels<'_> {
                     tree_model::Panel::Deformers
                 };
                 for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view, panel) {
-                    match out {
-                        tree::Out::Command(command) => {
-                            editor.submit(&ctx, command);
-                        }
-                        tree::Out::Reparent(target, parent) => {
-                            let model = editor.doc.as_ref().map(|d| d.dispatcher.model());
-                            match model
-                                .map(|m| deformer_ops::set_parent(m, &target, parent.as_deref()))
-                            {
-                                Some(Ok((command, label))) => {
-                                    editor.submit_labeled(&ctx, command, Some(label));
-                                }
-                                Some(Err(e)) => {
-                                    editor.toasts.push(&ctx, Tone::Error, tr(&ctx, e.key()));
-                                }
-                                None => {}
-                            }
-                        }
-                    }
+                    editor.apply_tree_out(&ctx, out);
                 }
             }
             "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
@@ -1427,6 +1514,17 @@ impl PanelHost for Panels<'_> {
                 hint(ui, tr(&ctx, "panel-empty"));
             }
         }
+    }
+}
+
+/// The name an element of the selection has.
+fn selection_name(s: &Selection) -> &str {
+    match s {
+        Selection::Part(n)
+        | Selection::Mesh(n)
+        | Selection::Warp(n)
+        | Selection::Rotation(n)
+        | Selection::Parameter(n) => n,
     }
 }
 
@@ -1812,6 +1910,116 @@ mod tests {
         let d = &editor.doc.as_ref().unwrap().dispatcher;
         let mesh = d.model().meshes().find("DefMesh").unwrap();
         assert!(d.model().meshes().get(mesh).unwrap().parent.is_some());
+    }
+
+    #[test]
+    fn the_tree_renames_deletes_duplicates_and_moves_through_the_one_door() {
+        use crate::tree_model::Kind;
+        use tsukumoe_core::command::Command;
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        for command in [
+            Command::AddPart {
+                name: "TreeA".into(),
+                parent: None,
+            },
+            Command::AddPart {
+                name: "TreeB".into(),
+                parent: Some("TreeA".into()),
+            },
+            Command::AddMesh {
+                name: "TreeMesh".into(),
+                part: "TreeB".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            assert!(editor.submit(&ctx, command));
+        }
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let model = |e: &Editor| {
+            let d = &e.doc.as_ref().unwrap().dispatcher;
+            (
+                d.model().meshes().find("TreeMesh").is_some(),
+                d.model().parts().find("TreeB").is_some(),
+            )
+        };
+        let base = steps(&editor);
+        // Rename: one step, named, and the selection follows.
+        editor.view.select_only(Selection::Mesh("TreeMesh".into()));
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Rename {
+                kind: Kind::Mesh,
+                from: "TreeMesh".into(),
+                to: "Renamed".into(),
+            },
+        );
+        assert_eq!(steps(&editor), base + 1);
+        assert_eq!(
+            editor.view.selection,
+            Some(Selection::Mesh("Renamed".into()))
+        );
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        assert_eq!(
+            d.name_of(base).as_deref(),
+            Some("tree_rename: TreeMesh -> Renamed")
+        );
+        // A taken name is refused and the model stays.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Rename {
+                kind: Kind::Part,
+                from: "TreeB".into(),
+                to: "TreeA".into(),
+            },
+        );
+        assert_eq!(steps(&editor), base + 1);
+        // Duplicate: the copy is selected, one step.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Duplicate(vec![Selection::Mesh("Renamed".into())]),
+        );
+        assert_eq!(steps(&editor), base + 2);
+        assert_eq!(
+            editor.view.selection,
+            Some(Selection::Mesh("Renamed.copy".into()))
+        );
+        // Move to another part.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::SetPart(Selection::Mesh("Renamed.copy".into()), Some("TreeA".into())),
+        );
+        assert_eq!(steps(&editor), base + 3);
+        // A part with something under it asks first; nothing goes until it is confirmed.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Delete(vec![Selection::Part("TreeB".into())]),
+        );
+        assert!(matches!(editor.dialog, Some(Dialog::ConfirmDelete(_, 2))));
+        assert_eq!(steps(&editor), base + 3);
+        assert_eq!(model(&editor), (false, true));
+        editor.delete_items(&ctx, &[Selection::Part("TreeB".into())]);
+        assert_eq!(steps(&editor), base + 4);
+        assert!(editor.view.selection.is_none());
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.name_of(base + 3).as_deref(), Some("tree_delete: TreeB"));
+        // One undo brings the part and its mesh back.
+        assert!(d.undo());
+        assert!(
+            d.model().parts().find("TreeB").is_some()
+                && d.model().meshes().find("Renamed").is_some()
+        );
+        assert!(d.model().validate().is_empty());
+        // A mesh goes at once, without asking.
+        editor.dialog = None;
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Delete(vec![Selection::Mesh("Renamed.copy".into())]),
+        );
+        assert!(editor.dialog.is_none());
+        assert_eq!(steps(&editor), base + 4);
     }
 
     #[test]
