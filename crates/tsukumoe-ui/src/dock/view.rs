@@ -16,11 +16,42 @@ use crate::icons::Icon;
 use crate::lang::tr;
 use crate::theme::Theme;
 
+/// How a tab group's headings are written. A panel without an icon shows its
+/// initial in the icon's place; the full title is always the tooltip and the
+/// screen reader's name.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TabStyle {
+    /// Icon only, and the name too on the selected tab.
+    #[default]
+    Compact,
+    /// Icon and name on every tab.
+    Full,
+}
+
+impl TabStyle {
+    /// The word it is saved as.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Full => "full",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        [Self::Compact, Self::Full]
+            .into_iter()
+            .find(|s| s.key() == key)
+    }
+}
+
 /// What the dock needs from the app: names, optional icons, and the content.
 pub trait PanelHost {
     fn title(&self, ctx: &Context, id: &str) -> String;
     fn icon(&self, _id: &str) -> Option<Icon> {
         None
+    }
+    fn tab_style(&self) -> TabStyle {
+        TabStyle::default()
     }
     fn ui(&mut self, ui: &mut Ui, id: &str);
 }
@@ -529,16 +560,50 @@ fn draw_tabs(
         kind: ZoneKind::Group(tabs.to_vec()),
     });
     let bar_h = m.control + 2.0;
-    let mut x = rect.left();
-    for (i, id) in tabs.iter().enumerate() {
-        let title = host.title(&ctx, id);
-        let font = FontId::proportional(m.text);
-        let w = ui
-            .painter()
-            .layout_no_wrap(title.clone(), font.clone(), Color32::PLACEHOLDER)
+    let font = FontId::proportional(m.text);
+    let titles: Vec<String> = tabs.iter().map(|id| host.title(&ctx, id)).collect();
+    let name_width = |ui: &Ui, title: &str| {
+        ui.painter()
+            .layout_no_wrap(title.to_owned(), font.clone(), Color32::PLACEHOLDER)
             .size()
             .x
-            + 2.0 * m.pad;
+    };
+    // Which tabs show their name: as chosen, then only the selected one, then none, so
+    // that the tabs always fit in the width of the group.
+    let widths = |names: &dyn Fn(usize) -> bool| -> Vec<f32> {
+        titles
+            .iter()
+            .enumerate()
+            .map(|(i, title)| {
+                let icon = m.icon + 2.0 * m.pad;
+                if names(i) {
+                    icon + m.gap + name_width(ui, title)
+                } else {
+                    icon
+                }
+            })
+            .collect()
+    };
+    let all: &dyn Fn(usize) -> bool = &|_| true;
+    let selected: &dyn Fn(usize) -> bool = &|i| i == active;
+    let none: &dyn Fn(usize) -> bool = &|_| false;
+    let levels: &[&dyn Fn(usize) -> bool] = match host.tab_style() {
+        TabStyle::Full => &[all, selected, none],
+        TabStyle::Compact => &[selected, none],
+    };
+    let mut shown = Vec::new();
+    let mut sizes = Vec::new();
+    for level in levels {
+        shown = (0..tabs.len()).map(level).collect();
+        sizes = widths(level);
+        if sizes.iter().sum::<f32>() <= rect.width() {
+            break;
+        }
+    }
+    let mut x = rect.left();
+    for (i, id) in tabs.iter().enumerate() {
+        let title = &titles[i];
+        let w = sizes[i];
         let r = Rect::from_min_size(pos2(x, rect.top()), vec2(w, bar_h));
         x += w;
         let resp = ui.interact(
@@ -559,7 +624,30 @@ fn draw_tabs(
         } else {
             t.colors.text_muted
         };
-        paint_label(ui, r, &title, color, m.text);
+        // The icon (or the initial), then the name when it is shown.
+        let slot = Rect::from_min_size(r.min, vec2(m.icon + 2.0 * m.pad, bar_h));
+        match host.icon(id) {
+            Some(icon) => icon.image(color, m.icon).paint_at(
+                ui,
+                Rect::from_center_size(slot.center(), vec2(m.icon, m.icon)),
+            ),
+            None => paint_label(
+                ui,
+                slot,
+                &title.chars().take(1).collect::<String>(),
+                color,
+                m.text,
+            ),
+        }
+        if shown[i] {
+            ui.painter().text(
+                pos2(slot.right() + m.gap - m.pad, r.center().y),
+                Align2::LEFT_CENTER,
+                title,
+                font.clone(),
+                color,
+            );
+        }
         if on {
             let bar = Rect::from_min_max(
                 pos2(r.left() + m.gap, r.bottom() - 2.0),
@@ -567,6 +655,7 @@ fn draw_tabs(
             );
             ui.painter().rect_filled(bar, 1.0, t.colors.accent);
         }
+        let resp = resp.on_hover_text(title);
         if resp.clicked() || resp.drag_started() {
             frame.actions.push(Action::Activate(id.clone()));
         }
@@ -641,5 +730,67 @@ mod tests {
         harness.get_by_label("title-b").click();
         harness.run();
         harness.get_by_label("body-b");
+    }
+
+    struct StyledHost(TabStyle);
+    impl PanelHost for StyledHost {
+        fn title(&self, _: &Context, id: &str) -> String {
+            format!("Title {id}")
+        }
+        fn tab_style(&self) -> TabStyle {
+            self.0
+        }
+        fn ui(&mut self, _: &mut Ui, _: &str) {}
+    }
+
+    fn tab_widths(style: TabStyle, width: f32) -> Vec<f32> {
+        let layout = Layout::new(Node::tabs(&["a", "b", "c"]));
+        let mut harness = Harness::builder()
+            .with_size(vec2(width, 200.0))
+            .build_ui_state(
+                move |ui, layout: &mut Layout| {
+                    crate::init(ui.ctx());
+                    show(ui, layout, &mut StyledHost(style));
+                },
+                layout,
+            );
+        harness.run();
+        ["a", "b", "c"]
+            .iter()
+            .map(|id| harness.get_by_label(&format!("Title {id}")).rect().width())
+            .collect()
+    }
+
+    #[test]
+    fn tab_headings_show_the_name_on_the_selected_tab_or_on_all() {
+        // Compact: the selected tab (a) is wider than the others, which are alike.
+        let compact = tab_widths(TabStyle::Compact, 600.0);
+        assert!(compact[0] > compact[1] + 20.0, "{compact:?}");
+        assert!((compact[1] - compact[2]).abs() < 0.5);
+        // Full: every tab has its name, so all are wide.
+        let full = tab_widths(TabStyle::Full, 600.0);
+        assert!(
+            full[1] > compact[1] + 20.0 && full[2] > compact[2] + 20.0,
+            "{full:?}"
+        );
+    }
+
+    #[test]
+    fn narrow_groups_drop_names_so_the_tabs_still_fit() {
+        let width = 120.0;
+        let full = tab_widths(TabStyle::Full, width);
+        assert!(full.iter().sum::<f32>() <= width + 0.5, "{full:?}");
+        // Too narrow for even one name: icons (initials) only, all alike.
+        let tight = tab_widths(TabStyle::Compact, 90.0);
+        assert!(tight.iter().sum::<f32>() <= 90.5, "{tight:?}");
+        assert!((tight[0] - tight[1]).abs() < 0.5);
+    }
+
+    #[test]
+    fn tab_styles_are_saved_as_words() {
+        for s in [TabStyle::Compact, TabStyle::Full] {
+            assert_eq!(TabStyle::from_key(s.key()), Some(s));
+        }
+        assert_eq!(TabStyle::from_key("nope"), None);
     }
 }

@@ -155,6 +155,18 @@ impl Node {
         }
     }
 
+    /// The panel showing in each tab group.
+    fn visible_tabs(&self) -> Vec<String> {
+        match self {
+            Node::Tabs { tabs, active } => tabs.get(*active).cloned().into_iter().collect(),
+            Node::Split { a, b, .. } => {
+                let mut v = a.visible_tabs();
+                v.extend(b.visible_tabs());
+                v
+            }
+        }
+    }
+
     fn find_tabs_mut(&mut self, anchor: &str) -> Option<&mut Node> {
         match self {
             Node::Tabs { tabs, .. } => tabs.iter().any(|t| t == anchor).then_some(self),
@@ -330,6 +342,30 @@ impl Layout {
             }
         }
         self.activate(id);
+    }
+
+    /// Whether `id` is showing: the visible tab of its group, or the open
+    /// panel of its strip.
+    pub fn is_visible(&self, id: &str) -> bool {
+        if [Side::Left, Side::Right]
+            .into_iter()
+            .any(|side| self.strip(side).open.as_deref() == Some(id))
+        {
+            return true;
+        }
+        self.root
+            .visible_tabs()
+            .iter()
+            .any(|visible| visible.as_str() == id)
+    }
+
+    /// Brings `id` to the front: the tab is selected, a strip panel is opened,
+    /// and a panel missing from the layout is added to the right strip and opened.
+    pub fn show_panel(&mut self, id: &str) {
+        if !self.contains(id) {
+            self.strip_mut(Side::Right).panels.push(id.to_owned());
+        }
+        self.reveal(id);
     }
 
     /// Sets the share of the split at `path` (`false` = `a`, `true` = `b`),
@@ -627,5 +663,36 @@ mod tests {
             }
         ));
         assert_eq!(l.root, Node::tabs(&["a"]));
+    }
+
+    #[test]
+    fn a_panel_is_visible_as_the_front_tab_or_the_open_strip_panel() {
+        let mut layout = Layout::new(Node::split(
+            Axis::Horizontal,
+            0.5,
+            Node::tabs(&["a", "b"]),
+            Node::tabs(&["c"]),
+        ));
+        layout.left.panels.push("d".into());
+        layout.left.panels.push("e".into());
+        assert!(layout.is_visible("a") && layout.is_visible("c"));
+        assert!(!layout.is_visible("b") && !layout.is_visible("d"));
+        // Selecting a tab shows it and hides the one it replaces.
+        layout.show_panel("b");
+        assert!(layout.is_visible("b") && !layout.is_visible("a"));
+        // A strip panel opens; opening another closes the first.
+        layout.show_panel("d");
+        assert!(layout.is_visible("d"));
+        layout.show_panel("e");
+        assert!(layout.is_visible("e") && !layout.is_visible("d"));
+        // A panel the layout lacks goes to the right strip, open.
+        assert!(!layout.contains("f"));
+        layout.show_panel("f");
+        assert!(layout.right.panels.contains(&"f".to_owned()));
+        assert!(layout.is_visible("f"));
+        // Showing it again changes nothing.
+        let before = layout.clone();
+        layout.show_panel("f");
+        assert_eq!(layout, before);
     }
 }
