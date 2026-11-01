@@ -62,3 +62,12 @@
 - `rfd` 0.17.2 を `default-features = false` で、macOS・Windows 限定の依存にする。Linux はパス入力のまま
 - 新規プロジェクトはフォルダ形式で作る。アーカイブ形式は「名前を付けて保存」
 - ピッカーはトレイトで差し替え可能にする
+- `rfd` は `default-features = false` のまま、追加の feature なしで macOS・Windows の同期 API（`FileDialog`）が使える。Windows の `common-controls-v6` は有効にしていない（旧スタイルのコモンコントロール）。`cargo tree -p tsukumoe-app --target x86_64-unknown-linux-gnu` に `rfd` は出ない。`cargo deny check` は通る
+- 親ウィンドウ: eframe 0.37 の `eframe::Frame` が `HasWindowHandle` / `HasDisplayHandle` を実装しているので、`FileDialog::set_parent(&Frame)` に渡す（`unsafe` は使わない）。`Frame` は `App::ui` の中でしか手に入らないため、ファイルダイアログが要る操作は `Editor::run_action` では実行せず待ち行列に積み、`App::ui` の最後に `Editor::process_pending(ctx, Some(frame))` が同期で開く（メインスレッド）。ピッカーが OS のものでない（Linux・パス入力）ときは、従来どおり `run_action` がパス入力のダイアログをすぐ開く
+- `FilePicker` トレイト（`is_native` / `pick`）の実装は `RfdPicker`（macOS・Windows）、`PathInputPicker`（それ以外）、テスト用の `Fake`。`Fake` は答えを順に返し、受けた依頼（種類・タイトル・初期フォルダ）を記録する
+- 「直前に使ったフォルダ」は `editor/state.json` の `last_dir` に保存し、次の依頼の初期フォルダにする（ファイルを選んだときはその親、フォルダを選んだときはそのフォルダ）
+- 未決の解決: 新規プロジェクトは完全に空（`manifest.json` と空の `model.json`）。名前は持たせず、フォルダ名がそのまま表示名（マニフェストに名前の項目は無く、形式の規則も変えない）。PSD から作るときは取り込みが `PSD` のルート `Part` を作る。Windows の実機確認は利用者が行い、Linux はパス入力のまま
+- 新規作成は、存在しないフォルダ（親は存在すること）か空のフォルダだけを受け付ける。空でない・フォルダでない・書けない場合はエラーにして何も作らない。失敗時は書いたファイルだけを消す（既存の空フォルダは残し、自分で作ったフォルダは消す）。`manifest.json` と `model.json` を選んだフォルダの中にだけ書く
+- PSD から新規プロジェクト: PSD → 保存先 → 作成して開く → 既存の取り込みダイアログ。開いていたプロジェクトは確定まで保持し、取り込みダイアログを確定せずに閉じたら、作ったファイルとフォルダを消して元のプロジェクトに戻す（最近のリストからも外す）。確定したら元のプロジェクトは破棄する。取り込みの適用は従来どおり 1 つの `Batch`
+- 「フォルダとして保存…」は、名前に拡張子があってもフォルダ形式で書く（`save_to_folder`）。「名前を付けて保存…」で拡張子が無いときは `.tsukumoe` を付ける
+- 実機のダイアログは、アプリを起動しない方針のため未確認（利用者が macOS・Windows で確認する）
