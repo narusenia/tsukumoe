@@ -193,9 +193,13 @@ impl Editor {
             "edit.undo" => drop(self.undo()),
             "edit.redo" => drop(self.redo()),
             "view.palette" => self.open_palette(),
+            // Holding the key repeats the press; reopening would move the menu
+            // to the pointer every time.
             "view.pie-menu" => {
-                let at = ctx.pointer_latest_pos().unwrap_or_default();
-                self.pie = Some(tsukumoe_ui::PieMenu::open(at, self.pie_config.items(ctx)));
+                if self.pie.is_none() {
+                    let at = ctx.pointer_latest_pos().unwrap_or_default();
+                    self.pie = Some(tsukumoe_ui::PieMenu::open(at, self.pie_config.items(ctx)));
+                }
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
                 let f = if action.ends_with("in") { 1.25 } else { 0.8 };
@@ -1025,6 +1029,43 @@ mod tests {
         frame(&ctx, vec![key(false)], |ctx| editor.pie_frame(ctx));
         assert!(editor.pie.is_none());
         assert_eq!(editor.view.tool, Tool::Select);
+    }
+
+    #[test]
+    fn a_repeated_key_press_does_not_move_the_open_pie_menu() {
+        let ctx = Context::default();
+        let mut editor = Editor::new(None);
+        editor.pie_config = PieConfig::from_json(
+            r#"{"items":[{"action":"tool.mesh"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
+        );
+        let at = egui::pos2(400.0, 400.0);
+        frame(&ctx, vec![egui::Event::PointerMoved(at)], |ctx| {
+            editor.run_action(ctx, "view.pie-menu");
+            editor.pie_frame(ctx);
+        });
+        // the key repeats while the pointer is elsewhere
+        let away = at + egui::vec2(300.0, 0.0);
+        frame(&ctx, vec![egui::Event::PointerMoved(away)], |ctx| {
+            editor.run_action(ctx, "view.pie-menu");
+            editor.pie_frame(ctx);
+        });
+        // straight up from where it first opened still picks the first item
+        let release = egui::Event::Key {
+            key: egui::Key::Q,
+            physical_key: Some(egui::Key::Q),
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(at + egui::vec2(0.0, -60.0)),
+                release,
+            ],
+            |ctx| editor.pie_frame(ctx),
+        );
+        assert_eq!(editor.view.tool, Tool::Mesh);
     }
 
     #[test]
