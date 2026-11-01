@@ -47,9 +47,12 @@ if tree tsukumoe-psd | grep -E '^(tsukumoe-)' | grep -vE '^tsukumoe-(psd|core)( 
   fail=1
 fi
 # `unsafe` lives in tsukumoe-ffi only (wasm-bindgen's generated code is not
-# written by us). The one exception is the allocation
-# counter in the evaluator's tests (it proves a frame does not allocate).
-if grep -rnE '\bunsafe[[:space:]]+(impl|fn|trait|extern|\{)' crates --include='*.rs' | grep -vE '^crates/tsukumoe-ffi/|^crates/tsukumoe-core/src/eval\.rs:'; then
+# written by us). The exceptions are the allocation counter in the evaluator's
+# tests (it proves a frame does not allocate) and the Spout2 output of the host
+# (Windows COM calls and raw handles cannot be written without `unsafe`; the
+# module is built only with `feature = "spout"` on Windows and holds only that
+# sink, see docs/implementation/M4-vtuber/host-spout.md).
+if grep -rnE '\bunsafe[[:space:]]+(impl|fn|trait|extern|\{)' crates --include='*.rs' | grep -vE '^crates/tsukumoe-ffi/|^crates/tsukumoe-core/src/eval\.rs:|^crates/tsukumoe-host/src/output/spout\.rs:'; then
   echo "error: unsafe code outside tsukumoe-ffi" >&2
   fail=1
 fi

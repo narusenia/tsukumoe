@@ -78,3 +78,4 @@
 - Spout2 は `spout-rs` の `vendored` で組み込む（SDK・DLL・環境変数は不要）
 - `FrameSink::publish` に渡すテクスチャは `COPY_SRC` 用途も持つ（読み戻しのため）。ウィンドウの描画先と `Output` の固定サイズテクスチャに足す
 - Syphon と Spout は OS が違うので同時には有効にならず、`Output` の sink は 1 つのまま。固定サイズは `--syphon-size` と `--spout-size` のどちらか指定された方を使う
+- `spout.rs` の `unsafe`（Windows の COM 呼び出しと生のハンドル）は避けられないため、`scripts/check-deps.sh` の「`unsafe` は `tsukumoe-ffi` のみ」の検査に、このファイルだけを例外として加えた。モジュールは Windows かつ `feature = "spout"` のときだけビルドされ、Spout の送信だけを持つ。M4-03c-1 のマージ以降 CI が赤かった原因は、この検査に例外を足し忘れていたこと
