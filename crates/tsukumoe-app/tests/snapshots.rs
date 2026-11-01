@@ -70,11 +70,11 @@ fn mesh_overlay_snapshot(mode: Mode, name: &str) {
             indices.extend([a, a + 1, a + 6, a, a + 6, a + 5]);
         }
     }
-    let size = egui::vec2(360.0, 260.0);
+    let size = egui::vec2(480.0, 260.0);
     let mapper = Mapper {
         origin: [0.0, 0.0],
         size: [size.x, size.y],
-        view: [-0.5, -0.4, 4.9, 3.4],
+        view: [-0.8, -0.4, 5.2, 3.4],
     };
     let mut tool = MeshTool::default();
     tool.set_mesh(Some("Skin"));

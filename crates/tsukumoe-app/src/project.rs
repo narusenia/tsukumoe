@@ -49,6 +49,27 @@ impl Document {
         &self.project
     }
 
+    /// The alpha channel of the `index`-th texture (the order the viewport
+    /// loads them in): width, height and one byte per pixel.
+    pub fn texture_alpha(&self, index: u32) -> Result<(u32, u32, Vec<u8>), String> {
+        let (path, bytes) = self
+            .project
+            .files
+            .iter()
+            .filter(|(path, _)| path.starts_with("textures/") && path.ends_with(".png"))
+            .nth(index as usize)
+            .ok_or_else(|| format!("no texture {index}"))?;
+        let texture = tsukumoe_gpu::Texture::from_png(bytes).map_err(|e| format!("{path}: {e}"))?;
+        let alpha = texture
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| p[3])
+            .collect();
+        Ok((texture.width, texture.height, alpha))
+    }
+
     /// Adds or replaces a file of the project (a texture, the PSD map). It is
     /// written on the next save.
     pub fn put_file(&mut self, path: &str, bytes: Vec<u8>) {

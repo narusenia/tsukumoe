@@ -10,6 +10,7 @@
 use std::collections::BTreeSet;
 
 use tsukumoe_core::command::Command;
+use tsukumoe_core::contour::{self, Alpha, ContourError, ContourParams};
 use tsukumoe_core::elements::Point;
 use tsukumoe_core::mesh_edit::{self, EditError, Geometry};
 use tsukumoe_core::model::Model;
@@ -65,6 +66,9 @@ pub enum ToolError {
     NeedEdge,
     /// Re-triangulating would change nothing.
     NoChange,
+    /// The texture of the mesh could not be read.
+    NoTexture,
+    Contour(ContourError),
     Edit(EditError),
 }
 
@@ -76,6 +80,13 @@ impl ToolError {
             Self::NeedTwoVertices => "mesh-edit-need-two",
             Self::NeedEdge => "mesh-edit-need-edge",
             Self::NoChange => "mesh-edit-no-change",
+            Self::NoTexture => "mesh-edit-no-texture",
+            Self::Contour(ContourError::BadImage) => "mesh-edit-no-texture",
+            Self::Contour(ContourError::BadParams) => "mesh-edit-contour-params",
+            Self::Contour(ContourError::Empty) => "mesh-edit-contour-empty",
+            Self::Contour(ContourError::NoUvMapping) => "mesh-edit-contour-no-uv",
+            Self::Contour(ContourError::TooManyPoints) => "mesh-edit-contour-too-many",
+            Self::Contour(ContourError::CannotTriangulate) => "mesh-edit-contour-cannot",
             Self::Edit(EditError::OutsideMesh) => "mesh-edit-outside",
             Self::Edit(EditError::TooClose) => "mesh-edit-too-close",
             Self::Edit(EditError::BoundaryEdge) => "mesh-edit-outline-edge",
@@ -87,6 +98,20 @@ impl ToolError {
             Self::Edit(EditError::BadVertex | EditError::NoSuchEdge) => "mesh-edit-no-edge",
         }
     }
+}
+
+impl From<ContourError> for ToolError {
+    fn from(e: ContourError) -> Self {
+        Self::Contour(e)
+    }
+}
+
+/// The alpha of a mesh's texture, owned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AlphaImage {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
 }
 
 impl From<EditError> for ToolError {
@@ -120,6 +145,8 @@ pub struct MeshTool {
     gesture: Option<Gesture>,
     /// Columns and rows of the grid `mesh.fill-grid` lays; kept across meshes.
     pub grid: (u32, u32),
+    /// Settings of `mesh.contour`; kept across meshes.
+    pub contour: ContourParams,
 }
 
 fn dist_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -227,6 +254,7 @@ impl Default for MeshTool {
             edge: None,
             gesture: None,
             grid: (4, 4),
+            contour: ContourParams::default(),
         }
     }
 }
@@ -242,6 +270,7 @@ impl MeshTool {
             *self = Self {
                 mesh: name.map(str::to_owned),
                 grid: self.grid,
+                contour: self.contour,
                 ..Self::default()
             };
         }
@@ -511,6 +540,26 @@ impl MeshTool {
         let out = mesh_edit::fill_grid(g, self.grid.0, self.grid.1)?;
         self.clear_selection();
         Ok(geometry_op(name, "mesh_fill_grid", out))
+    }
+
+    /// Makes the mesh again from the alpha of its texture: an outline per
+    /// island and lattice points inside (`contour::contour_mesh`). `alpha` is
+    /// `None` when the texture could not be read.
+    pub fn contour_mesh(
+        &mut self,
+        name: &str,
+        g: &Geometry,
+        alpha: Option<&AlphaImage>,
+    ) -> Result<Op, ToolError> {
+        let alpha = alpha.ok_or(ToolError::NoTexture)?;
+        let image = Alpha {
+            width: alpha.width,
+            height: alpha.height,
+            data: &alpha.data,
+        };
+        let out = contour::contour_mesh(g, &image, &self.contour)?;
+        self.clear_selection();
+        Ok(geometry_op(name, "mesh_contour", out))
     }
 
     /// Flips the selected edge; the selection is dropped, as the edge is gone.
@@ -834,6 +883,54 @@ mod tests {
     }
 
     #[test]
+    fn contour_uses_the_tools_settings_and_reports_a_missing_texture() {
+        let (g, _) = square();
+        let mut t = tool();
+        assert_eq!(t.contour, ContourParams::default());
+        assert_eq!(t.contour_mesh("Skin", &g, None), Err(ToolError::NoTexture));
+        // A disc on a 64 x 64 image.
+        let data: Vec<u8> = (0..64 * 64)
+            .map(|i| {
+                let (x, y) = ((i % 64) as f32 - 32.0, (i / 64) as f32 - 32.0);
+                if x.hypot(y) < 24.0 { 255 } else { 0 }
+            })
+            .collect();
+        let alpha = AlphaImage {
+            width: 64,
+            height: 64,
+            data,
+        };
+        t.contour.spacing = 8.0;
+        let (command, label) = t.contour_mesh("Skin", &g, Some(&alpha)).unwrap();
+        assert_eq!(label, "mesh_contour: Skin");
+        let Command::SetMeshGeometry { positions, .. } = command else {
+            panic!("a contour sends SetMeshGeometry");
+        };
+        let with_lattice = positions.len();
+        t.contour.spacing = 0.0;
+        let Ok((Command::SetMeshGeometry { positions, .. }, _)) =
+            t.contour_mesh("Skin", &g, Some(&alpha))
+        else {
+            panic!();
+        };
+        assert!(
+            positions.len() < with_lattice,
+            "the setting changes the result"
+        );
+        // The settings survive a change of mesh; a transparent image is refused.
+        t.set_mesh(Some("Other"));
+        assert_eq!(t.contour.spacing, 0.0);
+        let clear = AlphaImage {
+            data: vec![0; 64 * 64],
+            ..alpha
+        };
+        assert_eq!(
+            t.contour_mesh("Skin", &g, Some(&clear)),
+            Err(ToolError::Contour(ContourError::Empty))
+        );
+    }
+
+    #[test]
     fn changing_the_mesh_drops_the_selection_and_sanitize_drops_stale_ids() {
         let (g, m) = square();
         let mut t = tool();
@@ -894,6 +991,13 @@ mod tests {
             ToolError::NeedTwoVertices,
             ToolError::NeedEdge,
             ToolError::NoChange,
+            ToolError::NoTexture,
+            ContourError::BadImage.into(),
+            ContourError::BadParams.into(),
+            ContourError::Empty.into(),
+            ContourError::NoUvMapping.into(),
+            ContourError::TooManyPoints.into(),
+            ContourError::CannotTriangulate.into(),
             EditError::OutsideMesh.into(),
             EditError::TooClose.into(),
             EditError::BoundaryEdge.into(),

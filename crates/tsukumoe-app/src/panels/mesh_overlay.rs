@@ -105,11 +105,20 @@ pub fn caption(painter: &Painter, theme: &Theme, rect: Rect, text: &str) {
     );
 }
 
+fn float(v: &mut f32, max: f32) -> egui::DragValue<'_> {
+    egui::DragValue::new(v)
+        .range(0.0..=max)
+        .speed(0.1)
+        .max_decimals(1)
+}
+
 /// The small options box in the top right corner: columns and rows of the
-/// grid `mesh.fill-grid` lays. The values live in the tool, not in the model.
+/// grid `mesh.fill-grid` lays, and the settings of `mesh.contour`. The values
+/// live in the tool, not in the model.
 pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
     let theme = Theme::get(ctx);
     let m = theme.metrics;
+    let t = |key: &str| tsukumoe_ui::tr(ctx, key);
     egui::Area::new(egui::Id::unique("tsukumoe-mesh-grid-options"))
         .fixed_pos(rect.right_top() + vec2(-8.0, 8.0))
         .pivot(Align2::RIGHT_TOP)
@@ -122,13 +131,42 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                 .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(tsukumoe_ui::tr(ctx, "mesh-edit-grid"));
+                        ui.label(t("mesh-edit-grid"));
                         let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
                         ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
-                            .accessible_name(tsukumoe_ui::tr(ctx, "mesh-edit-grid-cols"));
+                            .accessible_name(t("mesh-edit-grid-cols"));
                         ui.label("\u{d7}");
                         ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
-                            .accessible_name(tsukumoe_ui::tr(ctx, "mesh-edit-grid-rows"));
+                            .accessible_name(t("mesh-edit-grid-rows"));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(t("mesh-edit-contour"));
+                        let c = &mut tool.contour;
+                        let fields = [
+                            (
+                                ui.add(egui::DragValue::new(&mut c.threshold)),
+                                "mesh-edit-contour-threshold",
+                            ),
+                            (
+                                ui.add(float(&mut c.simplify, 50.0)),
+                                "mesh-edit-contour-simplify",
+                            ),
+                            (
+                                ui.add(float(&mut c.offset, 50.0)),
+                                "mesh-edit-contour-offset",
+                            ),
+                            (
+                                ui.add(float(&mut c.spacing, 512.0)),
+                                "mesh-edit-contour-spacing",
+                            ),
+                        ];
+                        for (response, key) in fields {
+                            response.accessible_name(t(key)).on_hover_text(t(key));
+                        }
+                        // The spacing is 0 (none) or at least 4.
+                        if c.spacing > 0.0 && c.spacing < 4.0 {
+                            c.spacing = 4.0;
+                        }
                     });
                 });
         });
