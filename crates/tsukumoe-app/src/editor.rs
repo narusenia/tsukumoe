@@ -1306,17 +1306,21 @@ impl PanelHost for Panels<'_> {
                             _ => None,
                         };
                         editor.mesh_tool.set_mesh(target);
-                        let (response, ops) = vp.show(
+                        let (response, ops, actions) = vp.show(
                             ui,
                             rs,
                             doc,
                             &mut editor.view,
                             &editor.drag,
                             &mut editor.mesh_tool,
+                            &editor.keymap,
                         );
                         editor.viewport_hovered = response.hovered();
                         for op in ops {
                             editor.apply_mesh_op(&ctx, op);
+                        }
+                        for action in actions {
+                            editor.run_action(&ctx, action);
                         }
                     }
                 }
@@ -1626,6 +1630,15 @@ mod tests {
         // D outside the mesh tool still picks the deformer tool.
         assert!(editor.run_action(&ctx, "mesh.retriangulate"));
         assert_eq!(editor.view.tool, Tool::Deformer);
+    }
+
+    #[test]
+    fn every_menu_action_is_a_known_action() {
+        let ctx = Context::default();
+        let mut editor = open_minimal();
+        for action in crate::mesh_tool::MENU_ACTIONS {
+            assert!(editor.run_action(&ctx, action), "{action}");
+        }
     }
 
     #[test]

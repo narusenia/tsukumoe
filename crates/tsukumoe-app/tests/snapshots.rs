@@ -151,3 +151,57 @@ fn mesh_edit_overlay_in_the_dark_theme() {
 fn mesh_edit_overlay_in_the_light_theme() {
     mesh_overlay_snapshot(Mode::Light, "mesh_edit_light");
 }
+
+/// The right-click menu of the mesh tool with one vertex selected: the
+/// whole-mesh items and delete are on, drawing an edge and flipping are off.
+fn menu_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::mesh_tool::{Mapper, MeshTool};
+    use tsukumoe_app::panels::mesh_overlay;
+
+    let positions = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let indices = vec![0, 1, 2, 0, 2, 3];
+    let mapper = Mapper {
+        origin: [0.0, 0.0],
+        size: [100.0, 100.0],
+        view: [0.0, 0.0, 1.0, 1.0],
+    };
+    let mut tool = MeshTool::default();
+    tool.set_mesh(Some("Skin"));
+    tool.click(&positions, &indices, &mapper, [100.0, 100.0], false);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(300.0, 190.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, tool: &mut MeshTool| {
+                let ctx = ui.ctx().clone();
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::En);
+                set_mode(&ctx, mode);
+                let keys = |a: &str| match a {
+                    "mesh.retriangulate" => Some("D".to_owned()),
+                    "mesh.fill-grid" => Some("G".to_owned()),
+                    "mesh.contour" => Some("C".to_owned()),
+                    "mesh.connect" => Some("E".to_owned()),
+                    "mesh.flip-edge" => Some("F".to_owned()),
+                    "mesh.delete-vertices" => Some("Delete".to_owned()),
+                    _ => None,
+                };
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    mesh_overlay::menu_ui(ui, tool, &keys);
+                });
+            },
+            tool,
+        );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn mesh_edit_menu_in_the_dark_theme() {
+    menu_snapshot(Mode::Dark, "mesh_edit_menu_dark");
+}
+
+#[test]
+fn mesh_edit_menu_in_the_light_theme() {
+    menu_snapshot(Mode::Light, "mesh_edit_menu_light");
+}

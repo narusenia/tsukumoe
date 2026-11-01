@@ -120,6 +120,17 @@ impl From<EditError> for ToolError {
     }
 }
 
+/// The actions of the right-click menu, in order. Each one is run through
+/// `Editor::run_action`, so the menu has no logic of its own.
+pub const MENU_ACTIONS: [&str; 6] = [
+    "mesh.retriangulate",
+    "mesh.fill-grid",
+    "mesh.contour",
+    "mesh.connect",
+    "mesh.flip-edge",
+    "mesh.delete-vertices",
+];
+
 /// A command and the name it gets in the history list.
 pub type Op = (Command, String);
 
@@ -296,6 +307,35 @@ impl MeshTool {
         match self.gesture {
             Some(Gesture::Rect { from, to, .. }) => Some((from, to)),
             _ => None,
+        }
+    }
+
+    /// Whether the menu item `action` can be used with the current selection:
+    /// drawing an edge needs two vertices, flipping an edge, deleting some
+    /// vertices; the whole-mesh actions always work.
+    pub fn menu_enabled(&self, action: &str) -> bool {
+        match action {
+            "mesh.connect" => self.vertices.len() == 2,
+            "mesh.flip-edge" => self.edge.is_some(),
+            "mesh.delete-vertices" => !self.vertices.is_empty(),
+            _ => true,
+        }
+    }
+
+    /// A right click at `at`: a vertex or an edge under it that is not in the
+    /// selection yet becomes the selection, so the menu acts on it. Empty
+    /// space leaves the selection as it is.
+    pub fn context_select(
+        &mut self,
+        positions: &[Point],
+        indices: &[u32],
+        m: &Mapper,
+        at: [f32; 2],
+    ) {
+        match hit_test(positions, indices, m, at) {
+            Hit::Vertex(v) if !self.vertices.contains(&v) => self.select(Hit::Vertex(v), false),
+            Hit::Edge(a, b) if self.edge != Some((a, b)) => self.select(Hit::Edge(a, b), false),
+            _ => {}
         }
     }
 
@@ -928,6 +968,47 @@ mod tests {
             t.contour_mesh("Skin", &g, Some(&clear)),
             Err(ToolError::Contour(ContourError::Empty))
         );
+    }
+
+    #[test]
+    fn menu_items_follow_the_selection() {
+        let (g, m) = square();
+        let mut t = tool();
+        let enabled = |t: &MeshTool| MENU_ACTIONS.map(|a| t.menu_enabled(a));
+        // Nothing selected: only the whole-mesh actions.
+        assert_eq!(enabled(&t), [true, true, true, false, false, false]);
+        click(&mut t, &g, &m, [100.0, 100.0], false);
+        assert_eq!(enabled(&t), [true, true, true, false, false, true]);
+        click(&mut t, &g, &m, [0.0, 0.0], true);
+        assert_eq!(enabled(&t), [true, true, true, true, false, true]);
+        click(&mut t, &g, &m, [100.0, 0.0], true);
+        assert_eq!(enabled(&t), [true, true, true, false, false, true]);
+        click(&mut t, &g, &m, [50.0, 50.0], false);
+        assert_eq!(enabled(&t), [true, true, true, false, true, false]);
+    }
+
+    #[test]
+    fn a_right_click_selects_what_is_under_it_unless_already_selected() {
+        let (g, m) = square();
+        let mut t = tool();
+        let right = |t: &mut MeshTool, at| t.context_select(&g.positions, &g.indices, &m, at);
+        right(&mut t, [100.0, 100.0]);
+        assert_eq!(t.vertices().iter().copied().collect::<Vec<_>>(), [1]);
+        // Two selected: a right click on one of them keeps both.
+        click(&mut t, &g, &m, [0.0, 0.0], true);
+        right(&mut t, [100.0, 100.0]);
+        assert_eq!(t.vertices().len(), 2);
+        // On another vertex: it alone.
+        right(&mut t, [100.0, 0.0]);
+        assert_eq!(t.vertices().iter().copied().collect::<Vec<_>>(), [2]);
+        // An edge selects it (and drops the vertices); the same edge again keeps it.
+        right(&mut t, [50.0, 50.0]);
+        assert_eq!((t.edge(), t.vertices().len()), (Some((0, 2)), 0));
+        right(&mut t, [50.0, 50.0]);
+        assert_eq!(t.edge(), Some((0, 2)));
+        // Empty space changes nothing.
+        right(&mut t, [80.0, 30.0]);
+        assert_eq!(t.edge(), Some((0, 2)));
     }
 
     #[test]

@@ -171,3 +171,66 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                 });
         });
 }
+
+/// The items of the right-click menu: one button per action of
+/// [`crate::mesh_tool::MENU_ACTIONS`], disabled when the selection does not
+/// fit, with its shortcut on the right. Returns the action that was clicked.
+pub fn menu_ui(
+    ui: &mut egui::Ui,
+    tool: &MeshTool,
+    shortcut: &dyn Fn(&str) -> Option<String>,
+) -> Option<&'static str> {
+    let ctx = ui.ctx().clone();
+    let mut chosen = None;
+    for action in crate::mesh_tool::MENU_ACTIONS {
+        let label = tsukumoe_ui::tr(&ctx, &crate::actions::label_key(action));
+        let mut button = egui::Button::new(label);
+        if let Some(keys) = shortcut(action) {
+            button = button.shortcut_text(keys);
+        }
+        if ui.add_enabled(tool.menu_enabled(action), button).clicked() {
+            chosen = Some(action);
+        }
+    }
+    chosen
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mesh_tool::MENU_ACTIONS;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use tsukumoe_i18n::{I18n, Language};
+
+    fn menu_harness(tool: MeshTool) -> Harness<'static, (MeshTool, Option<&'static str>)> {
+        Harness::builder()
+            .with_size(vec2(420.0, 220.0))
+            .build_ui_state(
+                |ui, (tool, chosen): &mut (MeshTool, Option<&'static str>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    if let Some(action) = menu_ui(ui, tool, &|_| None) {
+                        *chosen = Some(action);
+                    }
+                },
+                (tool, None),
+            )
+    }
+
+    #[test]
+    fn each_menu_item_sends_its_action_and_disabled_ones_send_nothing() {
+        let t = I18n::new(Language::En);
+        let label = |a: &str| t.tr(&crate::actions::label_key(a));
+        for action in MENU_ACTIONS {
+            assert!(crate::actions::ACTIONS.contains(&action), "{action}");
+            // The whole-mesh items are enabled with nothing selected.
+            let mut harness = menu_harness(MeshTool::default());
+            harness.run();
+            harness.get_by_label(&label(action)).click();
+            harness.run();
+            let expected = MeshTool::default().menu_enabled(action).then_some(action);
+            assert_eq!(harness.state().1, expected, "{action}");
+        }
+    }
+}
