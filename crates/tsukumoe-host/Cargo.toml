@@ -18,10 +18,12 @@ eframe.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 syphon-wgpu = { workspace = true, optional = true }
+# Direct dependency only so build.rs receives DEP_SYPHON_FRAMEWORK_DIR (`links = "Syphon"`).
+syphon-core = { workspace = true, optional = true }
 
 [features]
 # Publishes the output as a Syphon server (macOS; needs Syphon.framework to link and run).
-syphon = ["dep:syphon-wgpu"]
+syphon = ["dep:syphon-wgpu", "dep:syphon-core"]
 
 [dev-dependencies]
 pollster.workspace = true

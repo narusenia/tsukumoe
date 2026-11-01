@@ -40,6 +40,7 @@ cbindgen = { version = "0.29", default-features = false }
 cc = "1"
 jsonschema = { version = "0.33", default-features = false }
 syphon-wgpu = "0.4.3"
+syphon-core = "0.4.0"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
