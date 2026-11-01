@@ -10,6 +10,7 @@ pub mod commands;
 pub mod dispatcher;
 pub mod drag;
 pub mod editor;
+pub mod menu;
 pub mod panels;
 pub mod pie;
 pub mod project;

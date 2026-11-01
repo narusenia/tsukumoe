@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::actions::{self, ACTIONS, Tool};
 use crate::drag::{AxisTarget, DragAssignment, Modifier};
+use crate::menu;
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use crate::pie::{Entry, PieConfig};
@@ -350,130 +351,45 @@ impl Editor {
         self.toasts.show(&ctx);
     }
 
+    /// The menu as shown now, from [`menu::MENU`] and the editor's state.
+    pub fn menu_entries(&self, ctx: &Context) -> Vec<menu::Entry> {
+        let (can_undo, can_redo) = self.doc.as_ref().map_or((false, false), |d| {
+            (d.dispatcher.can_undo(), d.dispatcher.can_redo())
+        });
+        let state = menu::State {
+            has_doc: self.doc.is_some(),
+            can_undo,
+            can_redo,
+            recent: self
+                .recent
+                .paths()
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect(),
+            saved_layouts: self
+                .layouts
+                .saved
+                .iter()
+                .filter(|s| s.workspace == self.workspace)
+                .map(|s| s.name.clone())
+                .collect(),
+        };
+        menu::resolve(menu::MENU, &state, &|key| tr(ctx, key), &|action| {
+            self.keymap.shortcut_text(ctx, action)
+        })
+    }
+
     fn menu_bar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         let t = |key: &str| tr(&ctx, key);
+        let entries = self.menu_entries(&ctx);
+        let mut chosen = None;
         egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button(t("menu-file"), |ui| {
-                if tsukumoe_ui::menu_item(ui, &t("menu-open"), None).clicked() {
-                    self.dialog = Some(Dialog::Open(String::new()));
-                    ui.close();
+            for entry in &entries {
+                if let menu::Entry::Sub { label, entries } = entry {
+                    ui.menu_button(label, |ui| show_entries(ui, entries, &mut chosen));
                 }
-                let has_doc = self.doc.is_some();
-                ui.add_enabled_ui(has_doc, |ui| {
-                    if tsukumoe_ui::menu_item(ui, &t("menu-save"), None).clicked() {
-                        let r = self.save();
-                        self.report(&ctx, r, Some(t("app-saved")));
-                        ui.close();
-                    }
-                    if tsukumoe_ui::menu_item(ui, &t("menu-save-as"), None).clicked() {
-                        self.dialog = Some(Dialog::SaveAs(String::new()));
-                        ui.close();
-                    }
-                });
-                ui.menu_button(t("menu-recent"), |ui| {
-                    if self.recent.paths().is_empty() {
-                        ui.add_enabled(false, egui::Label::new(t("menu-no-recent")));
-                    }
-                    for path in self.recent.paths().to_vec() {
-                        let name = path.display().to_string();
-                        if tsukumoe_ui::menu_item(ui, &name, None).clicked() {
-                            let r = self.open(&path);
-                            let ok =
-                                tr_args(&ctx, "app-opened", &[("name", Arg::from(name.as_str()))]);
-                            self.report(&ctx, r, Some(ok));
-                            ui.close();
-                        }
-                    }
-                });
-            });
-            ui.menu_button(t("menu-edit"), |ui| {
-                let (can_undo, can_redo) = self.doc.as_ref().map_or((false, false), |d| {
-                    (d.dispatcher.can_undo(), d.dispatcher.can_redo())
-                });
-                ui.add_enabled_ui(can_undo, |ui| {
-                    if tsukumoe_ui::menu_item(ui, &t("menu-undo"), None).clicked() {
-                        self.undo();
-                        ui.close();
-                    }
-                });
-                ui.add_enabled_ui(can_redo, |ui| {
-                    if tsukumoe_ui::menu_item(ui, &t("menu-redo"), None).clicked() {
-                        self.redo();
-                        ui.close();
-                    }
-                });
-            });
-            ui.menu_button(t("menu-view"), |ui| {
-                if tsukumoe_ui::menu_item(
-                    ui,
-                    &t("menu-palette"),
-                    self.keymap.shortcut_text(&ctx, "view.palette").as_deref(),
-                )
-                .clicked()
-                {
-                    self.open_palette();
-                    ui.close();
-                }
-                if tsukumoe_ui::menu_item(ui, &t("pie-title"), None).clicked() {
-                    self.dialog = Some(Dialog::Pie);
-                    ui.close();
-                }
-                if tsukumoe_ui::menu_item(ui, &t("drag-title"), None).clicked() {
-                    self.dialog = Some(Dialog::Drag);
-                    ui.close();
-                }
-                if tsukumoe_ui::menu_item(ui, &t("keymap-title"), None).clicked() {
-                    let texts = ACTIONS
-                        .iter()
-                        .map(|a| {
-                            self.keymap
-                                .keys_text(a, actions::context_of(a))
-                                .unwrap_or_default()
-                        })
-                        .collect();
-                    self.dialog = Some(Dialog::Keymap(texts, None));
-                    ui.close();
-                }
-            });
-            ui.menu_button(t("menu-layout"), |ui| {
-                for preset in Preset::ALL {
-                    if tsukumoe_ui::menu_item(
-                        ui,
-                        &t(&format!("layout-preset-{}", preset.key())),
-                        None,
-                    )
-                    .clicked()
-                    {
-                        self.dialog = Some(Dialog::ConfirmPreset(preset));
-                        ui.close();
-                    }
-                }
-                if tsukumoe_ui::menu_item(ui, &t("layout-save-named"), None).clicked() {
-                    self.dialog = Some(Dialog::SaveLayout(String::new()));
-                    ui.close();
-                }
-                ui.menu_button(t("layout-load-named"), |ui| {
-                    let names: Vec<String> = self
-                        .layouts
-                        .saved
-                        .iter()
-                        .filter(|s| s.workspace == self.workspace)
-                        .map(|s| s.name.clone())
-                        .collect();
-                    if names.is_empty() {
-                        ui.add_enabled(false, egui::Label::new(t("layout-none-saved")));
-                    }
-                    for name in names {
-                        if tsukumoe_ui::menu_item(ui, &name, None).clicked() {
-                            if self.layouts.load_named(self.workspace, &name) {
-                                self.layouts_dirty = true;
-                            }
-                            ui.close();
-                        }
-                    }
-                });
-            });
+            }
             ui.separator();
             let mut selected = Workspace::ALL
                 .iter()
@@ -488,6 +404,9 @@ impl Editor {
                 self.switch_workspace(Workspace::ALL[selected]);
             }
         });
+        if let Some(action) = chosen {
+            self.run_action(&ctx, &action);
+        }
     }
 
     fn status_bar(&mut self, ui: &mut Ui) {
@@ -801,6 +720,33 @@ impl Editor {
 }
 
 /// The dock's view of the editor: panel names and their contents.
+/// Draws `entries` as egui menu items; the action of a clicked one goes to `chosen`.
+fn show_entries(ui: &mut Ui, entries: &[menu::Entry], chosen: &mut Option<String>) {
+    for entry in entries {
+        match entry {
+            menu::Entry::Separator => {
+                ui.separator();
+            }
+            menu::Entry::Sub { label, entries } => {
+                ui.menu_button(label, |ui| show_entries(ui, entries, chosen));
+            }
+            menu::Entry::Item {
+                action,
+                label,
+                enabled,
+                shortcut,
+            } => {
+                ui.add_enabled_ui(*enabled, |ui| {
+                    if tsukumoe_ui::menu_item(ui, label, shortcut.as_deref()).clicked() {
+                        *chosen = Some(action.clone());
+                        ui.close();
+                    }
+                });
+            }
+        }
+    }
+}
+
 struct Panels<'a> {
     editor: &'a mut Editor,
     rs: Option<&'a RenderState>,
