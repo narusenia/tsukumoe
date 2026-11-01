@@ -94,3 +94,30 @@ pub fn caption(painter: &Painter, theme: &Theme, rect: Rect, text: &str) {
         theme.colors.text_muted,
     );
 }
+
+/// The small options box in the top right corner: columns and rows of the
+/// grid `mesh.fill-grid` lays. The values live in the tool, not in the model.
+pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
+    let theme = Theme::get(ctx);
+    let m = theme.metrics;
+    egui::Area::new(egui::Id::unique("tsukumoe-mesh-grid-options"))
+        .fixed_pos(rect.right_top() + vec2(-8.0, 8.0))
+        .pivot(Align2::RIGHT_TOP)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme.colors.surface_raised)
+                .stroke(Stroke::new(1.0, theme.colors.border))
+                .corner_radius(m.radius)
+                .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(tsukumoe_ui::tr(ctx, "mesh-edit-grid"));
+                        let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
+                        ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()));
+                        ui.label("\u{d7}");
+                        ui.add(egui::DragValue::new(&mut tool.grid.1).range(range));
+                    });
+                });
+        });
+}

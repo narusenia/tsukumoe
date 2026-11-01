@@ -306,6 +306,9 @@ impl Viewport {
                 (None, None) => {}
             }
         }
+        if mesh.is_some() {
+            mesh_overlay::grid_options(ui.ctx(), rect, tool);
+        }
         match &mesh {
             Some((_, m)) => {
                 let preview = tool.preview(&m.positions, &mapper);

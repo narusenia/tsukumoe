@@ -82,6 +82,8 @@ impl ToolError {
             Self::Edit(EditError::NotConvex) => "mesh-edit-not-convex",
             Self::Edit(EditError::CannotRemove) => "mesh-edit-cannot-remove",
             Self::Edit(EditError::CannotConnect) => "mesh-edit-cannot-connect",
+            Self::Edit(EditError::BadGrid) => "mesh-edit-grid-size",
+            Self::Edit(EditError::NothingToAdd) => "mesh-edit-grid-empty",
             Self::Edit(EditError::BadVertex | EditError::NoSuchEdge) => "mesh-edit-no-edge",
         }
     }
@@ -110,12 +112,14 @@ enum Gesture {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MeshTool {
     mesh: Option<String>,
     vertices: BTreeSet<u32>,
     edge: Option<(u32, u32)>,
     gesture: Option<Gesture>,
+    /// Columns and rows of the grid `mesh.fill-grid` lays; kept across meshes.
+    pub grid: (u32, u32),
 }
 
 fn dist_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -215,6 +219,18 @@ fn geometry_op(name: &str, label: &str, g: Geometry) -> Op {
     )
 }
 
+impl Default for MeshTool {
+    fn default() -> Self {
+        Self {
+            mesh: None,
+            vertices: BTreeSet::new(),
+            edge: None,
+            gesture: None,
+            grid: (4, 4),
+        }
+    }
+}
+
 impl MeshTool {
     pub fn mesh(&self) -> Option<&str> {
         self.mesh.as_deref()
@@ -225,6 +241,7 @@ impl MeshTool {
         if self.mesh.as_deref() != name {
             *self = Self {
                 mesh: name.map(str::to_owned),
+                grid: self.grid,
                 ..Self::default()
             };
         }
@@ -487,6 +504,13 @@ impl MeshTool {
             return Err(ToolError::NoChange);
         }
         Ok(geometry_op(name, "mesh_retriangulate", out))
+    }
+
+    /// Lays the tool's grid of vertices inside the mesh and re-triangulates it.
+    pub fn fill_grid(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        let out = mesh_edit::fill_grid(g, self.grid.0, self.grid.1)?;
+        self.clear_selection();
+        Ok(geometry_op(name, "mesh_fill_grid", out))
     }
 
     /// Flips the selected edge; the selection is dropped, as the edge is gone.
@@ -783,6 +807,33 @@ mod tests {
     }
 
     #[test]
+    fn fill_grid_uses_the_tools_grid_and_keeps_it_across_meshes() {
+        let (g, _) = square();
+        let mut t = tool();
+        assert_eq!(t.grid, (4, 4));
+        t.grid = (2, 3);
+        let (command, label) = t.fill_grid("Skin", &g).unwrap();
+        assert_eq!(label, "mesh_fill_grid: Skin");
+        let Command::SetMeshGeometry { positions, .. } = command else {
+            panic!("a fill sends SetMeshGeometry");
+        };
+        // 1 x 2 inner points on a 2 x 3 grid.
+        assert_eq!(positions.len(), 4 + 2);
+        t.set_mesh(Some("Other"));
+        assert_eq!(t.grid, (2, 3));
+        t.grid = (0, 3);
+        assert_eq!(
+            t.fill_grid("Skin", &g),
+            Err(ToolError::Edit(EditError::BadGrid))
+        );
+        t.grid = (1, 1);
+        assert_eq!(
+            t.fill_grid("Skin", &g),
+            Err(ToolError::Edit(EditError::NothingToAdd))
+        );
+    }
+
+    #[test]
     fn changing_the_mesh_drops_the_selection_and_sanitize_drops_stale_ids() {
         let (g, m) = square();
         let mut t = tool();
@@ -850,6 +901,8 @@ mod tests {
             EditError::CannotRemove.into(),
             EditError::CannotConnect.into(),
             EditError::NoSuchEdge.into(),
+            EditError::BadGrid.into(),
+            EditError::NothingToAdd.into(),
         ];
         for lang in Language::ALL {
             let t = I18n::new(lang);

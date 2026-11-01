@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 16] = [
+pub const ACTIONS: [&str; 17] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -27,6 +27,7 @@ pub const ACTIONS: [&str; 16] = [
     "mesh.connect",
     "mesh.flip-edge",
     "mesh.retriangulate",
+    "mesh.fill-grid",
     "viewport.zoom-in",
     "viewport.zoom-out",
     "viewport.reset-camera",

@@ -231,6 +231,7 @@ impl Editor {
     /// A mesh tool key (delete, connect, flip) on the mesh being edited.
     fn run_mesh_action(&mut self, ctx: &Context, action: &str) {
         // D also switches to the deformer tool; keep that outside the mesh tool.
+        // G is bound to nothing else.
         if action == "mesh.retriangulate" && self.view.tool != Tool::Mesh {
             self.view.tool = Tool::Deformer;
             return;
@@ -252,6 +253,7 @@ impl Editor {
             "mesh.delete-vertices" => self.mesh_tool.delete_selected(&name, &g),
             "mesh.connect" => self.mesh_tool.connect_selected(&name, &g),
             "mesh.retriangulate" => self.mesh_tool.retriangulate(&name, &g),
+            "mesh.fill-grid" => self.mesh_tool.fill_grid(&name, &g),
             _ => self.mesh_tool.flip_selected(&name, &g),
         };
         self.apply_mesh_op(ctx, op);
@@ -332,7 +334,11 @@ impl Editor {
                     self.pie = Some(tsukumoe_ui::PieMenu::open(at, self.pie_config.items(ctx)));
                 }
             }
-            "mesh.delete-vertices" | "mesh.connect" | "mesh.flip-edge" | "mesh.retriangulate" => {
+            "mesh.delete-vertices"
+            | "mesh.connect"
+            | "mesh.flip-edge"
+            | "mesh.retriangulate"
+            | "mesh.fill-grid" => {
                 self.run_mesh_action(ctx, action);
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
@@ -1578,6 +1584,17 @@ mod tests {
                 .len()
         };
         assert_eq!(count(d), 8);
+        assert!(d.undo());
+        assert_eq!(count(d), 9);
+        // G fills a grid: one more step, named, and one undo returns.
+        assert!(editor.run_action(&ctx, "mesh.fill-grid"));
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.log().len(), steps + 1);
+        assert_eq!(
+            d.name_of(steps).as_deref(),
+            Some("mesh_fill_grid: MeshEditGrid")
+        );
+        assert!(count(d) > 9);
         assert!(d.undo());
         assert_eq!(count(d), 9);
         // Other tools ignore the keys.
