@@ -10,6 +10,12 @@
 //!
 //! `cargo test --release -p tsukumoe-app --test deformer_frame_time -- --nocapture`
 //!
+//! A drag frame also shows the drag live in the picture: the preview is laid
+//! over the compiled model, the frame is evaluated and, when a hardware GPU
+//! is there, the whole model is drawn and waited for. (The reference model's
+//! warps have keyforms, so their base points do not change the picture, but
+//! the work per frame is the same.)
+//!
 //! The reference model's deformers have keyforms, so the release of the drag
 //! is refused by the model; that refusal is checked too.
 
@@ -22,6 +28,7 @@ use tsukumoe_app::mesh_tool::Mapper;
 use tsukumoe_app::panels::deformer_overlay;
 use tsukumoe_app::scene::{Scene, fit_view};
 use tsukumoe_cli::generate::{Table, project};
+use tsukumoe_gpu::{Headless, Texture};
 use tsukumoe_ui::Theme;
 
 const BUDGET: Duration = Duration::from_millis(16);
@@ -35,14 +42,25 @@ fn dragging_warp_points_of_the_reference_model_fits_the_frame_budget() {
         "/../../assets/reference-model/parts.json"
     );
     let table: Table = serde_json::from_slice(&std::fs::read(table).unwrap()).unwrap();
-    let (_, model) = project(&table).unwrap();
+    let (project, model) = project(&table).unwrap();
     let (name, _) = model
         .warps()
         .iter()
         .map(|(_, n, w)| (n.to_owned(), w.base_points.len()))
         .max_by_key(|&(_, points)| points)
         .expect("the reference model has warp deformers");
-    let scene = Scene::new(&model).unwrap();
+    let mut scene = Scene::new(&model).unwrap();
+    let full_view = fit_view(scene.bounds(), SIZE.0 as u32, SIZE.1 as u32);
+    let mut gpu = Headless::hardware().ok();
+    if let Some(g) = &mut gpu {
+        let textures: Vec<Texture> = project
+            .files
+            .iter()
+            .filter(|(p, _)| p.starts_with("textures/") && p.ends_with(".png"))
+            .map(|(_, b)| Texture::from_png(b).unwrap())
+            .collect();
+        g.set_textures(&textures).unwrap();
+    }
     let mapper = Mapper {
         origin: [0.0, 0.0],
         size: [SIZE.0, SIZE.1],
@@ -76,6 +94,16 @@ fn dragging_warp_points_of_the_reference_model_fits_the_frame_budget() {
         } as f32;
         tool.drag([start[0] + sweep, start[1] + sweep * 0.5]);
         let preview = tool.preview(&shape, &mapper);
+        // The drag live in the picture: preview, evaluate, draw.
+        let live = tool.dragging(&shape, &mapper).map(|s| s.as_preview(&name));
+        scene.set_preview(live.as_ref());
+        scene.advance(1.0 / 60.0);
+        if let Some(g) = &mut gpu {
+            let list = scene.frame.draw_list(&scene.model);
+            g.draw(&list, full_view, true, SIZE.0 as u32, SIZE.1 as u32)
+                .unwrap();
+            g.wait().unwrap();
+        }
         let mut output = ctx.run_ui(RawInput::default(), |ui| {
             let painter = ui
                 .ctx()
@@ -105,8 +133,13 @@ fn dragging_warp_points_of_the_reference_model_fits_the_frame_budget() {
     assert!(refused.contains("keyforms"), "{refused}");
 
     eprintln!(
-        "deformer_frame_time: '{name}' has {} points; drag frame median {:.2} ms, p99 {:.2} ms, max {:.2} ms (budget {} ms)",
+        "deformer_frame_time: '{name}' has {} points; GPU {}; drag frame median {:.2} ms, p99 {:.2} ms, max {:.2} ms (budget {} ms)",
         shape.world_points().len(),
+        if gpu.is_some() {
+            "included"
+        } else {
+            "not available"
+        },
         p(0.5).as_secs_f64() * 1e3,
         p(0.99).as_secs_f64() * 1e3,
         p(1.0).as_secs_f64() * 1e3,
