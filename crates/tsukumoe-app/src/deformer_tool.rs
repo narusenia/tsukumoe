@@ -17,10 +17,15 @@ use tsukumoe_core::elements::Point;
 use tsukumoe_core::model::Model;
 use tsukumoe_core::rig::DeformerRef;
 
+use crate::deformer_ops::OpError;
 use crate::mesh_tool::{Mapper, Op};
 
 /// The actions of the deformer tool's right-click menu.
-pub const MENU_ACTIONS: [&str; 2] = ["deformer.create-warp", "deformer.create-rotation"];
+pub const MENU_ACTIONS: [&str; 3] = [
+    "deformer.create-warp",
+    "deformer.create-rotation",
+    "deformer.reset",
+];
 
 /// A control point or a handle is picked within this many points of the pointer.
 pub const PICK_RADIUS: f32 = 8.0;
@@ -246,6 +251,10 @@ pub struct DeformerTool {
     gesture: Option<Gesture>,
     /// Rows and columns of the warp `deformer.create-warp` makes; kept across deformers.
     pub grid: (u32, u32),
+    /// Cmd / Ctrl is held: dragging a rotation's origin moves everything
+    /// under it too. Without it only the axis moves and what hangs from the
+    /// rotation stays where it is drawn. Set by the viewport each frame.
+    pub whole: bool,
 }
 
 impl Default for DeformerTool {
@@ -255,6 +264,7 @@ impl Default for DeformerTool {
             points: BTreeSet::new(),
             gesture: None,
             grid: (4, 4),
+            whole: false,
         }
     }
 }
@@ -497,6 +507,55 @@ impl DeformerTool {
                 Some((moved.command(name), format!("{label}: {name}")))
             }
         }
+    }
+
+    /// While the origin of a rotation is dragged and the whole is not moved,
+    /// the commands a release would send (the axis and the corrected children).
+    pub fn axis_drag(
+        &self,
+        name: &str,
+        shape: &Shape,
+        m: &Mapper,
+        model: &Model,
+    ) -> Option<Result<Op, OpError>> {
+        let Some(Gesture::Move {
+            grab: Grab::Handle(Handle::Origin),
+            from,
+            to,
+        }) = self.gesture
+        else {
+            return None;
+        };
+        if self.whole || from == to {
+            return None;
+        }
+        let Shape::Rotation { base, .. } = shape.dragged(
+            Grab::Handle(Handle::Origin),
+            &self.points,
+            m.to_model(from),
+            m.to_model(to),
+        )?
+        else {
+            return None;
+        };
+        Some(crate::deformer_ops::move_axis(model, name, base.origin))
+    }
+
+    /// [`Self::release`] that knows the model: dragging a rotation's origin
+    /// moves the axis only (unless `whole`), so it needs the model to keep
+    /// what hangs from it in place.
+    pub fn release_in(
+        &mut self,
+        name: &str,
+        shape: &Shape,
+        m: &Mapper,
+        model: &Model,
+    ) -> Option<Result<Op, OpError>> {
+        if let Some(op) = self.axis_drag(name, shape, m, model) {
+            self.gesture = None;
+            return Some(op);
+        }
+        self.release(name, shape, m).map(Ok)
     }
 
     /// The shape a release now would store, while a move is on.
@@ -851,5 +910,111 @@ mod tests {
             name_of(&m, DeformerRef::Warp(m.warps().find("Warp").unwrap())).as_deref(),
             Some("Warp")
         );
+    }
+
+    /// The model with a mesh hanging from the rotation, drawn around (7, 3).
+    fn with_child() -> Model {
+        let mut m = model();
+        m.apply(Command::AddMesh {
+            name: "Child".into(),
+            part: "P".into(),
+            positions: vec![[1.0, 0.0], [2.0, 0.0], [1.0, 1.0]],
+            uvs: vec![[0.0, 0.0]; 3],
+            indices: vec![0, 1, 2],
+        })
+        .unwrap();
+        m.apply(Command::SetMeshParent {
+            name: "Child".into(),
+            parent: Some("Rot".into()),
+        })
+        .unwrap();
+        m.apply(Command::SetRotationBase {
+            name: "Rot".into(),
+            base: RotationBase {
+                origin: [6.0, 2.0],
+                angle_degrees: 30.0,
+                scale: 1.5,
+                reflect_x: false,
+                reflect_y: true,
+            },
+        })
+        .unwrap();
+        m
+    }
+
+    fn child_drawn(m: &Model) -> Vec<[f32; 2]> {
+        let mesh = m.meshes().get(m.meshes().find("Child").unwrap()).unwrap();
+        let space = Space::of(m, mesh.parent).unwrap();
+        mesh.positions
+            .iter()
+            .map(|&p| space.point_to_world(p))
+            .collect()
+    }
+
+    #[test]
+    fn dragging_the_origin_moves_the_axis_and_keeps_the_children_where_they_are() {
+        let mut m = with_child();
+        let before = child_drawn(&m);
+        let shape = Shape::of(&m, "Rot", 1.0).unwrap();
+        let mut t = tool("Rot");
+        t.press(&shape, &mapper(), at(6.0, 2.0), false);
+        t.drag(at(6.8, 2.6));
+        // The preview and the commit are the same batch, the child's own coordinates included.
+        let live = t.axis_drag("Rot", &shape, &mapper(), &m).unwrap().unwrap();
+        assert!(matches!(&live.0, Command::Batch { commands } if commands.len() == 2));
+        let (command, label) = t.release_in("Rot", &shape, &mapper(), &m).unwrap().unwrap();
+        assert_eq!(label, "deformer_move_axis: Rot");
+        assert_eq!(command, live.0);
+        m.apply(command).unwrap();
+        let origin = m
+            .rotations()
+            .get(m.rotations().find("Rot").unwrap())
+            .unwrap()
+            .base
+            .origin;
+        assert!((origin[0] - 6.8).abs() < 1e-3 && (origin[1] - 2.6).abs() < 1e-3);
+        for (a, b) in before.iter().zip(child_drawn(&m)) {
+            assert!((a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3);
+        }
+        assert!(m.undo());
+        assert_eq!(child_drawn(&m), before);
+    }
+
+    #[test]
+    fn with_cmd_or_ctrl_held_the_whole_rotation_moves_as_before() {
+        let mut m = with_child();
+        let before = child_drawn(&m);
+        let shape = Shape::of(&m, "Rot", 1.0).unwrap();
+        let mut t = tool("Rot");
+        t.whole = true;
+        t.press(&shape, &mapper(), at(6.0, 2.0), false);
+        t.drag(at(6.8, 2.6));
+        assert!(t.axis_drag("Rot", &shape, &mapper(), &m).is_none());
+        let (command, label) = t.release_in("Rot", &shape, &mapper(), &m).unwrap().unwrap();
+        assert_eq!(label, "deformer_move_origin: Rot");
+        assert!(matches!(command, Command::SetRotationBase { .. }));
+        m.apply(command).unwrap();
+        // The child went with it.
+        let after = child_drawn(&m);
+        assert!((after[0][0] - before[0][0] - 0.8).abs() < 1e-3);
+        assert!((after[0][1] - before[0][1] - 0.6).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_other_handles_and_the_grid_are_not_affected_and_a_keyed_child_refuses() {
+        let m = with_child();
+        let shape = Shape::of(&m, "Rot", 1.0).unwrap();
+        let mut t = tool("Rot");
+        // The angle handle sends a plain command; there is no axis drag.
+        let (_, handle) = shape.handles()[1];
+        t.press(&shape, &mapper(), mapper().to_screen(handle), false);
+        t.drag(at(5.0, 4.0));
+        assert!(t.axis_drag("Rot", &shape, &mapper(), &m).is_none());
+        let (command, label) = t.release_in("Rot", &shape, &mapper(), &m).unwrap().unwrap();
+        assert_eq!(label, "deformer_rotate: Rot");
+        assert!(matches!(command, Command::SetRotationBase { .. }));
+        // A click is not a drag.
+        t.press(&shape, &mapper(), at(6.0, 2.0), false);
+        assert!(t.release_in("Rot", &shape, &mapper(), &m).is_none());
     }
 }

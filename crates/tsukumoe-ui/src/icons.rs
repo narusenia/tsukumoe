@@ -81,6 +81,7 @@ icons! {
     ChevronsUpDown => "chevrons-up-down",
     ChevronsDownUp => "chevrons-down-up",
     Locate => "locate",
+    RotateCcw => "rotate-ccw",
     Sparkles => "sparkles",
 }
 

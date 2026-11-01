@@ -414,6 +414,7 @@ impl Editor {
                     self.toasts.push(ctx, Tone::Neutral, text);
                 }
             }
+            tree::Out::Reset(items) => self.reset_deformers(ctx, &items),
             tree::Out::Delete(items) => {
                 let Some(doc) = &self.doc else { return };
                 let plan = tree_ops::delete_plan(doc.dispatcher.model(), &items);
@@ -455,6 +456,32 @@ impl Editor {
                     self.submit_labeled(ctx, command, Some(label));
                 }
             }
+        }
+    }
+
+    /// Moves the origin of the rotation `name` and keeps what hangs from it where it is drawn.
+    pub fn move_axis(&mut self, ctx: &Context, name: &str, origin: [f32; 2]) {
+        let Some(doc) = &self.doc else { return };
+        match deformer_ops::move_axis(doc.dispatcher.model(), name, origin) {
+            Ok((command, label)) => {
+                self.submit_labeled(ctx, command, Some(label));
+            }
+            Err(e) => {
+                let text = format!("{} ({e})", tr(ctx, e.key()));
+                self.toasts.push(ctx, Tone::Error, text);
+            }
+        }
+    }
+
+    /// Puts the base shape of the deformers in `items` back to its initial
+    /// state, as one undo step.
+    pub fn reset_deformers(&mut self, ctx: &Context, items: &[Selection]) {
+        let Some(doc) = &self.doc else { return };
+        match deformer_ops::reset(doc.dispatcher.model(), items) {
+            Ok((command, label)) => {
+                self.submit_labeled(ctx, command, Some(label));
+            }
+            Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
         }
     }
 
@@ -609,6 +636,10 @@ impl Editor {
             }
             "deformer.create-warp" | "deformer.create-rotation" => {
                 self.run_deformer_action(ctx, action);
+            }
+            "deformer.reset" => {
+                let items = self.view.selected();
+                self.reset_deformers(ctx, &items);
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
                 let f = if action.ends_with("in") { 1.25 } else { 0.8 };
@@ -1577,12 +1608,21 @@ impl PanelHost for Panels<'_> {
             }
             "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
             "inspector" => {
-                let command = inspector::show(
+                let mut requests = inspector::Requests::default();
+                let command = inspector::show_with(
                     ui,
                     doc.dispatcher.model(),
                     editor.view.selection.as_ref(),
                     Some(&editor.deformer_tool),
+                    &mut requests,
                 );
+                if let Some((name, origin)) = requests.move_axis.take() {
+                    editor.move_axis(&ctx, &name, origin);
+                }
+                if requests.reset {
+                    let items = editor.view.selected();
+                    editor.reset_deformers(&ctx, &items);
+                }
                 if let Some(command) = command {
                     editor.submit(&ctx, command);
                 }
@@ -2301,10 +2341,160 @@ mod tests {
     }
 
     #[test]
+    fn reset_puts_the_selected_deformers_back_in_one_step_and_says_when_there_is_nothing_to_do() {
+        use tsukumoe_core::command::{Command, RotationBase};
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        for command in [
+            Command::AddPart {
+                name: "ResetPart".into(),
+                parent: None,
+            },
+            Command::AddWarpDeformer {
+                name: "ResetWarp".into(),
+                part: "ResetPart".into(),
+                parent: None,
+                rows: 1,
+                columns: 1,
+                base_points: vec![[0.0, 0.0], [2.0, 0.3], [0.0, 2.0], [2.0, 2.0]],
+            },
+            Command::AddRotationDeformer {
+                name: "ResetTurn".into(),
+                part: "ResetPart".into(),
+                parent: None,
+                base: RotationBase {
+                    origin: [1.0, 1.0],
+                    angle_degrees: 25.0,
+                    scale: 1.0,
+                    reflect_x: false,
+                    reflect_y: false,
+                },
+            },
+        ] {
+            assert!(editor.submit(&ctx, command));
+        }
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let base = steps(&editor);
+        // Nothing selected: a message, no step.
+        assert!(editor.run_action(&ctx, "deformer.reset"));
+        assert_eq!(steps(&editor), base);
+        // Both selected: one step.
+        editor.view.select_all(vec![
+            Selection::Warp("ResetWarp".into()),
+            Selection::Rotation("ResetTurn".into()),
+        ]);
+        assert!(editor.run_action(&ctx, "deformer.reset"));
+        assert_eq!(steps(&editor), base + 1);
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.name_of(base).as_deref(), Some("deformer_reset: 2 items"));
+        let turn = d
+            .model()
+            .rotations()
+            .get(d.model().rotations().find("ResetTurn").unwrap())
+            .unwrap();
+        assert_eq!(
+            (turn.base.angle_degrees, turn.base.origin),
+            (0.0, [1.0, 1.0])
+        );
+        let warp = d
+            .model()
+            .warps()
+            .get(d.model().warps().find("ResetWarp").unwrap())
+            .unwrap();
+        assert_eq!(warp.base_points[1], [2.0, 0.0]);
+        // Reset again: already initial, so nothing happens.
+        assert!(editor.run_action(&ctx, "deformer.reset"));
+        assert_eq!(steps(&editor), base + 1);
+        // The tree's menu asks the same way.
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert!(d.undo());
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Reset(vec![Selection::Warp("ResetWarp".into())]),
+        );
+        assert_eq!(steps(&editor), base + 1);
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        assert_eq!(
+            d.name_of(base).as_deref(),
+            Some("deformer_reset: ResetWarp")
+        );
+    }
+
+    #[test]
+    fn moving_an_axis_is_one_named_step_that_keeps_the_children_and_a_failure_says_why() {
+        use tsukumoe_core::command::{Command, RotationBase};
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        for command in [
+            Command::AddPart {
+                name: "AxisPart".into(),
+                parent: None,
+            },
+            Command::AddRotationDeformer {
+                name: "AxisRot".into(),
+                part: "AxisPart".into(),
+                parent: None,
+                base: RotationBase {
+                    origin: [1.0, 1.0],
+                    angle_degrees: 30.0,
+                    scale: 1.0,
+                    reflect_x: false,
+                    reflect_y: false,
+                },
+            },
+            Command::AddMesh {
+                name: "AxisMesh".into(),
+                part: "AxisPart".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            },
+            Command::SetMeshParent {
+                name: "AxisMesh".into(),
+                parent: Some("AxisRot".into()),
+            },
+        ] {
+            assert!(editor.submit(&ctx, command));
+        }
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let base = steps(&editor);
+        let drawn = |e: &Editor| {
+            let m = e.doc.as_ref().unwrap().dispatcher.model();
+            let mesh = m
+                .meshes()
+                .get(m.meshes().find("AxisMesh").unwrap())
+                .unwrap();
+            let space = tsukumoe_core::deformer_space::Space::of(m, mesh.parent).unwrap();
+            mesh.positions
+                .iter()
+                .map(|&p| space.point_to_world(p))
+                .collect::<Vec<_>>()
+        };
+        let before = drawn(&editor);
+        editor.move_axis(&ctx, "AxisRot", [3.0, 0.5]);
+        assert_eq!(steps(&editor), base + 1);
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        assert_eq!(
+            d.name_of(base).as_deref(),
+            Some("deformer_move_axis: AxisRot")
+        );
+        for (a, b) in before.iter().zip(drawn(&editor)) {
+            assert!((a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3);
+        }
+        // An unknown rotation: a message, no step.
+        editor.move_axis(&ctx, "Nope", [0.0, 0.0]);
+        assert_eq!(steps(&editor), base + 1);
+    }
+
+    #[test]
     fn every_menu_action_is_a_known_action() {
         let ctx = Context::default();
         let mut editor = open_minimal();
         for action in crate::mesh_tool::MENU_ACTIONS {
+            assert!(editor.run_action(&ctx, action), "{action}");
+        }
+        for action in crate::deformer_tool::MENU_ACTIONS {
+            assert!(actions::ACTIONS.contains(&action), "{action}");
             assert!(editor.run_action(&ctx, action), "{action}");
         }
     }

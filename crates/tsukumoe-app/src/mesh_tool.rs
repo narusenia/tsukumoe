@@ -71,6 +71,8 @@ pub enum ToolError {
     /// The texture of the mesh could not be read.
     NoTexture,
     Contour(ContourError),
+    /// A deformer edit was refused; the translation key says why.
+    Deformer(&'static str),
     Edit(EditError),
 }
 
@@ -83,6 +85,7 @@ impl ToolError {
             Self::NeedEdge => "mesh-edit-need-edge",
             Self::NoChange => "mesh-edit-no-change",
             Self::NoTexture => "mesh-edit-no-texture",
+            Self::Deformer(key) => key,
             Self::Contour(ContourError::BadImage) => "mesh-edit-no-texture",
             Self::Contour(ContourError::BadParams) => "mesh-edit-contour-params",
             Self::Contour(ContourError::Empty) => "mesh-edit-contour-empty",
