@@ -7,6 +7,7 @@
 pub mod app;
 pub mod dispatcher;
 pub mod editor;
+pub mod panels;
 pub mod project;
 pub mod settings;
 pub mod workspace;

@@ -113,6 +113,29 @@ impl Editor {
         self.persist_state()
     }
 
+    /// The single entry for UI edits: sends `command` to the dispatcher and
+    /// shows a failure as an error toast (the model stays as it was).
+    pub fn submit(&mut self, ctx: &Context, command: tsukumoe_core::command::Command) -> bool {
+        let Some(doc) = self.doc.as_mut() else {
+            return false;
+        };
+        match doc.dispatcher.submit(command) {
+            Ok(()) => true,
+            Err(e) => {
+                self.toasts.push(ctx, Tone::Error, e);
+                false
+            }
+        }
+    }
+
+    pub fn undo(&mut self) -> bool {
+        self.doc.as_mut().is_some_and(|d| d.dispatcher.undo())
+    }
+
+    pub fn redo(&mut self) -> bool {
+        self.doc.as_mut().is_some_and(|d| d.dispatcher.redo())
+    }
+
     pub fn switch_workspace(&mut self, workspace: Workspace) {
         if self.workspace != workspace {
             self.workspace = workspace;
@@ -193,6 +216,23 @@ impl Editor {
                             self.report(&ctx, r, Some(ok));
                             ui.close();
                         }
+                    }
+                });
+            });
+            ui.menu_button(t("menu-edit"), |ui| {
+                let (can_undo, can_redo) = self.doc.as_ref().map_or((false, false), |d| {
+                    (d.dispatcher.can_undo(), d.dispatcher.can_redo())
+                });
+                ui.add_enabled_ui(can_undo, |ui| {
+                    if tsukumoe_ui::menu_item(ui, &t("menu-undo"), None).clicked() {
+                        self.undo();
+                        ui.close();
+                    }
+                });
+                ui.add_enabled_ui(can_redo, |ui| {
+                    if tsukumoe_ui::menu_item(ui, &t("menu-redo"), None).clicked() {
+                        self.redo();
+                        ui.close();
                     }
                 });
             });
@@ -347,9 +387,17 @@ impl PanelHost for Panels<'_> {
         tr(ctx, &format!("panel-{id}"))
     }
 
-    fn ui(&mut self, ui: &mut Ui, _id: &str) {
-        let _ = &self.editor;
-        hint(ui, tr(ui.ctx(), "panel-empty"));
+    fn ui(&mut self, ui: &mut Ui, id: &str) {
+        let ctx = ui.ctx().clone();
+        match (id, self.editor.doc.as_mut()) {
+            ("history", Some(doc)) => crate::panels::history::show(ui, &mut doc.dispatcher),
+            ("history", None) => {
+                hint(ui, tr(&ctx, "history-empty"));
+            }
+            _ => {
+                hint(ui, tr(&ctx, "panel-empty"));
+            }
+        }
     }
 }
 
@@ -434,6 +482,39 @@ mod tests {
             &crate::workspace::builtin_layout(Preset::Cubism, Workspace::Modeling)
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn edits_go_through_one_door_and_failures_surface() {
+        use tsukumoe_core::command::Command;
+        let mut editor = Editor::new(None);
+        let ctx = Context::default();
+        assert!(!editor.submit(
+            &ctx,
+            Command::AddPart {
+                name: "x".into(),
+                parent: None
+            }
+        ));
+        editor
+            .open(
+                &Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../tsukumoe-format/tests/fixtures/minimal"),
+            )
+            .unwrap();
+        let add = || Command::AddPart {
+            name: "P".into(),
+            parent: None,
+        };
+        assert!(editor.submit(&ctx, add()));
+        let parts = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.model().parts().len();
+        let n = parts(&editor);
+        assert!(!editor.submit(&ctx, add()), "duplicate name fails");
+        assert_eq!(parts(&editor), n);
+        assert!(!editor.toasts.is_empty());
+        assert!(editor.doc.as_ref().unwrap().dispatcher.error().is_some());
+        assert!(editor.undo() && parts(&editor) == n - 1);
+        assert!(editor.redo() && parts(&editor) == n);
     }
 
     #[test]
