@@ -156,3 +156,5 @@ psd-row-add-layer = Add layer
 psd-row-image = Update image
 psd-row-updated = Update values
 psd-row-missing = Gone from the PSD
+tree-hide = Hide
+tree-show = Show

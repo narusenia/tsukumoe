@@ -949,7 +949,11 @@ impl PanelHost for Panels<'_> {
         };
         match id {
             "history" => history::show(ui, &mut doc.dispatcher),
-            "tree" => tree::show(ui, doc.dispatcher.model(), &mut editor.view),
+            "tree" => {
+                if let Some(command) = tree::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    editor.submit(&ctx, command);
+                }
+            }
             "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
             "inspector" => {
                 let command =

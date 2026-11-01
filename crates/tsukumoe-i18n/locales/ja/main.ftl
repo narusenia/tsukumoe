@@ -152,3 +152,5 @@ psd-row-add-layer = レイヤを追加
 psd-row-image = 画像を更新
 psd-row-updated = 値を更新
 psd-row-missing = PSD から消えた
+tree-hide = 隠す
+tree-show = 表示する
