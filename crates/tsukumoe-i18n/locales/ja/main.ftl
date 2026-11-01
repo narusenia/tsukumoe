@@ -172,6 +172,7 @@ tree-open-all = すべて開く
 tree-close-all = すべて閉じる
 tree-open-selection = 選択を開く
 tree-selected-count = { $count } 選択中
+tree-rename-external = 名前を変更しました。旧名で参照している外部（ランタイム API、書き出した .tmod）は更新が必要です。
 tree-rename = 名前を変更
 tree-duplicate = 複製
 tree-delete = 削除

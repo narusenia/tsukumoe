@@ -177,6 +177,7 @@ tree-open-all = Open all
 tree-close-all = Close all
 tree-open-selection = Show selection
 tree-selected-count = { $count } selected
+tree-rename-external = Renamed. A program that uses the old name (the runtime API, an exported .tmod) has to be updated.
 tree-rename = Rename
 tree-duplicate = Duplicate
 tree-delete = Delete

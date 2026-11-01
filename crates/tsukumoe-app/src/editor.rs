@@ -402,10 +402,16 @@ impl Editor {
                 let command = tree_ops::rename_command(kind, &from, &to);
                 let old = tree_ops::renamed(kind, &from);
                 let was_selected = self.view.is_selected(&old);
-                if self.submit_labeled(ctx, command, Some(format!("tree_rename: {from} -> {to}")))
-                    && was_selected
-                {
+                let renamed =
+                    self.submit_labeled(ctx, command, Some(format!("tree_rename: {from} -> {to}")));
+                if renamed && was_selected {
                     self.view.select_only(tree_ops::renamed(kind, &to));
+                }
+                // Anything outside the editor that names it (the runtime API, a .tmod) is
+                // left as it was: say so, once.
+                if renamed {
+                    let text = tr(ctx, "tree-rename-external");
+                    self.toasts.push(ctx, Tone::Neutral, text);
                 }
             }
             tree::Out::Delete(items) => {
@@ -2080,6 +2086,8 @@ mod tests {
             d.name_of(base).as_deref(),
             Some("tree_rename: TreeMesh -> Renamed")
         );
+        // A rename says once that outside users of the old name are not updated.
+        assert!(!editor.toasts.is_empty());
         // A taken name is refused and the model stays.
         editor.apply_tree_out(
             &ctx,
