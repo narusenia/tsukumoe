@@ -31,6 +31,7 @@ wgpu.workspace = true
 tsukumoe-cli.workspace = true
 egui_kittest.workspace = true
 tsukumoe-i18n.workspace = true
+egui_extras.workspace = true
 pollster.workspace = true
 
 [lints]
