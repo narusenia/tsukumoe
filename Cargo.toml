@@ -41,7 +41,8 @@ cc = "1"
 jsonschema = { version = "0.33", default-features = false }
 syphon-wgpu = "0.4.3"
 syphon-core = "0.4.0"
-spout-rs = "0.1.3"
+spout-rs = { version = "0.2.0", features = ["vendored"] }
+windows = { version = "0.62", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

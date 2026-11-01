@@ -23,13 +23,14 @@ syphon-core = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 spout-rs = { workspace = true, optional = true }
+windows = { workspace = true, optional = true }
 
 [features]
 # Publishes the output as a Syphon server (macOS; needs Syphon.framework to link and run).
 syphon = ["dep:syphon-wgpu", "dep:syphon-core"]
-# Publishes the output as a Spout2 sender (Windows; build needs SPOUT2_SDK_DIR and
-# SPOUT2_LIB_DIR, run needs Spout.dll).
-spout = ["dep:spout-rs"]
+# Publishes the output as a Spout2 sender (Windows; spout-rs compiles Spout2 from
+# its vendored sources, so the build needs MSVC C++ tools and nothing else).
+spout = ["dep:spout-rs", "dep:windows"]
 
 [dev-dependencies]
 pollster.workspace = true

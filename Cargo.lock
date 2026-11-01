@@ -3440,9 +3440,9 @@ dependencies = [
 
 [[package]]
 name = "spout-rs"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbd7c18487341731b40034e2590641645a787b6034a4ba7a79937aae4d18c5a8"
+checksum = "75ba9b1769e162537a2de87ef76926dd815e58ac8c3f3c03954243a38fef7677"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -3895,6 +3895,7 @@ dependencies = [
  "tsukumoe-tracking",
  "tsukumoe-ui",
  "wgpu",
+ "windows",
 ]
 
 [[package]]
