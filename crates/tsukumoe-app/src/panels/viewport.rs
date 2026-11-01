@@ -23,6 +23,7 @@ use crate::panels::{deformer_overlay, mesh_overlay};
 use crate::project::Document;
 use crate::scene::{Scene, fit_view};
 use crate::view::{Selection, ViewState};
+use tsukumoe_core::deformer_space::Space;
 
 /// How long to keep drawing after a change, so physics can settle.
 const SETTLE: Duration = Duration::from_secs(3);
@@ -435,6 +436,21 @@ impl Viewport {
         let mesh = tool
             .mesh()
             .and_then(|n| Some((n.to_owned(), model.meshes().get(model.meshes().find(n)?)?)));
+        // The vertices as drawn (deformers, keyforms and parameters applied) are
+        // what the pointer meets; the stored ones are only for the commands.
+        let shown: Vec<[f32; 2]> = mesh
+            .as_ref()
+            .map(|(n, m)| {
+                scene
+                    .drawn_positions(n)
+                    .filter(|p| p.len() == m.positions.len())
+                    .unwrap_or_else(|| m.positions.clone())
+            })
+            .unwrap_or_default();
+        let space = mesh
+            .as_ref()
+            .and_then(|(_, m)| Space::of(model, m.parent).ok())
+            .unwrap_or(Space::Drawing);
         // The edited mesh is drawn again above the veil so it stays bright.
         let focus = self
             .focus
@@ -458,7 +474,7 @@ impl Viewport {
                 && response.drag_started_by(primary)
                 && let Some(at) = pressed
             {
-                tool.press(&mesh.positions, &mesh.indices, &mapper, at, modifiers.shift);
+                tool.press(&shown, &mesh.indices, &mapper, at, modifiers.shift);
             }
             if response.dragged_by(primary)
                 && let Some(at) = now
@@ -466,7 +482,7 @@ impl Viewport {
                 tool.drag(at);
             }
             if response.drag_stopped_by(primary)
-                && let Some(op) = tool.release(name, &mesh.positions, &mapper)
+                && let Some(op) = tool.release_in(name, &mesh.positions, &shown, &mapper, &space)
             {
                 ops.push(Ok(op));
             }
@@ -475,11 +491,13 @@ impl Viewport {
             && response.clicked_by(primary)
             && let Some(at) = now
         {
-            let positions = mesh.as_ref().map_or(&[][..], |(_, m)| &m.positions[..]);
+            let positions = &shown[..];
             let indices = mesh.as_ref().map_or(&[][..], |(_, m)| &m.indices[..]);
             let empty = mesh_tool::hit_test(positions, indices, &mapper, at) == Hit::Nothing;
             let picked = (empty && !modifiers.shift && !modifiers.command)
-                .then(|| mesh_tool::pick_mesh(model, mapper.to_model(at)))
+                .then(|| {
+                    mesh_tool::pick_drawn(&scene.frame.draw_list(&scene.model), mapper.to_model(at))
+                })
                 .flatten();
             match (&mesh, picked) {
                 (Some((name, _)), Some(p)) if &p != name => {
@@ -492,7 +510,7 @@ impl Viewport {
                 }
                 (Some((name, _)), _) if modifiers.command => {
                     if let Some(g) = mesh_tool::geometry_of(model, name) {
-                        ops.push(tool.add_at(name, &g, &mapper, at));
+                        ops.push(tool.add_at_in(name, &g, &shown, &mapper, at, &space));
                     }
                 }
                 (Some(_), _) => tool.click(positions, indices, &mapper, at, modifiers.shift),
@@ -508,7 +526,7 @@ impl Viewport {
             if response.secondary_clicked()
                 && let Some(at) = arrow(response.interact_pointer_pos())
             {
-                tool.context_select(&m.positions, &m.indices, &mapper, at);
+                tool.context_select(&shown, &m.indices, &mapper, at);
             }
             let ctx = ui.ctx().clone();
             response.context_menu(|ui| {
@@ -523,12 +541,12 @@ impl Viewport {
         }
         match &mesh {
             Some((_, m)) => {
-                let preview = tool.preview(&m.positions, &mapper);
+                let preview = tool.preview(&shown, &mapper);
                 mesh_overlay::paint(
                     &painter,
                     &theme,
                     &mapper,
-                    &m.positions,
+                    &shown,
                     &m.indices,
                     tool,
                     preview.as_deref(),

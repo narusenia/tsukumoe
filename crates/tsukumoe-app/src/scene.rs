@@ -84,6 +84,14 @@ impl Scene {
         }
     }
 
+    /// The vertices of the mesh `name` as drawn now: deformers, keyforms and
+    /// the current parameter values applied.
+    pub fn drawn_positions(&self, name: &str) -> Option<Vec<[f32; 2]>> {
+        let mesh = self.model.mesh_index(name)?;
+        let list = self.frame.draw_list(&self.model);
+        Some(list.drawable(mesh).positions.as_chunks::<2>().0.to_vec())
+    }
+
     pub fn advance(&mut self, dt: f32) {
         self.frame.advance(&self.model, dt);
     }
@@ -144,5 +152,76 @@ mod tests {
         view.reset_params();
         scene.apply(&view);
         assert_eq!(scene.frame.parameters_mut()[a], 0.25);
+    }
+
+    #[test]
+    fn the_drawn_positions_follow_a_keyform_driven_warp_and_the_parameter() {
+        use tsukumoe_core::elements::{Parameter, Part};
+        use tsukumoe_core::keyform::{Axis, Binding, KeyformGrid};
+        use tsukumoe_core::model::ModelParts;
+        use tsukumoe_core::rig::{ArtMesh, DeformerRef, WarpDeformer, WarpKeyform};
+        let mut parts = ModelParts::default();
+        let p = parts
+            .parameters
+            .insert("P", Parameter::new(0.0, 1.0, 0.0))
+            .unwrap();
+        let part = parts.parts.insert("Part", Part::default()).unwrap();
+        let binding = parts.bindings.insert(
+            Binding::new(vec![Axis {
+                parameter: p,
+                keys: vec![0.0, 1.0],
+            }])
+            .unwrap(),
+        );
+        let flat = vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]];
+        // At P = 1 the whole grid slides two units to the right.
+        let moved: Vec<[f32; 2]> = flat.iter().map(|q| [q[0] + 2.0, q[1]]).collect();
+        let key = |points: Vec<[f32; 2]>| WarpKeyform {
+            points,
+            opacity: 1.0,
+        };
+        let warp = parts
+            .warps
+            .insert(
+                "Warp",
+                WarpDeformer {
+                    part,
+                    parent: None,
+                    rows: 1,
+                    columns: 1,
+                    bezier: false,
+                    base_points: flat.clone(),
+                    keyforms: Some(KeyformGrid::new(binding, vec![key(flat), key(moved)])),
+                },
+            )
+            .unwrap();
+        let mut mesh = ArtMesh::new(
+            part,
+            vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            vec![[0.0, 0.0]; 3],
+            vec![0, 1, 2],
+        );
+        mesh.parent = Some(DeformerRef::Warp(warp));
+        parts.meshes.insert("Skin", mesh).unwrap();
+        let model = Model::from_parts(parts).unwrap();
+        let mut scene = Scene::new(&model).unwrap();
+        let mut view = ViewState::default();
+        let at_rest = scene.drawn_positions("Skin").unwrap();
+        assert_eq!(at_rest[1], [2.0, 0.0]);
+        // Moving the parameter moves where the vertices are drawn.
+        let param = model
+            .parameters()
+            .get(model.parameters().find("P").unwrap())
+            .unwrap();
+        view.set_param("P", param, 1.0);
+        scene.apply(&view);
+        scene.advance(0.0);
+        let moved = scene.drawn_positions("Skin").unwrap();
+        assert!(
+            (moved[1][0] - 4.0).abs() < 1e-4 && moved[1][1].abs() < 1e-4,
+            "{:?}",
+            moved[1]
+        );
+        assert!(scene.drawn_positions("Nope").is_none());
     }
 }

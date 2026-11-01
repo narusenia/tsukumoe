@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 
 use tsukumoe_core::command::Command;
 use tsukumoe_core::contour::{self, Alpha, ContourError, ContourParams};
+use tsukumoe_core::deformer_space::Space;
 use tsukumoe_core::elements::Point;
 use tsukumoe_core::mesh_edit::{self, EditError, Geometry};
 use tsukumoe_core::model::Model;
@@ -251,6 +252,31 @@ fn shown(model: &Model, mesh: &ArtMesh) -> bool {
     shown
 }
 
+/// The visible mesh drawn in front at `at` (a point of the drawing space), by
+/// name, from the evaluated draw list: where the pointer sees it, deformers
+/// and parameters included.
+pub fn pick_drawn(list: &tsukumoe_core::draw::DrawList, at: Point) -> Option<String> {
+    let side =
+        |a: [f32; 2], b: [f32; 2]| (b[0] - a[0]) * (at[1] - a[1]) - (b[1] - a[1]) * (at[0] - a[0]);
+    let order = list.order();
+    order.iter().rev().find_map(|&mesh| {
+        let d = list.drawable(mesh as usize);
+        if d.opacity <= 0.0 {
+            return None;
+        }
+        let p = d.positions.as_chunks::<2>().0;
+        let hit = d.indices.as_chunks::<3>().0.iter().any(|t| {
+            let [a, b, c] = t.map(|i| p.get(i as usize).copied());
+            let (Some(a), Some(b), Some(c)) = (a, b, c) else {
+                return false;
+            };
+            let s = [side(a, b), side(b, c), side(c, a)];
+            s.iter().all(|&x| x >= 0.0) || s.iter().all(|&x| x <= 0.0)
+        });
+        hit.then(|| d.name.to_owned())
+    })
+}
+
 /// The mesh `name` as a [`Geometry`].
 pub fn geometry_of(model: &Model, name: &str) -> Option<Geometry> {
     let m = model.meshes().get(model.meshes().find(name)?)?;
@@ -478,6 +504,28 @@ impl MeshTool {
         out
     }
 
+    /// `stored` with the selected vertices moved so that they are drawn the
+    /// drag's distance from where `space` draws them; `None` if the space is flat there.
+    fn shifted_through(
+        &self,
+        stored: &[Point],
+        space: &Space,
+        m: &Mapper,
+        from: [f32; 2],
+        to: [f32; 2],
+    ) -> Option<Vec<Point>> {
+        let (a, b) = (m.to_model(from), m.to_model(to));
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let mut out = stored.to_vec();
+        for &v in &self.vertices {
+            if let Some(p) = out.get_mut(v as usize) {
+                let w = space.point_to_world(*p);
+                *p = space.point_from_world([w[0] + d[0], w[1] + d[1]]).ok()?;
+            }
+        }
+        Some(out)
+    }
+
     /// The vertex positions with the dragged ones moved, while a move is on.
     /// The model is not changed.
     pub fn preview(&self, positions: &[Point], m: &Mapper) -> Option<Vec<Point>> {
@@ -490,20 +538,39 @@ impl MeshTool {
     /// The button is released: a click selects, a box selects what is inside,
     /// a move gives its one command.
     pub fn release(&mut self, name: &str, positions: &[Point], m: &Mapper) -> Option<Op> {
+        self.release_in(name, positions, positions, m, &Space::Drawing)
+    }
+
+    /// [`Self::release`] for a mesh drawn through its parent deformer: `shown`
+    /// are the vertices as drawn (what the pointer touches), `stored` the
+    /// ones in the model, and `space` the parent's child space. A move turns
+    /// into the stored positions whose drawn place is the dragged one.
+    pub fn release_in(
+        &mut self,
+        name: &str,
+        stored: &[Point],
+        shown: &[Point],
+        m: &Mapper,
+        space: &Space,
+    ) -> Option<Op> {
         match self.gesture.take()? {
             Gesture::Pending { hit, shift, .. } => {
                 self.select(hit, shift);
                 None
             }
             Gesture::Rect { from, to, add } => {
-                self.select_in(positions, m, from, to, add);
+                self.select_in(shown, m, from, to, add);
                 None
             }
             Gesture::Move { from, to } => {
                 if from == to {
                     return None;
                 }
-                let moved = self.shifted(positions, m, from, to);
+                let moved = if matches!(space, Space::Drawing) {
+                    self.shifted(stored, m, from, to)
+                } else {
+                    self.shifted_through(stored, space, m, from, to)?
+                };
                 Some((
                     Command::SetMeshPositions {
                         name: name.to_owned(),
@@ -536,12 +603,27 @@ impl MeshTool {
         m: &Mapper,
         at: [f32; 2],
     ) -> Result<Op, ToolError> {
-        let (out, label) = match hit_test(&g.positions, &g.indices, m, at) {
+        self.add_at_in(name, g, &g.positions, m, at, &Space::Drawing)
+    }
+
+    /// [`Self::add_at`] for a mesh drawn through its parent deformer: the
+    /// pointer meets `shown`, and the new vertex is stored where `space` draws it
+    /// under the pointer.
+    pub fn add_at_in(
+        &mut self,
+        name: &str,
+        g: &Geometry,
+        shown: &[Point],
+        m: &Mapper,
+        at: [f32; 2],
+        space: &Space,
+    ) -> Result<Op, ToolError> {
+        let (out, label) = match hit_test(shown, &g.indices, m, at) {
             Hit::Vertex(_) => return Err(EditError::TooClose.into()),
             Hit::Edge(a, b) => {
                 let (pa, pb) = (
-                    m.to_screen(g.positions[a as usize]),
-                    m.to_screen(g.positions[b as usize]),
+                    m.to_screen(shown[a as usize]),
+                    m.to_screen(shown[b as usize]),
                 );
                 let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
                 let t =
@@ -551,7 +633,12 @@ impl MeshTool {
                     "mesh_split_edge",
                 )
             }
-            Hit::Nothing => (mesh_edit::add_vertex(g, m.to_model(at))?, "mesh_add_vertex"),
+            Hit::Nothing => {
+                let local = space
+                    .point_from_world(m.to_model(at))
+                    .map_err(|_| EditError::OutsideMesh)?;
+                (mesh_edit::add_vertex(g, local)?, "mesh_add_vertex")
+            }
         };
         self.vertices = BTreeSet::from([g.positions.len() as u32]);
         self.edge = None;
@@ -1157,5 +1244,145 @@ mod tests {
                 assert_ne!(t.tr(e.key()), e.key(), "{lang:?} {e:?}");
             }
         }
+    }
+
+    /// A mesh under a warp that doubles and lifts it: stored (u, v) in 0..1,
+    /// drawn over [10, 14] x [20, 26].
+    fn warped() -> (Model, Geometry, Mapper) {
+        let mut model = Model::new();
+        for command in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddWarpDeformer {
+                name: "W".into(),
+                part: "P".into(),
+                parent: None,
+                rows: 1,
+                columns: 1,
+                base_points: vec![[10.0, 20.0], [14.0, 20.0], [10.0, 26.0], [14.0, 26.0]],
+            },
+            Command::AddMesh {
+                name: "Skin".into(),
+                part: "P".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2, 0, 2, 3],
+            },
+            Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: Some("W".into()),
+            },
+        ] {
+            model.apply(command).unwrap();
+        }
+        let g = geometry_of(&model, "Skin").unwrap();
+        // 50 points per unit over [8, 16] x [18, 28].
+        let m = Mapper {
+            origin: [0.0, 0.0],
+            size: [400.0, 500.0],
+            view: [8.0, 18.0, 16.0, 28.0],
+        };
+        (model, g, m)
+    }
+
+    fn drawn(model: &Model) -> (Vec<Point>, Space) {
+        let mesh = model
+            .meshes()
+            .get(model.meshes().find("Skin").unwrap())
+            .unwrap();
+        let space = Space::of(model, mesh.parent).unwrap();
+        (
+            mesh.positions
+                .iter()
+                .map(|&p| space.point_to_world(p))
+                .collect(),
+            space,
+        )
+    }
+
+    #[test]
+    fn dragging_a_vertex_of_a_deformed_mesh_moves_it_to_where_the_pointer_goes() {
+        let (mut model, g, m) = warped();
+        let (shown, space) = drawn(&model);
+        assert_eq!(shown[2], [14.0, 26.0]);
+        let mut t = tool();
+        t.press(&shown, &g.indices, &m, m.to_screen(shown[2]), false);
+        let to = m.to_screen([14.5, 25.0]);
+        t.drag(to);
+        let preview = t.preview(&shown, &m).unwrap();
+        assert!((preview[2][0] - 14.5).abs() < 1e-3 && (preview[2][1] - 25.0).abs() < 1e-3);
+        let (command, _) = t
+            .release_in("Skin", &g.positions, &shown, &m, &space)
+            .unwrap();
+        model.apply(command).unwrap();
+        let (after, _) = drawn(&model);
+        assert!(
+            (after[2][0] - 14.5).abs() < 1e-3 && (after[2][1] - 25.0).abs() < 1e-3,
+            "{:?}",
+            after[2]
+        );
+        for i in [0, 1, 3] {
+            assert!(
+                (after[i][0] - shown[i][0]).abs() < 1e-4
+                    && (after[i][1] - shown[i][1]).abs() < 1e-4
+            );
+        }
+        // The stored value is in (u, v), not in drawing units.
+        let stored = geometry_of(&model, "Skin").unwrap().positions[2];
+        assert!(
+            stored[0] > 0.9 && stored[0] < 1.2 && stored[1] > 0.7 && stored[1] < 1.0,
+            "{stored:?}"
+        );
+    }
+
+    #[test]
+    fn the_pointer_meets_the_drawn_vertices_not_the_stored_ones() {
+        let (model, g, m) = warped();
+        let (shown, _) = drawn(&model);
+        let mut t = tool();
+        // Clicking where the stored (u, v) would be (near the origin) selects nothing.
+        t.click(&shown, &g.indices, &m, m.to_screen(g.positions[1]), false);
+        assert!(t.vertices().is_empty());
+        t.click(&shown, &g.indices, &m, m.to_screen(shown[1]), false);
+        assert_eq!(t.vertices().iter().copied().collect::<Vec<_>>(), [1]);
+        // A box over the drawn upper vertices takes them.
+        t.press(&shown, &g.indices, &m, m.to_screen([9.0, 27.0]), false);
+        t.drag(m.to_screen([15.0, 25.0]));
+        t.release("Skin", &shown, &m);
+        assert_eq!(t.vertices().iter().copied().collect::<Vec<_>>(), [2, 3]);
+    }
+
+    #[test]
+    fn a_vertex_added_in_a_deformed_mesh_lands_under_the_pointer() {
+        let (mut model, g, m) = warped();
+        let (shown, space) = drawn(&model);
+        let mut t = tool();
+        let (command, label) = t
+            .add_at_in("Skin", &g, &shown, &m, m.to_screen([12.0, 22.0]), &space)
+            .unwrap();
+        assert_eq!(label, "mesh_add_vertex: Skin");
+        model.apply(command).unwrap();
+        let (after, _) = drawn(&model);
+        let last = after.last().unwrap();
+        assert!(
+            (last[0] - 12.0).abs() < 1e-3 && (last[1] - 22.0).abs() < 1e-3,
+            "{last:?}"
+        );
+    }
+
+    #[test]
+    fn the_front_mesh_is_picked_where_it_is_drawn() {
+        use tsukumoe_core::eval::Frame;
+        let (model, _, _) = warped();
+        let compiled = model.compile().unwrap();
+        let mut frame = Frame::new(&compiled);
+        frame.evaluate(&compiled);
+        let list = frame.draw_list(&compiled);
+        // Drawn over [10, 14] x [20, 26]; the stored shape sits near the origin.
+        assert_eq!(pick_drawn(&list, [12.0, 23.0]).as_deref(), Some("Skin"));
+        assert_eq!(pick_drawn(&list, [0.5, 0.25]), None);
+        assert_eq!(pick_mesh(&model, [0.5, 0.25]).as_deref(), Some("Skin"));
     }
 }
