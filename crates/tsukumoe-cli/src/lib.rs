@@ -8,4 +8,5 @@ pub mod generate;
 pub mod lipsync;
 pub mod mcp;
 pub mod parity;
+pub mod psd;
 pub mod store;

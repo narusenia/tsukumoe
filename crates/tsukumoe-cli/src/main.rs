@@ -1,7 +1,7 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! `tsukumoe convert | generate | validate | inspect | render | diff | parity | lipsync | commands | docs | edit | mcp`.
+//! `tsukumoe convert | generate | validate | inspect | render | diff | parity | lipsync | commands | docs | edit | psd | mcp`.
 //! See `docs/implementation/M1-core/cli.md` and `M4-vtuber/lipsync.md`.
 
 use std::fs;
@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use serde_json::json;
 use tsukumoe_ai::LipsyncConfig;
 use tsukumoe_ai::wav::{self, MAX_WAV_BYTES};
-use tsukumoe_cli::{commands, generate, lipsync, mcp, parity, store};
+use tsukumoe_cli::{commands, generate, lipsync, mcp, parity, psd, store};
 use tsukumoe_core::eval::Frame;
 use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
 use tsukumoe_format::{Project, read_model};
@@ -37,6 +37,12 @@ const USAGE: &str = "usage:
   tsukumoe edit <project> <command.json|->
       applies a command (or an array, as one undo step) and saves the project;
       nothing is written if it fails
+  tsukumoe psd inspect <psd>
+      the layer structure and warnings of a PSD (JSON)
+  tsukumoe psd import <project> <psd> [--plan] [--apply] [--keep-missing | --remove-missing] [--map OLD=NEW]...
+      plans (default, --plan) or applies (--apply) an import of the PSD as parts and
+      meshes; a reimport matches layers by group path and name; --map matches a
+      vanished layer to a new one by hand; the project is created if it does not exist
   tsukumoe mcp <project>
       an MCP server on stdio (JSON-RPC 2.0) that edits the project in memory;
       the `save` tool writes it";
@@ -541,6 +547,52 @@ fn edit(args: &[String]) -> Result<u8, Fail> {
     Ok(0)
 }
 
+fn psd(args: &[String]) -> Result<u8, Fail> {
+    let Some((sub, rest)) = args.split_first() else {
+        return usage("psd expects: inspect | import");
+    };
+    let flags = ["--plan", "--apply", "--keep-missing", "--remove-missing"];
+    let (flag_args, rest): (Vec<&String>, Vec<&String>) =
+        rest.iter().partition(|a| flags.contains(&a.as_str()));
+    let rest: Vec<String> = rest.into_iter().cloned().collect();
+    let has = |f: &str| flag_args.iter().any(|a| a.as_str() == f);
+    let value = match sub.as_str() {
+        "inspect" => {
+            let args = Args::parse(&rest, &[])?;
+            let [path] = args.positional()?;
+            psd::inspect(path).map_err(Fail::Failed)?
+        }
+        "import" => {
+            let args = Args::parse(&rest, &["--map"])?;
+            let [project, file] = args.positional()?;
+            if has("--keep-missing") && has("--remove-missing") {
+                return usage("--keep-missing and --remove-missing exclude each other");
+            }
+            if has("--plan") && has("--apply") {
+                return usage("--plan and --apply exclude each other");
+            }
+            let mut options = psd::ImportOptions {
+                apply: has("--apply"),
+                ..psd::ImportOptions::default()
+            };
+            options.choices.remove_missing = has("--remove-missing");
+            for pair in args.all("--map") {
+                let Some((old, new)) = pair.split_once('=') else {
+                    return usage("--map expects OLD=NEW");
+                };
+                options
+                    .choices
+                    .rename
+                    .insert(old.to_owned(), new.to_owned());
+            }
+            psd::import(project, file, &options).map_err(Fail::Failed)?
+        }
+        other => return usage(format!("unknown psd command {other:?}")),
+    };
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(0)
+}
+
 fn mcp(args: &[String]) -> Result<u8, Fail> {
     let args = Args::parse(args, &[])?;
     let [project] = args.positional()?;
@@ -569,6 +621,7 @@ fn main() -> ExitCode {
             "commands" => commands(rest),
             "docs" => docs(rest),
             "edit" => edit(rest),
+            "psd" => psd(rest),
             "mcp" => mcp(rest),
             other => usage(format!("unknown command {other:?}")),
         },

@@ -5,6 +5,7 @@
 //! untrusted; see `docs/implementation/M5-editor/psd-import.md`.
 
 mod image;
+mod import;
 mod map;
 mod plan;
 mod reader;
@@ -13,6 +14,7 @@ mod scan;
 pub mod writer;
 
 pub use image::{Image, hash_reader};
+pub use import::Prepared;
 pub use map::{GroupRec, LayerRec, MAP_PATH, PsdMap, Source, UNITS_PER_PIXEL};
 pub use plan::{
     Action, Choices, Existing, Item, Plan, ROOT_PART, TextureJob, plan, remap_uvs, render_textures,
