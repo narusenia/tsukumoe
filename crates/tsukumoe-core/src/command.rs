@@ -167,6 +167,24 @@ pub enum Command {
     SetWarpBasePoints { name: String, points: Vec<Point> },
     /// Replaces the base shape of a rotation deformer. Fails if it has keyforms.
     SetRotationBase { name: String, base: RotationBase },
+    /// Renames a part. Everything that refers to it keeps pointing at it.
+    RenamePart { name: String, new_name: String },
+    /// Renames a mesh.
+    RenameMesh { name: String, new_name: String },
+    /// Renames a warp deformer. Warp and rotation deformers share their names.
+    RenameWarp { name: String, new_name: String },
+    /// Renames a rotation deformer.
+    RenameRotation { name: String, new_name: String },
+    /// Moves a mesh to another part.
+    SetMeshPart { name: String, part: String },
+    /// Moves a deformer (warp or rotation) to another part.
+    SetDeformerPart { name: String, part: String },
+    /// Sets the parent part of a part (`null` for none); fails if it makes a cycle.
+    SetPartParent {
+        name: String,
+        #[serde(default)]
+        parent: Option<String>,
+    },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
     Batch { commands: Vec<Command> },
@@ -499,6 +517,44 @@ impl Model {
                 self.reject_keyforms::<RotationDeformer>(id, name, |d| d.keyforms.is_some())?;
                 self.modify(changes, id, |d| base.apply_to(&mut d.base));
             }
+            Command::RenamePart { name, new_name } => {
+                let id = self.resolve::<Part>(name)?;
+                self.rename(changes, id, new_name)?;
+            }
+            Command::RenameMesh { name, new_name } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.rename(changes, id, new_name)?;
+            }
+            Command::RenameWarp { name, new_name } => {
+                let id = self.resolve::<WarpDeformer>(name)?;
+                self.check_deformer_name(new_name)?;
+                self.rename(changes, id, new_name)?;
+            }
+            Command::RenameRotation { name, new_name } => {
+                let id = self.resolve::<RotationDeformer>(name)?;
+                self.check_deformer_name(new_name)?;
+                self.rename(changes, id, new_name)?;
+            }
+            Command::SetMeshPart { name, part } => {
+                let part = self.resolve::<Part>(part)?;
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| m.part = part);
+            }
+            Command::SetDeformerPart { name, part } => {
+                let part = self.resolve::<Part>(part)?;
+                match self.resolve_deformer(name)? {
+                    DeformerRef::Warp(id) => self.modify(changes, id, |d| d.part = part),
+                    DeformerRef::Rotation(id) => self.modify(changes, id, |d| d.part = part),
+                }
+            }
+            Command::SetPartParent { name, parent } => {
+                let parent = parent
+                    .as_deref()
+                    .map(|n| self.resolve::<Part>(n))
+                    .transpose()?;
+                let id = self.resolve::<Part>(name)?;
+                self.modify(changes, id, |p| p.parent = parent);
+            }
             Command::Batch { commands } => {
                 for command in commands {
                     self.run(command, changes)?;
@@ -548,6 +604,49 @@ impl Model {
                 name: name.to_owned(),
             });
         }
+        Ok(())
+    }
+
+    /// Gives an element a new name, keeping its id. History sees it as the
+    /// removal of the old name and the insertion of the new one at the same id.
+    fn rename<T: Editable>(
+        &mut self,
+        changes: &mut Vec<Change>,
+        id: Id<T>,
+        new_name: &str,
+    ) -> Result<(), CommandError> {
+        if new_name.is_empty() {
+            return Err(CommandError::EmptyName { kind: T::KIND });
+        }
+        let table = T::table_mut(self);
+        let Some(old) = table.name(id).map(str::to_owned) else {
+            return Ok(());
+        };
+        if old == new_name {
+            return Ok(());
+        }
+        if table.find(new_name).is_some() {
+            return Err(CommandError::AlreadyExists {
+                kind: T::KIND,
+                name: new_name.to_owned(),
+            });
+        }
+        let Some(value) = table.remove(id) else {
+            return Ok(());
+        };
+        changes.push(T::change(Edit {
+            id,
+            name: old,
+            before: Some(value.clone()),
+            after: None,
+        }));
+        T::table_mut(self).put(id, new_name, value.clone());
+        changes.push(T::change(Edit {
+            id,
+            name: new_name.to_owned(),
+            before: None,
+            after: Some(value),
+        }));
         Ok(())
     }
 
@@ -744,6 +843,36 @@ mod tests {
                 parent: None,
             },
             Command::RemoveDeformer { name: "Rot".into() },
+            add_part("Hair"),
+            Command::SetPartParent {
+                name: "Hair".into(),
+                parent: Some("Face".into()),
+            },
+            Command::SetMeshPart {
+                name: "Skin".into(),
+                part: "Hair".into(),
+            },
+            Command::RenameMesh {
+                name: "Skin".into(),
+                new_name: "Scalp".into(),
+            },
+            Command::RenamePart {
+                name: "Hair".into(),
+                new_name: "Fringe".into(),
+            },
+            Command::RenameWarp {
+                name: "Warp".into(),
+                new_name: "HeadWarp".into(),
+            },
+            rotation("Spin", None),
+            Command::RenameRotation {
+                name: "Spin".into(),
+                new_name: "Turn".into(),
+            },
+            Command::SetDeformerPart {
+                name: "Turn".into(),
+                part: "Fringe".into(),
+            },
         ]
     }
 
@@ -1263,5 +1392,212 @@ mod tests {
                 parent: None
             }
         );
+    }
+
+    #[test]
+    fn renaming_keeps_every_reference_and_fails_on_empty_duplicate_and_unknown_names() {
+        let mut model = built(vec![
+            add_part("Face"),
+            add_part("Hair"),
+            add_mesh("Skin", "Face"),
+            add_mesh("Clip", "Face"),
+            warp("W"),
+            rotation("R", Some("W")),
+            Command::SetMeshMasks {
+                name: "Skin".into(),
+                masks: vec!["Clip".into()],
+                inverted: false,
+            },
+            Command::SetMeshParent {
+                name: "Skin".into(),
+                parent: Some("R".into()),
+            },
+        ]);
+        let renames = [
+            Command::RenameMesh {
+                name: "Clip".into(),
+                new_name: "Mask".into(),
+            },
+            Command::RenameRotation {
+                name: "R".into(),
+                new_name: "Spin".into(),
+            },
+            Command::RenameWarp {
+                name: "W".into(),
+                new_name: "Bend".into(),
+            },
+            Command::RenamePart {
+                name: "Face".into(),
+                new_name: "Head".into(),
+            },
+        ];
+        for r in renames {
+            model.apply(r).unwrap();
+        }
+        // The names moved and nothing was left pointing at the old ones.
+        assert!(model.validate().is_empty());
+        let skin = model
+            .meshes()
+            .get(model.meshes().find("Skin").unwrap())
+            .unwrap();
+        assert_eq!(skin.masks, vec![model.meshes().find("Mask").unwrap()]);
+        assert_eq!(
+            skin.parent,
+            Some(DeformerRef::Rotation(
+                model.rotations().find("Spin").unwrap()
+            ))
+        );
+        assert_eq!(skin.part, model.parts().find("Head").unwrap());
+        assert!(model.meshes().find("Clip").is_none() && model.parts().find("Face").is_none());
+        // Each rename is one undo step that brings the old name back.
+        for _ in 0..4 {
+            assert!(model.undo());
+        }
+        assert!(model.meshes().find("Clip").is_some() && model.rotations().find("R").is_some());
+        assert!(model.warps().find("W").is_some() && model.parts().find("Face").is_some());
+        assert!(model.validate().is_empty());
+        assert!(model.redo());
+        assert!(model.meshes().find("Mask").is_some());
+        // Failures change nothing.
+        let steps = model.history().commands().count();
+        let bad = [
+            (
+                Command::RenameMesh {
+                    name: "Skin".into(),
+                    new_name: String::new(),
+                },
+                CommandError::EmptyName { kind: "mesh" },
+            ),
+            (
+                Command::RenameMesh {
+                    name: "Skin".into(),
+                    new_name: "Mask".into(),
+                },
+                CommandError::AlreadyExists {
+                    kind: "mesh",
+                    name: "Mask".into(),
+                },
+            ),
+            (
+                Command::RenameMesh {
+                    name: "Nope".into(),
+                    new_name: "X".into(),
+                },
+                CommandError::NotFound {
+                    kind: "mesh",
+                    name: "Nope".into(),
+                },
+            ),
+            // A warp may not take the name of a rotation deformer.
+            (
+                Command::RenameWarp {
+                    name: "W".into(),
+                    new_name: "R".into(),
+                },
+                CommandError::AlreadyExists {
+                    kind: "deformer",
+                    name: "R".into(),
+                },
+            ),
+            (
+                Command::RenamePart {
+                    name: "Face".into(),
+                    new_name: "Hair".into(),
+                },
+                CommandError::AlreadyExists {
+                    kind: "part",
+                    name: "Hair".into(),
+                },
+            ),
+        ];
+        for (command, error) in bad {
+            assert_eq!(model.apply(command), Err(error));
+        }
+        assert_eq!(model.history().commands().count(), steps);
+        // Renaming to the same name is nothing.
+        model
+            .apply(Command::RenamePart {
+                name: "Face".into(),
+                new_name: "Face".into(),
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn parts_and_deformers_move_between_parts_and_parts_cannot_loop() {
+        let mut model = built(vec![
+            add_part("Face"),
+            add_part("A"),
+            add_part("B"),
+            add_part("C"),
+            add_mesh("Skin", "A"),
+            warp("W"),
+        ]);
+        model
+            .apply(Command::SetMeshPart {
+                name: "Skin".into(),
+                part: "B".into(),
+            })
+            .unwrap();
+        model
+            .apply(Command::SetDeformerPart {
+                name: "W".into(),
+                part: "C".into(),
+            })
+            .unwrap();
+        let skin = model
+            .meshes()
+            .get(model.meshes().find("Skin").unwrap())
+            .unwrap();
+        assert_eq!(skin.part, model.parts().find("B").unwrap());
+        assert!(model.undo() && model.undo());
+        model
+            .apply(Command::SetPartParent {
+                name: "B".into(),
+                parent: Some("A".into()),
+            })
+            .unwrap();
+        model
+            .apply(Command::SetPartParent {
+                name: "C".into(),
+                parent: Some("B".into()),
+            })
+            .unwrap();
+        let steps = model.history().commands().count();
+        // A under C would close the loop A > B > C > A.
+        let cycle = Command::SetPartParent {
+            name: "A".into(),
+            parent: Some("C".into()),
+        };
+        assert!(matches!(model.apply(cycle), Err(CommandError::Invalid(_))));
+        assert_eq!(
+            model.apply(Command::SetPartParent {
+                name: "A".into(),
+                parent: Some("Nope".into())
+            }),
+            Err(CommandError::NotFound {
+                kind: "part",
+                name: "Nope".into()
+            })
+        );
+        assert_eq!(
+            model.apply(Command::SetMeshPart {
+                name: "Skin".into(),
+                part: "Nope".into()
+            }),
+            Err(CommandError::NotFound {
+                kind: "part",
+                name: "Nope".into()
+            })
+        );
+        assert_eq!(model.history().commands().count(), steps);
+        // Taking a part out of its parent.
+        model
+            .apply(Command::SetPartParent {
+                name: "C".into(),
+                parent: None,
+            })
+            .unwrap();
+        assert!(model.validate().is_empty());
     }
 }

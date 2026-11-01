@@ -373,6 +373,104 @@ Replaces the base shape of a rotation deformer. Fails if it has keyforms.
 {"type":"set_rotation_base","name":"HeadRotation","base":{"origin":[0.0,0.0],"angle_degrees":15.0,"scale":1.0,"reflect_x":false,"reflect_y":false}}
 ```
 
+### `rename_part`
+
+Renames a part. Everything that refers to it keeps pointing at it.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_part"` | yes |  |
+
+```json
+{"type":"rename_part","name":"Face","new_name":"Head"}
+```
+
+### `rename_mesh`
+
+Renames a mesh.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_mesh"` | yes |  |
+
+```json
+{"type":"rename_mesh","name":"Skin","new_name":"Scalp"}
+```
+
+### `rename_warp`
+
+Renames a warp deformer. Warp and rotation deformers share their names.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_warp"` | yes |  |
+
+```json
+{"type":"rename_warp","name":"FaceWarp","new_name":"HeadWarp"}
+```
+
+### `rename_rotation`
+
+Renames a rotation deformer.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_rotation"` | yes |  |
+
+```json
+{"type":"rename_rotation","name":"HeadRotation","new_name":"Turn"}
+```
+
+### `set_mesh_part`
+
+Moves a mesh to another part.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `part` | string | yes |  |
+| `type` | `"set_mesh_part"` | yes |  |
+
+```json
+{"type":"set_mesh_part","name":"Skin","part":"Head"}
+```
+
+### `set_deformer_part`
+
+Moves a deformer (warp or rotation) to another part.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `part` | string | yes |  |
+| `type` | `"set_deformer_part"` | yes |  |
+
+```json
+{"type":"set_deformer_part","name":"FaceWarp","part":"Head"}
+```
+
+### `set_part_parent`
+
+Sets the parent part of a part (`null` for none); fails if it makes a cycle.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `parent` | string or null | no | `null` |
+| `type` | `"set_part_parent"` | yes |  |
+
+```json
+{"type":"set_part_parent","name":"Face","parent":"Body"}
+```
+
 ### `batch`
 
 Applies the commands in order as one undo step; if one fails, none
