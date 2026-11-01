@@ -203,7 +203,7 @@ pub fn reference() -> String {
             let _ = write!(
                 out,
                 "\n```json\n{}\n```\n",
-                serde_json::to_string_pretty(example).unwrap_or_default()
+                serde_json::to_string(example).unwrap_or_default()
             );
         }
     }
