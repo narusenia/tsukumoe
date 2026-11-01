@@ -3791,6 +3791,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "pollster 0.4.0",
+ "syphon-core",
  "syphon-wgpu",
  "tsukumoe-core",
  "tsukumoe-format",
