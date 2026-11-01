@@ -147,6 +147,12 @@ mod tests {
             Command::AddMesh { .. } => "add_mesh",
             Command::RemoveMesh { .. } => "remove_mesh",
             Command::SetMeshPositions { .. } => "set_mesh_positions",
+            Command::SetMeshTexture { .. } => "set_mesh_texture",
+            Command::SetMeshBlendMode { .. } => "set_mesh_blend_mode",
+            Command::SetMeshOpacity { .. } => "set_mesh_opacity",
+            Command::SetMeshDrawOrder { .. } => "set_mesh_draw_order",
+            Command::SetMeshUvs { .. } => "set_mesh_uvs",
+            Command::SetMeshMasks { .. } => "set_mesh_masks",
             Command::SetMeshVisible { .. } => "set_mesh_visible",
             Command::Batch { .. } => "batch",
         }
@@ -199,6 +205,31 @@ mod tests {
             Command::SetMeshPositions {
                 name: String::new(),
                 positions: vec![],
+            },
+            Command::SetMeshTexture {
+                name: String::new(),
+                texture: 0,
+            },
+            Command::SetMeshBlendMode {
+                name: String::new(),
+                blend_mode: tsukumoe_core::rig::BlendMode::Normal,
+            },
+            Command::SetMeshOpacity {
+                name: String::new(),
+                opacity: 0.0,
+            },
+            Command::SetMeshDrawOrder {
+                name: String::new(),
+                draw_order: 0.0,
+            },
+            Command::SetMeshUvs {
+                name: String::new(),
+                uvs: vec![],
+            },
+            Command::SetMeshMasks {
+                name: String::new(),
+                masks: vec![],
+                inverted: false,
             },
             Command::SetMeshVisible {
                 name: String::new(),

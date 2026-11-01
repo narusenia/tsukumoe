@@ -10,6 +10,7 @@ use std::fmt::Write;
 use schemars::schema_for;
 use serde_json::{Value, json};
 use tsukumoe_core::command::Command;
+use tsukumoe_core::rig::BlendMode;
 
 /// One tool per `Command` variant, as `{name, description, inputSchema}`.
 /// The name is the variant's `type`; the schema is that variant's.
@@ -139,6 +140,31 @@ pub fn examples() -> Vec<Command> {
             name: "Skin".into(),
             positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
         },
+        Command::SetMeshTexture {
+            name: "Skin".into(),
+            texture: 1,
+        },
+        Command::SetMeshBlendMode {
+            name: "Skin".into(),
+            blend_mode: BlendMode::Multiply,
+        },
+        Command::SetMeshOpacity {
+            name: "Skin".into(),
+            opacity: 0.5,
+        },
+        Command::SetMeshDrawOrder {
+            name: "Skin".into(),
+            draw_order: 700.0,
+        },
+        Command::SetMeshUvs {
+            name: "Skin".into(),
+            uvs: triangle.clone(),
+        },
+        Command::SetMeshMasks {
+            name: "Skin".into(),
+            masks: vec!["Clip".into()],
+            inverted: false,
+        },
         Command::SetMeshVisible {
             name: "Skin".into(),
             visible: false,
@@ -163,6 +189,12 @@ pub fn tag(command: &Command) -> &'static str {
         Command::AddMesh { .. } => "add_mesh",
         Command::RemoveMesh { .. } => "remove_mesh",
         Command::SetMeshPositions { .. } => "set_mesh_positions",
+        Command::SetMeshTexture { .. } => "set_mesh_texture",
+        Command::SetMeshBlendMode { .. } => "set_mesh_blend_mode",
+        Command::SetMeshOpacity { .. } => "set_mesh_opacity",
+        Command::SetMeshDrawOrder { .. } => "set_mesh_draw_order",
+        Command::SetMeshUvs { .. } => "set_mesh_uvs",
+        Command::SetMeshMasks { .. } => "set_mesh_masks",
         Command::SetMeshVisible { .. } => "set_mesh_visible",
         Command::Batch { .. } => "batch",
     }

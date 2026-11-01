@@ -17,7 +17,10 @@ pub type GlueId = Id<Glue>;
 pub type BoneId = Id<Bone>;
 pub type BlendShapeId = Id<BlendShape>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// In JSON, snake case: `normal`, `additive`, `multiply`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema), schemars(inline))]
+#[serde(rename_all = "snake_case")]
 pub enum BlendMode {
     #[default]
     Normal,

@@ -14,7 +14,7 @@ use crate::arena::Id;
 use crate::elements::{Parameter, Part, Point};
 use crate::history::{Change, Edit, Editable, Record};
 use crate::model::Model;
-use crate::rig::ArtMesh;
+use crate::rig::{ArtMesh, BlendMode};
 use crate::table::InsertError;
 use crate::validate::ModelError;
 
@@ -65,6 +65,23 @@ pub enum Command {
     RemoveMesh { name: String },
     /// Replaces the vertex positions of a mesh; the count must match its uvs.
     SetMeshPositions { name: String, positions: Vec<Point> },
+    /// Sets the texture index of a mesh.
+    SetMeshTexture { name: String, texture: u32 },
+    /// Sets how a mesh blends with what is behind it.
+    SetMeshBlendMode { name: String, blend_mode: BlendMode },
+    /// Sets the opacity of a mesh.
+    SetMeshOpacity { name: String, opacity: f32 },
+    /// Sets the draw order of a mesh (ascending order is back to front).
+    SetMeshDrawOrder { name: String, draw_order: f32 },
+    /// Replaces the UVs of a mesh; the count must match its positions.
+    SetMeshUvs { name: String, uvs: Vec<Point> },
+    /// Sets the meshes that clip a mesh (by name) and whether the clip is inverted; an empty list removes the clipping.
+    SetMeshMasks {
+        name: String,
+        masks: Vec<String>,
+        #[serde(default)]
+        inverted: bool,
+    },
     /// Shows or hides a mesh; a hidden mesh is not in the draw list.
     SetMeshVisible { name: String, visible: bool },
     /// Applies the commands in order as one undo step; if one fails, none
@@ -212,6 +229,41 @@ impl Model {
             Command::SetPartVisible { name, visible } => {
                 let id = self.resolve::<Part>(name)?;
                 self.modify(changes, id, |p| p.visible = *visible);
+            }
+            Command::SetMeshTexture { name, texture } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| m.texture = *texture);
+            }
+            Command::SetMeshBlendMode { name, blend_mode } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| m.blend_mode = *blend_mode);
+            }
+            Command::SetMeshOpacity { name, opacity } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| m.opacity = *opacity);
+            }
+            Command::SetMeshDrawOrder { name, draw_order } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| m.draw_order = *draw_order);
+            }
+            Command::SetMeshUvs { name, uvs } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| m.uvs = uvs.clone());
+            }
+            Command::SetMeshMasks {
+                name,
+                masks,
+                inverted,
+            } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                let masks = masks
+                    .iter()
+                    .map(|n| self.resolve::<ArtMesh>(n))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.modify(changes, id, |m| {
+                    m.masks = masks;
+                    m.mask_inverted = *inverted;
+                });
             }
             Command::SetMeshVisible { name, visible } => {
                 let id = self.resolve::<ArtMesh>(name)?;
@@ -368,6 +420,32 @@ mod tests {
             Command::SetMeshPositions {
                 name: "Skin".into(),
                 positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
+            },
+            Command::SetMeshTexture {
+                name: "Skin".into(),
+                texture: 2,
+            },
+            Command::SetMeshBlendMode {
+                name: "Skin".into(),
+                blend_mode: BlendMode::Multiply,
+            },
+            Command::SetMeshOpacity {
+                name: "Skin".into(),
+                opacity: 0.25,
+            },
+            Command::SetMeshDrawOrder {
+                name: "Skin".into(),
+                draw_order: 700.0,
+            },
+            Command::SetMeshUvs {
+                name: "Skin".into(),
+                uvs: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]],
+            },
+            add_mesh("Clip", "Face"),
+            Command::SetMeshMasks {
+                name: "Skin".into(),
+                masks: vec!["Clip".into()],
+                inverted: true,
             },
             Command::SetMeshVisible {
                 name: "Skin".into(),
@@ -544,5 +622,68 @@ mod tests {
             .max = -1.0;
         assert!(!model.validate().is_empty());
         model.apply(add_param("B")).unwrap();
+    }
+
+    #[test]
+    fn mesh_style_commands_change_only_their_field() {
+        let mut model = built(vec![
+            add_part("Face"),
+            add_mesh("A", "Face"),
+            add_mesh("B", "Face"),
+        ]);
+        let id = model.meshes().find("A").unwrap();
+        model
+            .apply(Command::SetMeshBlendMode {
+                name: "A".into(),
+                blend_mode: BlendMode::Additive,
+            })
+            .unwrap();
+        model
+            .apply(Command::SetMeshMasks {
+                name: "A".into(),
+                masks: vec!["B".into()],
+                inverted: false,
+            })
+            .unwrap();
+        let mesh = model.meshes().get(id).unwrap();
+        assert_eq!(mesh.blend_mode, BlendMode::Additive);
+        assert_eq!(mesh.masks, vec![model.meshes().find("B").unwrap()]);
+        assert_eq!(
+            (mesh.texture, mesh.opacity, mesh.draw_order),
+            (0, 1.0, 500.0)
+        );
+        assert_eq!(
+            serde_json::to_value(Command::SetMeshBlendMode {
+                name: "A".into(),
+                blend_mode: BlendMode::Additive
+            })
+            .unwrap(),
+            serde_json::json!({"type":"set_mesh_blend_mode","name":"A","blend_mode":"additive"})
+        );
+    }
+
+    #[test]
+    fn bad_mask_and_uv_edits_are_rejected_and_change_nothing() {
+        let mut model = built(vec![add_part("Face"), add_mesh("A", "Face")]);
+        let expected = built(vec![add_part("Face"), add_mesh("A", "Face")]);
+        assert_eq!(
+            model.apply(Command::SetMeshMasks {
+                name: "A".into(),
+                masks: vec!["Nope".into()],
+                inverted: false
+            }),
+            Err(CommandError::NotFound {
+                kind: "mesh",
+                name: "Nope".into()
+            })
+        );
+        assert!(matches!(
+            model.apply(Command::SetMeshUvs {
+                name: "A".into(),
+                uvs: vec![[0.0, 0.0]]
+            }),
+            Err(CommandError::Invalid(_))
+        ));
+        assert!(model == expected);
     }
 }
