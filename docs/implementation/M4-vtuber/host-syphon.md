@@ -35,10 +35,10 @@
 
 ## 受入条件
 
-進捗（着手中）: ビルドと単体テストまで確認済み。この環境には `Syphon.framework` が無く、起動・OBS での受信・透過の縁の確認ができていない。
+進捗（着手中）: ビルド（`--features syphon` の `cargo check`・リンク）と単体テストまで確認済み。この環境には `Syphon.framework` が無く、起動して Syphon サーバとして公開できることを確認していないため、2 項目目と OBS 関連の 2 項目にチェックを付けていない。
 
 - [x] 既定のビルド（feature なし）で依存・挙動が変わらない
-- [x] `--features syphon`（macOS）でビルドでき、`--syphon` で Syphon サーバとして公開する
+- [ ] `--features syphon`（macOS）でビルドでき、`--syphon` で Syphon サーバとして公開する
 - [ ] OBS などの Syphon クライアントで映像を受け取れる（利用者の環境で確認）
 - [ ] 透過の縁が汚れない（利用者の環境で確認）
 - [x] feature なし・macOS 以外で `--syphon` を指定すると理由つきのエラーで終了する
