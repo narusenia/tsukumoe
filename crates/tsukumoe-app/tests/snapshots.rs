@@ -306,3 +306,91 @@ fn deformer_overlay_in_the_dark_theme() {
 fn deformer_overlay_in_the_light_theme() {
     deformer_overlay_snapshot(Mode::Light, "deformer_light");
 }
+
+/// The tree with deformer rows nested under their parents, one selected.
+fn tree_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::panels::tree;
+    use tsukumoe_app::view::{Selection, ViewState};
+    use tsukumoe_core::command::{Command, RotationBase};
+    use tsukumoe_core::model::Model;
+
+    let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    let base = RotationBase {
+        origin: [0.0, 0.0],
+        angle_degrees: 0.0,
+        scale: 1.0,
+        reflect_x: false,
+        reflect_y: false,
+    };
+    let mut model = Model::new();
+    let mut commands = vec![
+        Command::AddPart {
+            name: "Face".into(),
+            parent: None,
+        },
+        Command::AddWarpDeformer {
+            name: "FaceWarp".into(),
+            part: "Face".into(),
+            parent: None,
+            rows: 1,
+            columns: 1,
+            base_points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        },
+        Command::AddRotationDeformer {
+            name: "HeadRotation".into(),
+            part: "Face".into(),
+            parent: Some("FaceWarp".into()),
+            base,
+        },
+    ];
+    for (mesh, parent) in [
+        ("Skin", None),
+        ("Eye", Some("HeadRotation")),
+        ("Mouth", Some("FaceWarp")),
+    ] {
+        commands.push(Command::AddMesh {
+            name: mesh.into(),
+            part: "Face".into(),
+            positions: tri.clone(),
+            uvs: tri.clone(),
+            indices: vec![0, 1, 2],
+        });
+        if let Some(p) = parent {
+            commands.push(Command::SetMeshParent {
+                name: mesh.into(),
+                parent: Some(p.into()),
+            });
+        }
+    }
+    for c in commands {
+        model.apply(c).unwrap();
+    }
+    let mut view = ViewState::default();
+    view.selection = Some(Selection::Rotation("HeadRotation".into()));
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(260.0, 220.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, state: &mut (Model, ViewState)| {
+                let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::En);
+                set_mode(&ctx, mode);
+                tree::show(ui, &state.0, &mut state.1);
+            },
+            (model, view),
+        );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn tree_with_deformers_in_the_dark_theme() {
+    tree_snapshot(Mode::Dark, "tree_dark");
+}
+
+#[test]
+fn tree_with_deformers_in_the_light_theme() {
+    tree_snapshot(Mode::Light, "tree_light");
+}

@@ -1351,14 +1351,36 @@ impl PanelHost for Panels<'_> {
         match id {
             "history" => history::show(ui, &mut doc.dispatcher),
             "tree" => {
-                if let Some(command) = tree::show(ui, doc.dispatcher.model(), &mut editor.view) {
-                    editor.submit(&ctx, command);
+                for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    match out {
+                        tree::Out::Command(command) => {
+                            editor.submit(&ctx, command);
+                        }
+                        tree::Out::Reparent(target, parent) => {
+                            let model = editor.doc.as_ref().map(|d| d.dispatcher.model());
+                            match model
+                                .map(|m| deformer_ops::set_parent(m, &target, parent.as_deref()))
+                            {
+                                Some(Ok((command, label))) => {
+                                    editor.submit_labeled(&ctx, command, Some(label));
+                                }
+                                Some(Err(e)) => {
+                                    editor.toasts.push(&ctx, Tone::Error, tr(&ctx, e.key()));
+                                }
+                                None => {}
+                            }
+                        }
+                    }
                 }
             }
             "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
             "inspector" => {
-                let command =
-                    inspector::show(ui, doc.dispatcher.model(), editor.view.selection.as_ref());
+                let command = inspector::show(
+                    ui,
+                    doc.dispatcher.model(),
+                    editor.view.selection.as_ref(),
+                    Some(&editor.deformer_tool),
+                );
                 if let Some(command) = command {
                     editor.submit(&ctx, command);
                 }
