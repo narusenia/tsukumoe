@@ -40,6 +40,17 @@ fn commit_field(
     None
 }
 
+/// The icon button that puts a deformer's base shape back to its initial state.
+fn reset_button(ui: &mut Ui, ctx: &egui::Context) -> bool {
+    tsukumoe_ui::icon_button(
+        ui,
+        tsukumoe_ui::Icon::RotateCcw,
+        &tr(ctx, "deformer-reset"),
+        tsukumoe_ui::Variant::Ghost,
+    )
+    .clicked()
+}
+
 /// The field of a rotation deformer's base shape an inspector row edits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RotationField {
@@ -69,6 +80,18 @@ pub fn show(
     model: &Model,
     selection: Option<&Selection>,
     deformer: Option<&DeformerTool>,
+) -> Option<Command> {
+    show_with(ui, model, selection, deformer, &mut false)
+}
+
+/// [`show`], also telling (`reset`) when the reset button of a deformer was
+/// pressed: the editor resets the selected deformers.
+pub fn show_with(
+    ui: &mut Ui,
+    model: &Model,
+    selection: Option<&Selection>,
+    deformer: Option<&DeformerTool>,
+    reset: &mut bool,
 ) -> Option<Command> {
     let ctx = ui.ctx().clone();
     let Some(selection) = selection else {
@@ -162,6 +185,9 @@ pub fn show(
                 .find(name)
                 .and_then(|id| model.warps().get(id))?;
             section_header(ui, name);
+            if reset_button(ui, &ctx) {
+                *reset = true;
+            }
             // The grid size is fixed; a different one means making a new warp.
             hint(
                 ui,
@@ -205,6 +231,9 @@ pub fn show(
                 .find(name)
                 .and_then(|id| model.rotations().get(id))?;
             section_header(ui, name);
+            if reset_button(ui, &ctx) {
+                *reset = true;
+            }
             let base = RotationBase::of(&r.base);
             let rows = [
                 (
@@ -404,5 +433,37 @@ mod tests {
         h.state_mut().1 = Selection::Warp("W".into());
         h.run();
         h.get_by_label("Grid (rows x columns): 1 x 1");
+    }
+
+    #[test]
+    fn the_reset_button_of_a_deformer_is_reported_and_other_selections_have_none() {
+        use egui_kittest::kittest::Queryable;
+        let m = deformer_model();
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(300.0, 300.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, Selection, bool)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    let mut reset = false;
+                    show_with(ui, &state.0, Some(&state.1), None, &mut reset);
+                    state.2 |= reset;
+                },
+                (m, Selection::Rotation("R".into()), false),
+            );
+        h.run();
+        h.get_by_label("Reset").click();
+        h.run();
+        assert!(h.state().2);
+        h.state_mut().2 = false;
+        h.state_mut().1 = Selection::Warp("W".into());
+        h.run();
+        h.get_by_label("Reset").click();
+        h.run();
+        assert!(h.state().2);
+        h.state_mut().2 = false;
+        h.state_mut().1 = Selection::Part("P".into());
+        h.run();
+        assert!(h.query_by_label("Reset").is_none());
     }
 }

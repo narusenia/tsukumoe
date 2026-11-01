@@ -20,7 +20,11 @@ use tsukumoe_core::rig::DeformerRef;
 use crate::mesh_tool::{Mapper, Op};
 
 /// The actions of the deformer tool's right-click menu.
-pub const MENU_ACTIONS: [&str; 2] = ["deformer.create-warp", "deformer.create-rotation"];
+pub const MENU_ACTIONS: [&str; 3] = [
+    "deformer.create-warp",
+    "deformer.create-rotation",
+    "deformer.reset",
+];
 
 /// A control point or a handle is picked within this many points of the pointer.
 pub const PICK_RADIUS: f32 = 8.0;

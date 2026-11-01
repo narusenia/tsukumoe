@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 28] = [
+pub const ACTIONS: [&str; 29] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -31,6 +31,7 @@ pub const ACTIONS: [&str; 28] = [
     "mesh.contour",
     "deformer.create-warp",
     "deformer.create-rotation",
+    "deformer.reset",
     "panel.show.viewport",
     "panel.show.tree",
     "panel.show.deformers",
@@ -106,7 +107,7 @@ mod tests {
         assert!(map.conflicts().is_empty());
         for a in ACTIONS {
             // Showing a panel has no default key; the menu and the keymap dialog reach it.
-            if !a.starts_with("panel.show.") {
+            if !a.starts_with("panel.show.") && a != "deformer.reset" {
                 assert!(map.shortcut(a).is_some(), "{a} has no default key");
             }
         }

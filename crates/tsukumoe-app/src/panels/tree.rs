@@ -38,6 +38,8 @@ pub enum Out {
     Delete(Vec<Selection>),
     /// Copy these.
     Duplicate(Vec<Selection>),
+    /// Put the base shape of these deformers back to its initial state.
+    Reset(Vec<Selection>),
     /// Move the element to a part (a part: to a parent part, or none).
     SetPart(Selection, Option<String>),
 }
@@ -653,6 +655,12 @@ fn row_menu(
     let target = target_of(row);
     if ui.button(tr(&ctx, "tree-rename")).clicked() {
         view.tree_mut(panel).renaming = Some(Renaming::new(row.kind, &row.name));
+        ui.close();
+    }
+    if matches!(row.kind, Kind::Warp | Kind::Rotation)
+        && ui.button(tr(&ctx, "deformer-reset")).clicked()
+    {
+        outs.push(Out::Reset(targets.clone()));
         ui.close();
     }
     if row.kind != Kind::Part && ui.button(tr(&ctx, "tree-duplicate")).clicked() {
