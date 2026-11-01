@@ -3843,6 +3843,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "criterion",
+ "schemars",
  "serde",
  "serde_json",
 ]

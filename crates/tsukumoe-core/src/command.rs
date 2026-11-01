@@ -18,9 +18,12 @@ use crate::rig::ArtMesh;
 use crate::table::InsertError;
 use crate::validate::ModelError;
 
+/// An edit to a model. In JSON, `type` names the variant in snake case.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Command {
+    /// Adds a parameter with a value range and default.
     AddParameter {
         name: String,
         min: f32,
@@ -29,27 +32,26 @@ pub enum Command {
         #[serde(default)]
         repeat: bool,
     },
-    RemoveParameter {
-        name: String,
-    },
+    /// Removes a parameter by name.
+    RemoveParameter { name: String },
+    /// Changes the range and default of a parameter.
     SetParameterRange {
         name: String,
         min: f32,
         max: f32,
         default: f32,
     },
+    /// Adds a part, optionally under a parent part.
     AddPart {
         name: String,
         #[serde(default)]
         parent: Option<String>,
     },
-    RemovePart {
-        name: String,
-    },
-    SetPartOpacity {
-        name: String,
-        opacity: f32,
-    },
+    /// Removes a part by name; fails while a mesh uses it.
+    RemovePart { name: String },
+    /// Sets the opacity of a part.
+    SetPartOpacity { name: String, opacity: f32 },
+    /// Adds an art mesh to a part; positions and uvs are [x, y] pairs, indices are triangle vertex indices.
     AddMesh {
         name: String,
         part: String,
@@ -57,18 +59,13 @@ pub enum Command {
         uvs: Vec<Point>,
         indices: Vec<u32>,
     },
-    RemoveMesh {
-        name: String,
-    },
-    SetMeshPositions {
-        name: String,
-        positions: Vec<Point>,
-    },
+    /// Removes an art mesh by name.
+    RemoveMesh { name: String },
+    /// Replaces the vertex positions of a mesh; the count must match its uvs.
+    SetMeshPositions { name: String, positions: Vec<Point> },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
-    Batch {
-        commands: Vec<Command>,
-    },
+    Batch { commands: Vec<Command> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
