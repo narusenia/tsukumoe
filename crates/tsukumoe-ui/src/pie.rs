@@ -12,7 +12,7 @@
 
 use std::f32::consts::TAU;
 
-use egui::{Align2, Color32, Context, FontId, Id, Order, Pos2, Stroke, vec2};
+use egui::{Color32, Context, FontId, Id, Order, Pos2, Stroke, vec2};
 
 use crate::theme::Theme;
 
@@ -20,6 +20,10 @@ use crate::theme::Theme;
 pub const DEAD_RADIUS: f32 = 24.0;
 /// Radius of the ring the items sit on; past it a submenu opens.
 pub const OUTER_RADIUS: f32 = 84.0;
+/// Distance from the ring to the label chips.
+const LABEL_GAP: f32 = 10.0;
+/// How far off the vertical or horizontal axis a label counts as to that side.
+const SIDE: f32 = 0.3;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PieItem {
@@ -157,34 +161,66 @@ impl PieMenu {
             Order::Tooltip,
             Id::unique("tsukumoe-pie-menu"),
         ));
-        painter.circle_filled(self.center, OUTER_RADIUS + 28.0, t.colors.surface_raised);
-        painter.circle_stroke(
-            self.center,
-            OUTER_RADIUS + 28.0,
-            Stroke::new(1.0, t.colors.border),
-        );
+        painter.circle_filled(self.center, OUTER_RADIUS, t.colors.surface_raised);
+        painter.circle_stroke(self.center, OUTER_RADIUS, Stroke::new(1.0, t.colors.border));
         painter.circle_filled(self.center, DEAD_RADIUS, t.colors.background);
         let hit = pie_hit(self.center, pointer, self.items.len());
         let step = TAU / self.items.len().max(1) as f32;
         for (i, item) in self.items.iter().enumerate() {
             let a = i as f32 * step;
-            let at = self.center + vec2(a.sin(), -a.cos()) * (OUTER_RADIUS * 0.7);
+            let dir = vec2(a.sin(), -a.cos());
             let on = matches!(hit, PieHit::Item { index, .. } if index == i);
-            if on {
-                painter.circle_filled(at, 26.0, t.colors.accent);
-            }
-            let color = if on { Color32::WHITE } else { t.colors.text };
+            let dot = if on {
+                t.colors.accent
+            } else {
+                t.colors.border_strong
+            };
+            painter.circle_filled(self.center + dir * (OUTER_RADIUS - 12.0), 3.0, dot);
+
+            // Labels sit outside the ring, growing away from it, so that long
+            // labels never run into their neighbours.
             let mut text = item.label.clone();
             if !item.children.is_empty() {
                 text.push_str(" ›");
             }
-            painter.text(
-                at,
-                Align2::CENTER_CENTER,
-                text,
-                FontId::proportional(t.metrics.text),
-                color,
+            let color = if on { Color32::WHITE } else { t.colors.text };
+            let galley = painter.layout_no_wrap(text, FontId::proportional(t.metrics.text), color);
+            let size = galley.size();
+            let anchor = self.center + dir * (OUTER_RADIUS + LABEL_GAP);
+            let origin = anchor
+                + vec2(
+                    if dir.x > SIDE {
+                        0.0
+                    } else if dir.x < -SIDE {
+                        -size.x
+                    } else {
+                        -size.x / 2.0
+                    },
+                    if dir.y > SIDE {
+                        0.0
+                    } else if dir.y < -SIDE {
+                        -size.y
+                    } else {
+                        -size.y / 2.0
+                    },
+                );
+            let chip = egui::Rect::from_min_size(origin, size).expand2(vec2(7.0, 3.0));
+            painter.rect_filled(
+                chip,
+                t.metrics.radius + 2.0,
+                if on {
+                    t.colors.accent
+                } else {
+                    t.colors.surface_raised
+                },
             );
+            painter.rect_stroke(
+                chip,
+                t.metrics.radius + 2.0,
+                Stroke::new(1.0, if on { t.colors.accent } else { t.colors.border }),
+                egui::epaint::StrokeKind::Inside,
+            );
+            painter.galley(origin, galley, color);
         }
         painter.line_segment(
             [

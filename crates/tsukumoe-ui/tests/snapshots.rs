@@ -150,3 +150,54 @@ fn the_theme_section_in_both_languages() {
     }
     results.unwrap();
 }
+
+/// The pie menu with long Japanese labels on every side: none may touch its
+/// neighbours, and the item under the pointer is highlighted.
+#[test]
+fn pie_menu_labels_do_not_collide() {
+    use tsukumoe_ui::{PieItem, PieMenu};
+    let center = egui::pos2(280.0, 190.0);
+    let items = || {
+        let mut v: Vec<PieItem> = [
+            "選択ツール",
+            "元に戻す",
+            "メッシュツール",
+            "コマンドパレット",
+            "デフォーメーション",
+            "やり直す",
+            "パラメータを開く",
+        ]
+        .iter()
+        .map(|l| PieItem::new(l, l))
+        .collect();
+        v.push(PieItem::new("view", "表示").with_children(vec![PieItem::new("a", "a")]));
+        v
+    };
+    let mut results = SnapshotResults::new();
+    for (tag, pointer) in [
+        ("idle", None),
+        ("hover", Some(center + egui::vec2(60.0, 0.0))),
+    ] {
+        let mut menu = PieMenu::open(center, items());
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(560.0, 380.0))
+            .wgpu()
+            .build_ui(move |ui| {
+                let ctx = ui.ctx().clone();
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_mode(&ctx, Mode::Dark);
+                let t = Theme::get(&ctx);
+                egui::Frame::NONE.fill(t.colors.background).show(ui, |ui| {
+                    ui.allocate_space(egui::vec2(560.0, 380.0));
+                });
+                menu.show(&ctx, false);
+            });
+        if let Some(p) = pointer {
+            harness.hover_at(p);
+        }
+        // The open menu asks for a repaint every frame, so it never settles.
+        harness.run_steps(4);
+        harness.snapshot_options(format!("pie_{tag}"), &options());
+        results.extend_harness(&mut harness);
+    }
+}
