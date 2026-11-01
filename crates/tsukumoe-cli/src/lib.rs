@@ -3,6 +3,9 @@
 
 //! The pieces of `tsukumoe` that tests and benchmarks reuse.
 
+pub mod commands;
 pub mod generate;
 pub mod lipsync;
+pub mod mcp;
 pub mod parity;
+pub mod store;

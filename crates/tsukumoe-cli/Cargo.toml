@@ -17,7 +17,8 @@ path = "src/lib.rs"
 
 [dependencies]
 tsukumoe-ai.workspace = true
-tsukumoe-core.workspace = true
+tsukumoe-core = { workspace = true, features = ["schema"] }
+schemars.workspace = true
 tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true
 serde.workspace = true
@@ -25,6 +26,7 @@ serde_json.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+jsonschema.workspace = true
 tsukumoe-runtime.workspace = true
 tsukumoe-tracking.workspace = true
 

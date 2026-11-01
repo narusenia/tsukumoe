@@ -3827,6 +3827,8 @@ name = "tsukumoe-cli"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "jsonschema",
+ "schemars",
  "serde",
  "serde_json",
  "tsukumoe-ai",
@@ -3843,6 +3845,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "criterion",
+ "schemars",
  "serde",
  "serde_json",
 ]
