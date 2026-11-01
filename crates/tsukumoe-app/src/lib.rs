@@ -8,6 +8,7 @@ pub mod actions;
 pub mod app;
 pub mod commands;
 pub mod deformer_ops;
+pub mod deformer_tool;
 pub mod dispatcher;
 pub mod drag;
 pub mod editor;
