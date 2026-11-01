@@ -79,12 +79,29 @@ impl Toasts {
     }
 }
 
+/// The content width of [`dialog`], in points.
+pub const DIALOG_WIDTH: f32 = 480.0;
+
 /// A modal dialog with a title and a close button. It shows while `*open`;
 /// closing it (the button, Escape, a click outside) sets `*open = false`.
 pub fn dialog<R>(
     ctx: &Context,
     id: impl std::hash::Hash + std::fmt::Debug,
     title: &str,
+    open: &mut bool,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    dialog_sized(ctx, id, title, DIALOG_WIDTH, open, add_contents)
+}
+
+/// [`dialog`] with a given content width. The width is fixed: an auto-sized
+/// window whose fields fill the available width would otherwise grow by its
+/// margins on every frame.
+pub fn dialog_sized<R>(
+    ctx: &Context,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    title: &str,
+    width: f32,
     open: &mut bool,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
@@ -101,7 +118,7 @@ pub fn dialog<R>(
     let modal = egui::Modal::new(Id::unique(id))
         .frame(frame)
         .show(ctx, |ui| {
-            ui.set_min_width(320.0);
+            ui.set_width(width);
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).heading().color(t.colors.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -151,5 +168,46 @@ mod tests {
         assert_eq!(toasts.items[0].text, "b");
         toasts.expire(5.0);
         assert!(toasts.is_empty());
+    }
+
+    /// The content width of `frames` consecutive frames of a dialog with an
+    /// input field (which fills the available width) and a header.
+    fn dialog_widths(frames: usize) -> Vec<f32> {
+        let ctx = Context::default();
+        let mut text = String::from("path");
+        let mut open = true;
+        let mut widths = Vec::new();
+        for _ in 0..frames {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 900.0),
+                )),
+                ..Default::default()
+            };
+            let mut width = 0.0;
+            let mut out = ctx.run_ui(input, |ui| {
+                dialog(ui.ctx(), "growth", "Title", &mut open, |ui| {
+                    crate::text_input(ui, &mut text, "path", "path");
+                    width = ui.min_rect().width();
+                });
+            });
+            out.textures_delta.clear();
+            widths.push(width);
+        }
+        widths
+    }
+
+    #[test]
+    fn a_dialog_does_not_grow_from_frame_to_frame() {
+        let widths = dialog_widths(24);
+        let settled = widths[4];
+        for (i, w) in widths.iter().enumerate().skip(4) {
+            assert!(
+                (w - settled).abs() < 0.5,
+                "frame {i}: width {w} differs from {settled} ({widths:?})"
+            );
+        }
+        assert!(settled < 700.0, "dialog is {settled} points wide");
     }
 }
