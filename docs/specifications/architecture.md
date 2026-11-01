@@ -49,6 +49,7 @@ tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsuk
 - `tsukumoe-core` は `wgpu` にも依存しない。`wasm32-unknown-unknown` でビルドできる状態を保つ
 - `tsukumoe-runtime` は編集機能（コマンド・undo）を含まない。core の評価部分を feature で切り出して使う
 - moc3 関連コードは `tsukumoe-compat` の `moc3` feature に閉じる（REQ-COMPAT-003）
+- `tsukumoe-core` の `schema` feature が `Command` の JSON Schema を出す（wasm / FFI では無効）。MCP のツール定義と `docs/reference/commands.md`（`tsukumoe docs commands` の生成物）はここから作る
 
 ## 評価パイプライン
 
