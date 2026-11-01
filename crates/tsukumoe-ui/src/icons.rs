@@ -76,6 +76,7 @@ icons! {
     Menu => "menu",
     History => "history",
     ListTree => "list-tree",
+    Grid => "grid-3x3",
     Sparkles => "sparkles",
 }
 

@@ -1316,6 +1316,7 @@ impl PanelHost for Panels<'_> {
         Some(match id {
             "viewport" => Icon::Image,
             "tree" => Icon::ListTree,
+            "deformers" => Icon::Grid,
             "parameters" => Icon::Sliders,
             "inspector" => Icon::Info,
             "history" => Icon::History,
@@ -1339,13 +1340,13 @@ impl PanelHost for Panels<'_> {
         };
         match id {
             "history" => history::show(ui, &mut doc.dispatcher),
-            "tree" => {
-                for out in tree::show(
-                    ui,
-                    doc.dispatcher.model(),
-                    &mut editor.view,
-                    crate::tree_model::Panel::Parts,
-                ) {
+            "tree" | "deformers" => {
+                let panel = if id == "tree" {
+                    tree_model::Panel::Parts
+                } else {
+                    tree_model::Panel::Deformers
+                };
+                for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view, panel) {
                     match out {
                         tree::Out::Command(command) => {
                             editor.submit(&ctx, command);
