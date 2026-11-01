@@ -3583,6 +3583,7 @@ name = "tsukumoe-host"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "pollster 0.4.0",
  "tsukumoe-core",
  "tsukumoe-format",
  "tsukumoe-gpu",

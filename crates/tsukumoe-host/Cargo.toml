@@ -16,6 +16,9 @@ tsukumoe-ui.workspace = true
 wgpu.workspace = true
 eframe.workspace = true
 
+[dev-dependencies]
+pollster.workspace = true
+
 [[bin]]
 name = "tsukumoe-host"
 path = "src/main.rs"
