@@ -319,6 +319,19 @@ impl Layout {
         }
     }
 
+    /// Brings `id` into view: the visible tab of its group, or the open panel
+    /// of its strip.
+    pub fn reveal(&mut self, id: &str) {
+        for side in [Side::Left, Side::Right] {
+            let strip = self.strip_mut(side);
+            if strip.panels.iter().any(|p| p == id) {
+                strip.open = Some(id.to_owned());
+                return;
+            }
+        }
+        self.activate(id);
+    }
+
     /// Sets the share of the split at `path` (`false` = `a`, `true` = `b`),
     /// clamped to the allowed range.
     pub fn set_ratio(&mut self, path: &[bool], ratio: f32) -> bool {
@@ -562,6 +575,24 @@ mod tests {
         assert!(l.right.open.is_none());
         l.set_strip_width(Side::Right, 1.0);
         assert_eq!(l.right.width, MIN_WIDTH);
+    }
+
+    #[test]
+    fn reveal_opens_strip_panels_and_activates_tabs() {
+        let mut l = sample();
+        l.reveal("e");
+        assert_eq!(l.right.open.as_deref(), Some("e"));
+        l.reveal("b");
+        let Node::Split { a, .. } = &l.root else {
+            panic!()
+        };
+        assert_eq!(
+            **a,
+            Node::Tabs {
+                tabs: vec!["a".into(), "b".into()],
+                active: 1
+            }
+        );
     }
 
     #[test]

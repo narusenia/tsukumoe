@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
@@ -39,6 +40,7 @@ pub struct Editor {
     pub dialog: Option<Dialog>,
     pub toasts: Toasts,
     pub view: ViewState,
+    pub palette: Palette,
     viewport: Option<Viewport>,
     layouts_dirty: bool,
 }
@@ -65,6 +67,7 @@ impl Editor {
             dialog: None,
             toasts: Toasts::default(),
             view: ViewState::default(),
+            palette: Palette::default(),
             viewport: None,
             layouts_dirty: false,
         }
@@ -135,6 +138,13 @@ impl Editor {
                 false
             }
         }
+    }
+
+    /// Shows the command palette panel and puts the cursor in its search field.
+    pub fn open_palette(&mut self) {
+        self.layouts.current_mut(self.workspace).reveal("palette");
+        self.layouts_dirty = true;
+        self.palette.focus = true;
     }
 
     pub fn undo(&mut self) -> bool {
@@ -418,6 +428,11 @@ impl PanelHost for Panels<'_> {
                 let command =
                     inspector::show(ui, doc.dispatcher.model(), editor.view.selection.as_ref());
                 if let Some(command) = command {
+                    editor.submit(&ctx, command);
+                }
+            }
+            "palette" => {
+                if let Some(command) = editor.palette.show(ui) {
                     editor.submit(&ctx, command);
                 }
             }

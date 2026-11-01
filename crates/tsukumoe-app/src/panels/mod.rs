@@ -6,6 +6,7 @@
 
 pub mod history;
 pub mod inspector;
+pub mod palette;
 pub mod parameters;
 pub mod tree;
 pub mod viewport;

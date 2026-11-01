@@ -5,6 +5,7 @@
 //! window); `main.rs` only starts the window.
 
 pub mod app;
+pub mod commands;
 pub mod dispatcher;
 pub mod editor;
 pub mod panels;

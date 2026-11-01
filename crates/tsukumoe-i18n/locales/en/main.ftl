@@ -101,3 +101,6 @@ inspector-opacity = Opacity
 inspector-vertices = Vertices
 inspector-triangles = Triangles
 viewport-no-gpu = No GPU surface is available for the viewport.
+palette-search = Search commands
+palette-run = Run
+menu-palette = Command palette

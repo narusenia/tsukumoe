@@ -97,3 +97,6 @@ inspector-opacity = 不透明度
 inspector-vertices = 頂点数
 inspector-triangles = 三角形数
 viewport-no-gpu = ビューポートに使える GPU の描画面がありません。
+palette-search = コマンドを検索
+palette-run = 実行
+menu-palette = コマンドパレット
