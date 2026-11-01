@@ -258,4 +258,47 @@ mod tests {
         assert_eq!(live.bound(), 2);
         assert_eq!(live.skipped(), default_rules().len() - 2);
     }
+
+    #[test]
+    fn a_vmc_packet_over_local_udp_moves_the_scene() {
+        use std::net::UdpSocket;
+        use std::time::Duration;
+        use tsukumoe_tracking::VmcReceiver;
+
+        let mut scene = scene();
+        let rx = VmcReceiver::bind("127.0.0.1:0").unwrap();
+        let dst = rx.local_addr();
+        let mut live = Live::new(&scene, None);
+        live.attach(Box::new(rx));
+        live.set_smoothing(0.0);
+        let tx = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let pad = |s: &str| {
+            let mut b = s.as_bytes().to_vec();
+            b.resize((b.len() / 4 + 1) * 4, 0);
+            b
+        };
+        let message = |addr: &str, tags: &str, args: &[u8]| {
+            let mut m = [pad(addr), pad(tags)].concat();
+            m.extend_from_slice(args);
+            m
+        };
+        let mut args = pad("jawOpen");
+        args.extend_from_slice(&1.0f32.to_be_bytes());
+        let mut packet = [pad("#bundle"), vec![0; 8]].concat();
+        for m in [
+            message("/VMC/Ext/Blend/Val", ",sf", &args),
+            message("/VMC/Ext/Blend/Apply", ",", &[]),
+        ] {
+            packet.extend_from_slice(&(m.len() as i32).to_be_bytes());
+            packet.extend(m);
+        }
+        tx.send_to(&packet, dst).unwrap();
+        for i in 0..200 {
+            if live.step(f64::from(i) * 0.01, &mut scene) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(scene.value(1), 1.0);
+    }
 }
