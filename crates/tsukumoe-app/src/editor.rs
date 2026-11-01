@@ -182,11 +182,18 @@ impl Editor {
         }
     }
 
-    /// Runs an action by name (a key press, a menu item, a pie menu item).
-    /// Unknown names, e.g. from a hand-edited keymap, do nothing.
-    pub fn run_action(&mut self, ctx: &Context, action: &str) {
+    /// Runs an action by name (a key press, a menu item, a pie menu item) and
+    /// says whether it knows the name. Unknown names, e.g. from a hand-edited
+    /// keymap, do nothing. `file.open-recent:<path>` and `layout.load:<name>`
+    /// carry their argument after the colon.
+    pub fn run_action(&mut self, ctx: &Context, action: &str) -> bool {
         match action {
             "file.open" => self.dialog = Some(Dialog::Open(String::new())),
+            "file.save-as" => {
+                if self.doc.is_some() {
+                    self.dialog = Some(Dialog::SaveAs(String::new()));
+                }
+            }
             "file.save" => {
                 let r = self.save();
                 self.report(ctx, r, Some(tr(ctx, "app-saved")));
@@ -194,6 +201,20 @@ impl Editor {
             "edit.undo" => drop(self.undo()),
             "edit.redo" => drop(self.redo()),
             "view.palette" => self.open_palette(),
+            "view.pie-settings" => self.dialog = Some(Dialog::Pie),
+            "view.drag-settings" => self.dialog = Some(Dialog::Drag),
+            "view.keymap-settings" => {
+                let texts = ACTIONS
+                    .iter()
+                    .map(|a| {
+                        self.keymap
+                            .keys_text(a, actions::context_of(a))
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                self.dialog = Some(Dialog::Keymap(texts, None));
+            }
+            "layout.save" => self.dialog = Some(Dialog::SaveLayout(String::new())),
             // Holding the key repeats the press; reopening would move the menu
             // to the pointer every time.
             "view.pie-menu" => {
@@ -214,9 +235,27 @@ impl Editor {
             other => {
                 if let Some(tool) = Tool::from_action(other) {
                     self.view.tool = tool;
+                } else if let Some(path) = other.strip_prefix("file.open-recent:") {
+                    let path = PathBuf::from(path);
+                    let r = self.open(&path);
+                    let name = path.display().to_string();
+                    let ok = tr_args(ctx, "app-opened", &[("name", Arg::from(name.as_str()))]);
+                    self.report(ctx, r, Some(ok));
+                } else if let Some(name) = other.strip_prefix("layout.load:") {
+                    if self.layouts.load_named(self.workspace, name) {
+                        self.layouts_dirty = true;
+                    }
+                } else if let Some(preset) = other
+                    .strip_prefix("layout.preset.")
+                    .and_then(|k| Preset::ALL.into_iter().find(|p| p.key() == k))
+                {
+                    self.dialog = Some(Dialog::ConfirmPreset(preset));
+                } else {
+                    return false;
                 }
             }
         }
+        true
     }
 
     /// Draws the open pie menu; the key's release picks the item under the
@@ -964,6 +1003,28 @@ mod tests {
             )
             .unwrap();
         editor
+    }
+
+    #[test]
+    fn menu_actions_open_their_dialogs_and_unknown_names_are_refused() {
+        let ctx = Context::default();
+        let mut editor = Editor::new(None);
+        assert!(editor.run_action(&ctx, "file.save-as"));
+        assert!(editor.dialog.is_none(), "nothing to save without a project");
+        let mut editor = open_minimal();
+        assert!(editor.run_action(&ctx, "file.save-as"));
+        assert!(matches!(editor.dialog, Some(Dialog::SaveAs(_))));
+        assert!(editor.run_action(&ctx, "layout.preset.cubism"));
+        assert!(matches!(
+            editor.dialog,
+            Some(Dialog::ConfirmPreset(Preset::Cubism))
+        ));
+        assert!(editor.run_action(&ctx, "view.keymap-settings"));
+        assert!(matches!(editor.dialog, Some(Dialog::Keymap(..))));
+        assert!(editor.run_action(&ctx, "layout.save"));
+        assert!(matches!(editor.dialog, Some(Dialog::SaveLayout(_))));
+        assert!(!editor.run_action(&ctx, "layout.preset.nope"));
+        assert!(!editor.run_action(&ctx, "nonsense.action"));
     }
 
     #[test]
