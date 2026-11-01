@@ -14,7 +14,7 @@ Tsukumoe は「GPU も UI も知らない評価コア」を中心に置き、そ
                     │                       │
    ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  UI 境界
                     ▼                       ▼
-tsukumoe-cli ──► tsukumoe-ai     tsukumoe-tracking
+tsukumoe-cli ──► tsukumoe-ai     tsukumoe-tracking     tsukumoe-psd ──► tsukumoe-core
     │              │               │
     ▼              ▼               ▼
 tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsukumoe-runtime ◄── tsukumoe-ffi ──► (Unity package, 別 repo)
@@ -36,7 +36,8 @@ tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsuk
 | `tsukumoe-wasm` | wasm-bindgen + TS 型 | なし | M3 |
 | `tsukumoe-tracking` | 入力アダプタ・標準パラメータマッピング | なし | M4 |
 | `tsukumoe-ai` | 推論プロバイダ抽象・リップシンク・リグ支援 | なし | M4 / M6 |
-| `tsukumoe-cli` | 変換・レンダ・検証・MCP サーバ | なし | M1〜 |
+| `tsukumoe-psd` | PSD リーダ（自前・依存追加なし）・取り込み計画・`sources/psd-map.json` | なし | M5 |
+| `tsukumoe-cli` | 変換・レンダ・検証・MCP サーバ・PSD 取り込み | なし | M1〜 |
 | `tsukumoe-i18n` | UI の翻訳（Fluent）・言語の検出とフォールバック | なし | M1 |
 | `tsukumoe-ui` | デザイントークン・テーマ・UI 部品（egui の上）、gallery | あり | M1 |
 | `tsukumoe-host` | 透過ウィンドウ・Spout2 / Syphon・仮想カメラ | あり | M1（ビューア）→ M4 |
@@ -48,6 +49,7 @@ tsukumoe-compat ──► tsukumoe-format ──► tsukumoe-core ◄── tsuk
 - UI 境界より下のクレートは egui 系（`egui` / `eframe` / `egui-wgpu` / `epaint` など）に依存しない（CI で `cargo tree` 検査）
 - `tsukumoe-core` は `wgpu` にも依存しない。`wasm32-unknown-unknown` でビルドできる状態を保つ
 - `tsukumoe-runtime` は編集機能（コマンド・undo）を含まない。core の評価部分を feature で切り出して使う
+- `tsukumoe-psd` は `tsukumoe-core` にだけ依存する（`tsukumoe-format` にも UI にも依存しない。プロジェクトのファイルは呼び出し側が渡す）。外部由来のバイト列を読むので、長さは境界検査し、上限はメモリ確保の前に検査する
 - moc3 関連コードは `tsukumoe-compat` の `moc3` feature に閉じる（REQ-COMPAT-003）
 - `tsukumoe-core` の `schema` feature が `Command` の JSON Schema を出す（wasm / FFI では無効）。MCP のツール定義と `docs/reference/commands.md`（`tsukumoe docs commands` の生成物）はここから作る
 
