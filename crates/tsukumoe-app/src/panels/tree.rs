@@ -10,7 +10,7 @@
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use tsukumoe_core::command::Command;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{Icon, Theme, Variant, button, hint, select, text_input, tr};
+use tsukumoe_ui::{Icon, Theme, Variant, hint, icon_button, text_input, tr};
 
 use crate::deformer_ops::Target;
 use crate::tree_model::{
@@ -726,54 +726,69 @@ fn header(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) {
     let ctx = ui.ctx().clone();
     let name = tr(&ctx, "filter-name");
     text_input(ui, &mut view.tree_mut(panel).filter, &name, &name);
+    // The toolbar is icons only (the names are the tooltips and the accessible
+    // names); it wraps when the panel is narrow.
     ui.horizontal_wrapped(|ui| {
+        let toggle = |on: bool| if on { Variant::Primary } else { Variant::Ghost };
         for &kind in panel.kinds() {
             let on = view.tree(panel).kinds.contains(&kind);
-            let variant = if on {
-                Variant::Primary
-            } else {
-                Variant::Secondary
-            };
-            if button(ui, &tr(&ctx, kind_key(kind)), variant).clicked() {
+            if icon_button(ui, toggle_icon(kind), &tr(&ctx, kind_key(kind)), toggle(on)).clicked() {
                 view.tree_mut(panel).toggle_kind(kind);
             }
         }
         let on = view.tree(panel).hidden_only;
-        let variant = if on {
-            Variant::Primary
-        } else {
-            Variant::Secondary
-        };
-        if button(ui, &tr(&ctx, "tree-hidden-only"), variant).clicked() {
+        if icon_button(ui, Icon::EyeOff, &tr(&ctx, "tree-hidden-only"), toggle(on)).clicked() {
             view.tree_mut(panel).hidden_only = !on;
         }
-    });
-    ui.horizontal_wrapped(|ui| {
-        let mut sort = view.tree(panel).sort;
-        let options = [
+        // The sort order: the button opens a short menu; the tooltip names the one in use.
+        let sort = view.tree(panel).sort;
+        let sorts = [
             (Sort::Model, tr(&ctx, "tree-sort-model")),
             (Sort::Name, tr(&ctx, "tree-sort-name")),
             (Sort::Draw, tr(&ctx, "tree-sort-draw")),
         ];
-        let options: Vec<(Sort, &str)> = options.iter().map(|(s, n)| (*s, n.as_str())).collect();
-        if select(
+        let current = sorts
+            .iter()
+            .find(|(s, _)| *s == sort)
+            .map_or("", |(_, n)| n.as_str());
+        let name = format!("{}: {current}", tr(&ctx, "tree-sort"));
+        let on = sort != Sort::Model;
+        let sort_button = icon_button(ui, Icon::ArrowUpDown, &name, toggle(on));
+        egui::Popup::menu(&sort_button).show(|ui| {
+            for (s, label) in &sorts {
+                if ui.selectable_label(*s == sort, label).clicked() {
+                    view.tree_mut(panel).sort = *s;
+                    ui.close();
+                }
+            }
+        });
+        if icon_button(
             ui,
-            ("tree-sort", panel as u8),
-            &tr(&ctx, "tree-sort"),
-            &mut sort,
-            &options,
+            Icon::ChevronsUpDown,
+            &tr(&ctx, "tree-open-all"),
+            Variant::Ghost,
         )
-        .changed()
+        .clicked()
         {
-            view.tree_mut(panel).sort = sort;
-        }
-        if button(ui, &tr(&ctx, "tree-open-all"), Variant::Ghost).clicked() {
             view.tree_mut(panel).open_all();
         }
-        if button(ui, &tr(&ctx, "tree-close-all"), Variant::Ghost).clicked() {
+        if icon_button(
+            ui,
+            Icon::ChevronsDownUp,
+            &tr(&ctx, "tree-close-all"),
+            Variant::Ghost,
+        )
+        .clicked()
+        {
             view.tree_mut(panel).close_all(model, panel);
         }
-        if button(ui, &tr(&ctx, "tree-open-selection"), Variant::Ghost).clicked()
+        if icon_button(
+            ui,
+            Icon::Locate,
+            &tr(&ctx, "tree-open-selection"),
+            Variant::Ghost,
+        )
+        .clicked()
             && let Some(sel) = view.selection.clone()
         {
             view.tree_mut(panel).open_to(model, panel, &sel);
@@ -787,6 +802,16 @@ fn header(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) {
             &[("count", tsukumoe_ui::Arg::from(count))],
         );
         hint(ui, text);
+    }
+}
+
+/// The icon of a kind's filter toggle (the rows keep their own).
+fn toggle_icon(kind: Kind) -> Icon {
+    match kind {
+        Kind::Part => Icon::Folder,
+        Kind::Mesh => Icon::Image,
+        Kind::Warp => Icon::Grid,
+        Kind::Rotation => Icon::Rotate,
     }
 }
 
@@ -1368,5 +1393,93 @@ mod tests {
         assert!(badge.right() <= row.right() - 20.0, "{badge:?} {row:?}");
         assert!(badge.left() > row.left() + 80.0, "{badge:?} {row:?}");
         assert!(badge.width() < row.width() * 0.6);
+    }
+
+    #[test]
+    fn the_toolbar_is_icon_buttons_named_by_their_tooltips() {
+        let mut h = harness(many(), Panel::Parts);
+        h.run();
+        // The kinds of this panel, with their names as the accessible names.
+        h.get_by_label("Part");
+        h.get_by_label("Mesh");
+        assert!(
+            h.query_by_label("Warp").is_none(),
+            "the parts panel has no warp toggle"
+        );
+        // A kind toggle changes the filter.
+        h.get_by_label("Mesh").click();
+        h.run();
+        assert!(h.state().1.parts.kinds.contains(&Kind::Mesh));
+        h.get_by_label("Hidden only").click();
+        h.run();
+        assert!(h.state().1.parts.hidden_only);
+        // Open all / close all / show selection.
+        h.get_by_label("Close all").click();
+        h.run();
+        assert!(h.state().1.parts.collapsed.contains("p:Arm"));
+        h.get_by_label("Open all").click();
+        h.run();
+        assert!(h.state().1.parts.collapsed.is_empty());
+        h.state_mut().1.select_only(Selection::Mesh("a1".into()));
+        h.state_mut().1.parts.set_open("p:Arm", false);
+        h.run();
+        h.get_by_label("Show selection").click();
+        h.run();
+        assert!(h.state().1.parts.is_open("p:Arm"));
+        // The deformers panel has its own kinds.
+        let mut d = harness(with_deformers(), Panel::Deformers);
+        d.run();
+        d.get_by_label("Warp");
+        d.get_by_label("Rotation");
+        d.get_by_label("Warp").click();
+        d.run();
+        assert!(d.state().1.deformers.kinds.contains(&Kind::Warp));
+    }
+
+    #[test]
+    fn the_sort_button_opens_a_menu_and_names_the_order_in_use() {
+        let mut h = harness(many(), Panel::Parts);
+        h.run();
+        h.get_by_label("Sort: Model order").click();
+        h.run();
+        h.get_by_label("Name").click();
+        h.run();
+        assert_eq!(h.state().1.parts.sort, tree_model::Sort::Name);
+        // The tooltip and the accessible name now say the new order.
+        h.get_by_label("Sort: Name");
+        assert!(h.query_by_label("Sort: Model order").is_none());
+    }
+
+    #[test]
+    fn a_narrow_toolbar_wraps_and_keeps_every_button_inside() {
+        for width in [120.0, 200.0, 320.0] {
+            let mut h = Harness::builder()
+                .with_size(egui::vec2(width, 400.0))
+                .build_ui_state(
+                    |ui, state: &mut (Model, ViewState)| {
+                        tsukumoe_ui::init(ui.ctx());
+                        tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                        show(ui, &state.0, &mut state.1, Panel::Deformers);
+                    },
+                    (with_deformers(), ViewState::default()),
+                );
+            h.run();
+            for name in [
+                "Warp",
+                "Rotation",
+                "Mesh",
+                "Hidden only",
+                "Sort: Model order",
+                "Open all",
+                "Close all",
+                "Show selection",
+            ] {
+                let r = h.get_by_label(name).rect();
+                assert!(
+                    r.left() >= 0.0 && r.right() <= width + 0.5,
+                    "{name} at {width}: {r:?}"
+                );
+            }
+        }
     }
 }
