@@ -437,18 +437,31 @@ fn clipping_becomes_a_mask_only_when_the_result_matches() {
     assert_eq!(mesh(&p.model, "shade").masks, [base_id]);
     assert!(make_plan(&p, &ok, &Choices::default()).2.is_empty());
 
-    // A multiply-clipped layer would not look the same: warned and not masked.
-    let mut mul = clipped.clone();
-    mul.blend = *b"mul ";
-    let bytes = spec(vec![Node::Layer(mul), layer("base", 0, 0, 8, 8, 6)]);
+    // Multiply and Additive clipped layers are masked too: the mask factor
+    // scales the premultiplied source before the blend.
+    for key in [b"mul ", b"lddg"] {
+        let mut c = clipped.clone();
+        c.blend = *key;
+        let bytes = spec(vec![Node::Layer(c), layer("base", 0, 0, 8, 8, 6)]);
+        let mut p = Proj::default();
+        let plan = import(&mut p, &bytes, &Choices::default());
+        assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+        let base_id = p.model.meshes().find("base").unwrap();
+        assert_eq!(mesh(&p.model, "shade").masks, [base_id]);
+    }
+
+    // A blend with no counterpart falls back to Normal: still clipped, and
+    // the note says the color is approximate.
+    let mut over = clipped.clone();
+    over.blend = *b"over";
+    let bytes = spec(vec![Node::Layer(over), layer("base", 0, 0, 8, 8, 6)]);
     let mut p = Proj::default();
     let plan = import(&mut p, &bytes, &Choices::default());
-    assert!(
-        plan.notes
-            .iter()
-            .any(|n| n.code == "clipping" && n.layer == "shade")
-    );
-    assert!(mesh(&p.model, "shade").masks.is_empty());
+    assert_eq!(plan.notes.len(), 1);
+    assert_eq!(plan.notes[0].code, "blend_mode");
+    assert!(plan.notes[0].message.contains("approximate"));
+    assert_eq!(mesh(&p.model, "shade").masks.len(), 1);
+    assert_eq!(mesh(&p.model, "shade").blend_mode, BlendMode::Normal);
 
     // A translucent base likewise.
     let mut base = LayerSpec::solid("base", 0, 0, 8, 8, px(6));

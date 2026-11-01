@@ -232,7 +232,14 @@ impl Scan {
                 notes.push(Note {
                     code: "blend_mode",
                     layer: l.key.clone(),
-                    message: format!("blend mode '{}' has no counterpart: Normal", l.blend),
+                    message: if l.clipping && self.clipping_problem(l).is_none() {
+                        format!(
+                            "blend mode '{}' has no counterpart: Normal (clipped to its base, but the color is approximate)",
+                            l.blend
+                        )
+                    } else {
+                        format!("blend mode '{}' has no counterpart: Normal", l.blend)
+                    },
                 });
             }
             if l.clipping
@@ -250,7 +257,9 @@ impl Scan {
 
     /// Why clipping `layer` to its base would not look like the PSD, if so.
     /// The runtime mask is the alpha of the base's texture, ignoring the
-    /// base's opacity and blend mode (`rendering.md` section 3).
+    /// base's opacity and blend mode (`rendering.md` section 3). The mask
+    /// factor multiplies the layer's premultiplied color before the blend, so
+    /// Normal, Multiply and Additive layers clip like the PSD's.
     pub fn clipping_problem(&self, layer: &ScannedLayer) -> Option<&'static str> {
         let Some(base) = layer.clip_base.map(|b| &self.layers[b]) else {
             return Some("the base is not a layer");
@@ -266,9 +275,6 @@ impl Scan {
         }
         if blend_mode(&base.blend) != Some(BlendMode::Normal) {
             return Some("the base has a blend mode");
-        }
-        if blend_mode(&layer.blend) != Some(BlendMode::Normal) {
-            return Some("the layer has a blend mode");
         }
         None
     }
