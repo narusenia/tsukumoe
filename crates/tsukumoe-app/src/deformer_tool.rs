@@ -15,10 +15,12 @@ use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::deformer_space::Space;
 use tsukumoe_core::elements::Point;
 use tsukumoe_core::model::Model;
+use tsukumoe_core::proportional;
 use tsukumoe_core::rig::DeformerRef;
 
 use crate::deformer_ops::OpError;
 use crate::mesh_tool::{Mapper, Op};
+use crate::proportional::Proportional;
 
 /// The actions of the deformer tool's right-click menu.
 pub const MENU_ACTIONS: [&str; 3] = [
@@ -164,16 +166,25 @@ impl Shape {
         selected: &BTreeSet<u32>,
         from: Point,
         to: Point,
+        weights: Option<&[f32]>,
     ) -> Option<Self> {
         let mut out = self.clone();
         match (&mut out, grab) {
             (Self::Warp { points, parent, .. }, Grab::Points) => {
                 let (a, b) = (from, to);
                 let d = [b[0] - a[0], b[1] - a[1]];
-                for &i in selected {
-                    let world = parent.point_to_world(*points.get(i as usize)?);
-                    points[i as usize] = parent
-                        .point_from_world([world[0] + d[0], world[1] + d[1]])
+                // With weights every point follows by its weight; else the selected ones whole.
+                let follow: Vec<(usize, f32)> = match weights.filter(|w| w.len() == points.len()) {
+                    Some(w) => (0..w.len())
+                        .filter(|&i| w[i] > 0.0)
+                        .map(|i| (i, w[i]))
+                        .collect(),
+                    None => selected.iter().map(|&i| (i as usize, 1.0)).collect(),
+                };
+                for (i, k) in follow {
+                    let world = parent.point_to_world(*points.get(i)?);
+                    points[i] = parent
+                        .point_from_world([world[0] + d[0] * k, world[1] + d[1] * k])
                         .ok()?;
                 }
             }
@@ -255,6 +266,8 @@ pub struct DeformerTool {
     /// under it too. Without it only the axis moves and what hangs from the
     /// rotation stays where it is drawn. Set by the viewport each frame.
     pub whole: bool,
+    /// Proportional edit for grid points; the viewport copies the editor's options here.
+    pub proportional: Proportional,
 }
 
 impl Default for DeformerTool {
@@ -265,6 +278,7 @@ impl Default for DeformerTool {
             gesture: None,
             grid: (4, 4),
             whole: false,
+            proportional: Proportional::default(),
         }
     }
 }
@@ -366,6 +380,7 @@ impl DeformerTool {
             *self = Self {
                 deformer: name.map(str::to_owned),
                 grid: self.grid,
+                proportional: self.proportional,
                 ..Self::default()
             };
         }
@@ -468,7 +483,41 @@ impl DeformerTool {
         let Some(Gesture::Move { grab, from, to }) = self.gesture else {
             return None;
         };
-        shape.dragged(grab, &self.points, m.to_model(from), m.to_model(to))
+        let weights = self.weights(shape, grab, m);
+        shape.dragged(
+            grab,
+            &self.points,
+            m.to_model(from),
+            m.to_model(to),
+            weights.as_deref(),
+        )
+    }
+
+    /// How far each grid point follows a drag of points with proportional
+    /// edit on: the selected points whole, their neighbours (along the grid's
+    /// rows and columns) less. `None` for handles and with it off.
+    fn weights(&self, shape: &Shape, grab: Grab, m: &Mapper) -> Option<Vec<f32>> {
+        let Shape::Warp { rows, columns, .. } = shape else {
+            return None;
+        };
+        if grab != Grab::Points || !self.proportional.on {
+            return None;
+        }
+        let base: Vec<u32> = self.points.iter().copied().collect();
+        Some(proportional::weights(
+            &shape.world_points(),
+            &proportional::grid_edges(*rows, *columns),
+            &base,
+            &self.proportional.influence(m),
+        ))
+    }
+
+    /// The weights of a points drag in progress, for the overlay's shading.
+    pub fn drag_weights(&self, shape: &Shape, m: &Mapper) -> Option<Vec<f32>> {
+        let Some(Gesture::Move { grab, .. }) = self.gesture else {
+            return None;
+        };
+        self.weights(shape, grab, m)
     }
 
     /// The button is released: a click selects, a box selects the points
@@ -497,7 +546,14 @@ impl DeformerTool {
                 if from == to {
                     return None;
                 }
-                let moved = shape.dragged(grab, &self.points, m.to_model(from), m.to_model(to))?;
+                let weights = self.weights(shape, grab, m);
+                let moved = shape.dragged(
+                    grab,
+                    &self.points,
+                    m.to_model(from),
+                    m.to_model(to),
+                    weights.as_deref(),
+                )?;
                 let label = match grab {
                     Grab::Points => "deformer_move_points",
                     Grab::Handle(Handle::Origin) => "deformer_move_origin",
@@ -534,6 +590,7 @@ impl DeformerTool {
             &self.points,
             m.to_model(from),
             m.to_model(to),
+            None,
         )?
         else {
             return None;
@@ -783,6 +840,81 @@ mod tests {
         t.drag(at(1.0, 1.0));
         t.cancel();
         assert!(t.release("Warp", &shape, &mapper()).is_none());
+    }
+
+    #[test]
+    fn proportional_edit_moves_the_neighbours_of_a_grid_point_along_the_grid() {
+        let m = model();
+        let shape = Shape::of(&m, "Warp", 0.5).unwrap();
+        let mut t = tool("Warp");
+        t.proportional.on = true;
+        // 300 points are 3 units; the grid is 2 apart.
+        t.proportional.radius = 300.0;
+        t.proportional.falloff = proportional::Falloff::Linear;
+        t.click(&shape, &mapper(), at(2.0, 2.0), false);
+        t.press(&shape, &mapper(), at(2.0, 2.0), false);
+        t.drag(at(2.0, 3.0));
+        let weights = t.drag_weights(&shape, &mapper()).unwrap();
+        assert_eq!(weights[4], 1.0);
+        // Along the grid a corner is 4 away: out. A side neighbour is 2 away.
+        assert_eq!(weights[0], 0.0);
+        assert!((weights[1] - (1.0 - 2.0 / 3.0)).abs() < 1e-5);
+        let live = t.dragging(&shape, &mapper()).unwrap();
+        let Shape::Warp { points, .. } = &live else {
+            panic!("a warp");
+        };
+        assert!((points[4][1] - 3.0).abs() < 1e-4);
+        assert!(
+            (points[1][1] - (0.0 + 1.0 / 3.0)).abs() < 1e-4,
+            "{:?}",
+            points[1]
+        );
+        assert_eq!(points[0], [0.0, 0.0]);
+        let (command, _) = t.release("Warp", &shape, &mapper()).unwrap();
+        let Command::SetWarpBasePoints { points: sent, .. } = command else {
+            panic!("one SetWarpBasePoints");
+        };
+        assert_eq!(
+            Shape::Warp {
+                points: sent,
+                rows: 2,
+                columns: 2,
+                parent: Space::Drawing
+            },
+            live
+        );
+    }
+
+    #[test]
+    fn proportional_edit_is_off_by_default_and_never_touches_handles() {
+        let m = model();
+        let shape = Shape::of(&m, "Warp", 0.5).unwrap();
+        let mut t = tool("Warp");
+        t.click(&shape, &mapper(), at(2.0, 2.0), false);
+        t.press(&shape, &mapper(), at(2.0, 2.0), false);
+        t.drag(at(2.0, 3.0));
+        assert!(t.drag_weights(&shape, &mapper()).is_none());
+        let live = t.dragging(&shape, &mapper()).unwrap();
+        let Shape::Warp { points, .. } = &live else {
+            panic!("a warp");
+        };
+        assert_eq!(points[1], [2.0, 0.0]);
+        // A rotation has no weights even with the option on.
+        let rot = Shape::of(&m, "Rot", 0.5).unwrap();
+        let mut t = tool("Rot");
+        t.proportional.on = true;
+        let origin = rot
+            .handles()
+            .into_iter()
+            .find(|(h, _)| *h == Handle::Origin)
+            .unwrap()
+            .1;
+        t.press(&rot, &mapper(), mapper().to_screen(origin), false);
+        t.drag([
+            mapper().to_screen(origin)[0] + 30.0,
+            mapper().to_screen(origin)[1],
+        ]);
+        assert!(t.drag_weights(&rot, &mapper()).is_none());
     }
 
     #[test]
