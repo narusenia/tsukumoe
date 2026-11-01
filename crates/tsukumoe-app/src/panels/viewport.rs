@@ -9,7 +9,9 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui_wgpu::RenderState;
-use egui::{PointerButton, Rect, Sense, TextureId, Ui, pos2};
+use egui::{
+    Event, MouseWheelSource, MouseWheelUnit, PointerButton, Rect, Sense, TextureId, Ui, pos2,
+};
 use tsukumoe_gpu::{Renderer, Texture};
 use tsukumoe_ui::{hint, tr};
 
@@ -20,6 +22,33 @@ use crate::view::ViewState;
 
 /// How long to keep drawing after a change, so physics can settle.
 const SETTLE: Duration = Duration::from_secs(3);
+
+/// What scrolling does in the viewport. A trackpad (and the momentum after it)
+/// pans; a mouse wheel zooms; pinch always zooms. Where the platform does not
+/// say which device it is, points mean a trackpad and lines a wheel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scroll {
+    Pan,
+    Zoom,
+}
+
+/// The mode after this frame's events. A scroll keeps gliding for a few frames
+/// after its last event, so without a new event the mode stays as it was.
+fn scroll_mode(events: &[Event], before: Scroll) -> Scroll {
+    events
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            Event::MouseWheel { unit, source, .. } => Some(match (source, unit) {
+                (MouseWheelSource::Trackpad | MouseWheelSource::Momentum, _) => Scroll::Pan,
+                (MouseWheelSource::Wheel, _) => Scroll::Zoom,
+                (MouseWheelSource::Unknown, MouseWheelUnit::Point) => Scroll::Pan,
+                (MouseWheelSource::Unknown, _) => Scroll::Zoom,
+            }),
+            _ => None,
+        })
+        .unwrap_or(before)
+}
 
 struct Target {
     view: wgpu::TextureView,
@@ -36,6 +65,7 @@ pub struct Viewport {
     target: Option<Target>,
     last_frame: Instant,
     active_until: Instant,
+    scroll: Scroll,
     pub error: Option<String>,
 }
 
@@ -61,6 +91,7 @@ impl Viewport {
             target: None,
             last_frame: Instant::now(),
             active_until: Instant::now(),
+            scroll: Scroll::Zoom,
             error: None,
         })
     }
@@ -207,7 +238,8 @@ impl Viewport {
         self.wake();
     }
 
-    /// Pan (middle drag, or Shift + drag) and zoom (wheel, pinch) the camera.
+    /// Pan (trackpad scroll, middle drag, or Shift + drag) and zoom (mouse wheel,
+    /// pinch) the camera.
     fn navigate(&mut self, ui: &Ui, response: &egui::Response, rect: Rect, view: &mut ViewState) {
         let size = [rect.width(), rect.height()];
         let shift = ui.input(|i| i.modifiers.shift);
@@ -220,14 +252,20 @@ impl Viewport {
             self.wake();
         }
         if response.hovered() {
-            let (scroll, pinch, hover) = ui.input(|i| {
-                (
-                    i.smooth_scroll_delta.y,
-                    i.zoom_delta(),
-                    i.pointer.hover_pos(),
-                )
-            });
-            let factor = (scroll * 0.002).exp() * pinch;
+            self.scroll = ui.input(|i| scroll_mode(&i.events, self.scroll));
+            let (scroll, pinch, hover) =
+                ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
+            if self.scroll == Scroll::Pan && scroll != egui::Vec2::ZERO {
+                view.camera.pan([scroll.x, scroll.y], size);
+                view.touch();
+                self.wake();
+            }
+            let wheel = if self.scroll == Scroll::Zoom {
+                scroll.y
+            } else {
+                0.0
+            };
+            let factor = (wheel * 0.002).exp() * pinch;
             if (factor - 1.0).abs() > 1e-4
                 && let Some(p) = hover
             {
@@ -251,4 +289,64 @@ pub fn placeholder(ui: &mut Ui, has_doc: bool) {
         "app-no-project"
     };
     hint(ui, tr(ui.ctx(), key));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scroll(unit: MouseWheelUnit, source: MouseWheelSource) -> Event {
+        Event::MouseWheel {
+            unit,
+            delta: egui::vec2(0.0, 1.0),
+            phase: egui::TouchPhase::Move,
+            source,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_trackpad_pans_and_a_wheel_zooms() {
+        use MouseWheelSource::*;
+        use MouseWheelUnit::*;
+        // macOS reports the device; a trackpad can scroll in points or lines
+        for unit in [Point, Line] {
+            assert_eq!(
+                scroll_mode(&[scroll(unit, Trackpad)], Scroll::Zoom),
+                Scroll::Pan
+            );
+            assert_eq!(
+                scroll_mode(&[scroll(unit, Momentum)], Scroll::Zoom),
+                Scroll::Pan
+            );
+            assert_eq!(
+                scroll_mode(&[scroll(unit, Wheel)], Scroll::Pan),
+                Scroll::Zoom
+            );
+        }
+        // elsewhere the unit decides
+        assert_eq!(
+            scroll_mode(&[scroll(Point, Unknown)], Scroll::Zoom),
+            Scroll::Pan
+        );
+        assert_eq!(
+            scroll_mode(&[scroll(Line, Unknown)], Scroll::Pan),
+            Scroll::Zoom
+        );
+        assert_eq!(
+            scroll_mode(&[scroll(Page, Unknown)], Scroll::Pan),
+            Scroll::Zoom
+        );
+    }
+
+    #[test]
+    fn the_mode_stays_while_a_scroll_glides_without_new_events() {
+        use MouseWheelSource::*;
+        use MouseWheelUnit::*;
+        assert_eq!(scroll_mode(&[], Scroll::Pan), Scroll::Pan);
+        assert_eq!(scroll_mode(&[], Scroll::Zoom), Scroll::Zoom);
+        // the latest wheel event of the frame decides
+        let mixed = [scroll(Line, Wheel), scroll(Point, Trackpad)];
+        assert_eq!(scroll_mode(&mixed, Scroll::Zoom), Scroll::Pan);
+    }
 }
