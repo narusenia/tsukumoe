@@ -1,0 +1,34 @@
+[package]
+name = "tsukumoe-app"
+description = "Tsukumoe editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "tsukumoe_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tsukumoe-app"
+path = "src/main.rs"
+
+[dependencies]
+tsukumoe-core = { workspace = true, features = ["schema"] }
+tsukumoe-format.workspace = true
+tsukumoe-gpu.workspace = true
+tsukumoe-ui.workspace = true
+eframe.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+pollster.workspace = true
+
+[lints]
+workspace = true
