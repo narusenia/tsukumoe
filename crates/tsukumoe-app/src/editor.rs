@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::actions::{self, ACTIONS, Tool};
 use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::menu;
+use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
@@ -26,7 +27,7 @@ use crate::panels::viewport::Viewport;
 use crate::project::{Document, Recent};
 use crate::psd_import::{PsdImport, RowKind, Stage};
 use crate::settings;
-use crate::view::ViewState;
+use crate::view::{Selection, ViewState};
 use crate::workspace::{Layouts, Preset, Workspace};
 
 const LAYOUTS_FILE: &str = "layouts.json";
@@ -69,6 +70,8 @@ pub struct Editor {
     pub palette: Palette,
     pub keymap: Keymap,
     pub drag: DragAssignment,
+    /// The mesh edit tool's selection and drag; view state, not model.
+    pub mesh_tool: MeshTool,
     pub pie_config: PieConfig,
     /// Whether the system draws the menus (macOS), leaving only the tabs here.
     pub native_menu: bool,
@@ -122,6 +125,7 @@ impl Editor {
             palette: Palette::default(),
             keymap,
             drag,
+            mesh_tool: MeshTool::default(),
             pie_config,
             native_menu: false,
             pie: None,
@@ -164,6 +168,7 @@ impl Editor {
             Ok(doc) => {
                 self.doc = Some(doc);
                 self.view = ViewState::default();
+                self.mesh_tool = MeshTool::default();
                 self.recent.push(path);
                 self.persist_state()
             }
@@ -191,16 +196,67 @@ impl Editor {
     /// The single entry for UI edits: sends `command` to the dispatcher and
     /// shows a failure as an error toast (the model stays as it was).
     pub fn submit(&mut self, ctx: &Context, command: tsukumoe_core::command::Command) -> bool {
+        self.submit_labeled(ctx, command, None)
+    }
+
+    /// [`Self::submit`] with a history name for the command.
+    pub fn submit_labeled(
+        &mut self,
+        ctx: &Context,
+        command: tsukumoe_core::command::Command,
+        label: Option<String>,
+    ) -> bool {
         let Some(doc) = self.doc.as_mut() else {
             return false;
         };
-        match doc.dispatcher.submit(command) {
+        match doc.dispatcher.submit_labeled(command, label) {
             Ok(()) => true,
             Err(e) => {
                 self.toasts.push(ctx, Tone::Error, e);
                 false
             }
         }
+    }
+
+    /// Sends the result of a mesh tool operation, or shows why it failed.
+    pub fn apply_mesh_op(&mut self, ctx: &Context, op: Result<Op, ToolError>) {
+        match op {
+            Ok((command, label)) => {
+                self.submit_labeled(ctx, command, Some(label));
+            }
+            Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+        }
+    }
+
+    /// A mesh tool key (delete, connect, flip) on the mesh being edited.
+    fn run_mesh_action(&mut self, ctx: &Context, action: &str) {
+        // D also switches to the deformer tool; keep that outside the mesh tool.
+        // G is bound to nothing else.
+        if action == "mesh.retriangulate" && self.view.tool != Tool::Mesh {
+            self.view.tool = Tool::Deformer;
+            return;
+        }
+        let Some(name) = self.mesh_tool.mesh().map(str::to_owned) else {
+            return;
+        };
+        let Some(g) = self
+            .doc
+            .as_ref()
+            .and_then(|d| mesh_tool::geometry_of(d.dispatcher.model(), &name))
+        else {
+            return;
+        };
+        if self.view.tool != Tool::Mesh {
+            return;
+        }
+        let op = match action {
+            "mesh.delete-vertices" => self.mesh_tool.delete_selected(&name, &g),
+            "mesh.connect" => self.mesh_tool.connect_selected(&name, &g),
+            "mesh.retriangulate" => self.mesh_tool.retriangulate(&name, &g),
+            "mesh.fill-grid" => self.mesh_tool.fill_grid(&name, &g),
+            _ => self.mesh_tool.flip_selected(&name, &g),
+        };
+        self.apply_mesh_op(ctx, op);
     }
 
     fn save_keymap(&mut self, ctx: &Context) {
@@ -277,6 +333,13 @@ impl Editor {
                     let at = ctx.pointer_latest_pos().unwrap_or_default();
                     self.pie = Some(tsukumoe_ui::PieMenu::open(at, self.pie_config.items(ctx)));
                 }
+            }
+            "mesh.delete-vertices"
+            | "mesh.connect"
+            | "mesh.flip-edge"
+            | "mesh.retriangulate"
+            | "mesh.fill-grid" => {
+                self.run_mesh_action(ctx, action);
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
                 let f = if action.ends_with("in") { 1.25 } else { 0.8 };
@@ -1224,9 +1287,23 @@ impl PanelHost for Panels<'_> {
                         }
                     }
                     if let Some(vp) = editor.viewport.as_mut() {
-                        editor.viewport_hovered = vp
-                            .show(ui, rs, doc, &mut editor.view, &editor.drag)
-                            .hovered();
+                        let target = match &editor.view.selection {
+                            Some(Selection::Mesh(name)) => Some(name.as_str()),
+                            _ => None,
+                        };
+                        editor.mesh_tool.set_mesh(target);
+                        let (response, ops) = vp.show(
+                            ui,
+                            rs,
+                            doc,
+                            &mut editor.view,
+                            &editor.drag,
+                            &mut editor.mesh_tool,
+                        );
+                        editor.viewport_hovered = response.hovered();
+                        for op in ops {
+                            editor.apply_mesh_op(&ctx, op);
+                        }
                     }
                 }
                 None => viewport::placeholder(ui, true),
@@ -1433,6 +1510,106 @@ mod tests {
     }
 
     #[test]
+    fn mesh_keys_send_one_named_command_and_show_why_they_fail() {
+        use crate::mesh_tool::Mapper;
+        use tsukumoe_core::command::Command;
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        // A 3 x 3 grid, so an inner vertex can be removed.
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        for y in 0..3 {
+            for x in 0..3 {
+                positions.push([x as f32, y as f32]);
+            }
+        }
+        for y in 0..2u32 {
+            for x in 0..2u32 {
+                let a = y * 3 + x;
+                indices.extend([a, a + 1, a + 4, a, a + 4, a + 3]);
+            }
+        }
+        for command in [
+            Command::AddPart {
+                name: "MeshEditPart".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "MeshEditGrid".into(),
+                part: "MeshEditPart".into(),
+                positions: positions.clone(),
+                uvs: positions.clone(),
+                indices,
+            },
+        ] {
+            assert!(editor.submit(&ctx, command));
+        }
+        editor.view.tool = Tool::Mesh;
+        editor.mesh_tool.set_mesh(Some("MeshEditGrid"));
+        let steps = editor.doc.as_ref().unwrap().dispatcher.log().len();
+        // Nothing selected: refused with a message, no command.
+        assert!(editor.run_action(&ctx, "mesh.delete-vertices"));
+        assert_eq!(editor.doc.as_ref().unwrap().dispatcher.log().len(), steps);
+        // Select the middle vertex and delete it.
+        let m = Mapper {
+            origin: [0.0, 0.0],
+            size: [200.0, 200.0],
+            view: [0.0, 0.0, 2.0, 2.0],
+        };
+        let indices = {
+            let d = &editor.doc.as_ref().unwrap().dispatcher;
+            d.model()
+                .meshes()
+                .get(d.model().meshes().find("MeshEditGrid").unwrap())
+                .unwrap()
+                .indices
+                .clone()
+        };
+        editor
+            .mesh_tool
+            .click(&positions, &indices, &m, [100.0, 100.0], false);
+        assert!(editor.run_action(&ctx, "mesh.delete-vertices"));
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.log().len(), steps + 1);
+        assert_eq!(
+            d.name_of(steps).as_deref(),
+            Some("mesh_remove_vertices: MeshEditGrid")
+        );
+        let count = |d: &crate::dispatcher::Dispatcher| {
+            let model = d.model();
+            model
+                .meshes()
+                .get(model.meshes().find("MeshEditGrid").unwrap())
+                .unwrap()
+                .positions
+                .len()
+        };
+        assert_eq!(count(d), 8);
+        assert!(d.undo());
+        assert_eq!(count(d), 9);
+        // G fills a grid: one more step, named, and one undo returns.
+        assert!(editor.run_action(&ctx, "mesh.fill-grid"));
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.log().len(), steps + 1);
+        assert_eq!(
+            d.name_of(steps).as_deref(),
+            Some("mesh_fill_grid: MeshEditGrid")
+        );
+        assert!(count(d) > 9);
+        assert!(d.undo());
+        assert_eq!(count(d), 9);
+        // Other tools ignore the keys.
+        editor.view.tool = Tool::Select;
+        editor
+            .mesh_tool
+            .click(&positions, &indices, &m, [100.0, 100.0], false);
+        assert!(editor.run_action(&ctx, "mesh.delete-vertices"));
+        assert_eq!(count(&editor.doc.as_ref().unwrap().dispatcher), 9);
+        // D outside the mesh tool still picks the deformer tool.
+        assert!(editor.run_action(&ctx, "mesh.retriangulate"));
+        assert_eq!(editor.view.tool, Tool::Deformer);
+    }
+
+    #[test]
     fn a_shortcut_runs_its_action_and_tools_switch() {
         use tsukumoe_core::command::Command;
         let mut editor = open_minimal();
@@ -1472,7 +1649,7 @@ mod tests {
         let ctx = Context::default();
         let mut editor = Editor::new(None);
         editor.pie_config = PieConfig::from_json(
-            r#"{"items":[{"action":"tool.mesh"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
+            r#"{"items":[{"action":"tool.mesh-edit"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
         );
         let at = egui::pos2(400.0, 400.0);
         frame(&ctx, vec![egui::Event::PointerMoved(at)], |ctx| {
@@ -1516,7 +1693,7 @@ mod tests {
         let ctx = Context::default();
         let mut editor = Editor::new(None);
         editor.pie_config = PieConfig::from_json(
-            r#"{"items":[{"action":"tool.mesh"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
+            r#"{"items":[{"action":"tool.mesh-edit"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
         );
         let at = egui::pos2(400.0, 400.0);
         frame(&ctx, vec![egui::Event::PointerMoved(at)], |ctx| {

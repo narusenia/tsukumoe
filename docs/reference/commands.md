@@ -151,6 +151,22 @@ Replaces the vertex positions of a mesh; the count must match its uvs.
 {"type":"set_mesh_positions","name":"Skin","positions":[[0.0,0.0],[2.0,0.0],[0.0,2.0]]}
 ```
 
+### `set_mesh_geometry`
+
+Replaces the vertices, UVs and triangles of a mesh at once; counts must match as in `add_mesh`. Fails if the vertex count changes while keyforms, bone influences, blend shapes or glue depend on the vertices.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `indices` | integer[] | yes |  |
+| `name` | string | yes |  |
+| `positions` | number[2][] | yes |  |
+| `type` | `"set_mesh_geometry"` | yes |  |
+| `uvs` | number[2][] | yes |  |
+
+```json
+{"type":"set_mesh_geometry","name":"Skin","positions":[[0.0,0.0],[1.0,0.0],[0.0,1.0]],"uvs":[[0.0,0.0],[1.0,0.0],[0.0,1.0]],"indices":[0,1,2]}
+```
+
 ### `set_mesh_texture`
 
 Sets the texture index of a mesh.

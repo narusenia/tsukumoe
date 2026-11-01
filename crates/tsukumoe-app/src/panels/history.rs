@@ -7,7 +7,7 @@
 use egui::Ui;
 use tsukumoe_ui::{selectable_row, tr};
 
-use crate::dispatcher::{Dispatcher, describe};
+use crate::dispatcher::Dispatcher;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowState {
@@ -38,11 +38,11 @@ pub fn rows(dispatcher: &Dispatcher) -> Vec<Row> {
             RowState::Applied
         },
     }];
-    for (i, command) in dispatcher.log().iter().enumerate() {
+    for i in 0..dispatcher.log().len() {
         let position = i + 1;
         rows.push(Row {
             position,
-            label: Some(describe(command)),
+            label: dispatcher.name_of(i),
             state: match position.cmp(&cursor) {
                 std::cmp::Ordering::Less => RowState::Applied,
                 std::cmp::Ordering::Equal => RowState::Current,
@@ -102,5 +102,7 @@ mod tests {
         assert_eq!(states, [Applied, Applied, Current, Undone]);
         assert_eq!(rows(&d)[3].label.as_deref(), Some("add_part: c"));
         assert_eq!(rows(&d)[3].position, 3);
+        d.submit_labeled(part("d"), Some("named".into())).unwrap();
+        assert_eq!(rows(&d)[3].label.as_deref(), Some("named"));
     }
 }

@@ -135,6 +135,33 @@ fn two_layers(mode: BlendMode) -> ModelParts {
 }
 
 #[test]
+fn only_one_mesh_is_drawn_even_when_hidden() {
+    let Some(mut g) = gpu() else { return };
+    let mut m = two_layers(BlendMode::Normal);
+    let top = m.meshes.find("top").unwrap();
+    m.meshes.get_mut(top).unwrap().visible = false;
+    let compiled = Model::from_parts(m).unwrap().compile().unwrap();
+    let mut frame = Frame::new(&compiled);
+    frame.evaluate(&compiled);
+    g.set_textures(&[solid([255, 0, 0, 255]), solid([0, 0, 255, 255])])
+        .unwrap();
+    let list = frame.draw_list(&compiled);
+    let top = compiled.mesh_index("top").unwrap() as u32;
+    let bottom = compiled.mesh_index("bottom").unwrap() as u32;
+    // The hidden mesh alone: its color, nothing of the other.
+    assert_all(
+        &g.render_only(&list, FULL, top, 2, 2).unwrap(),
+        [0, 0, 255, 255],
+    );
+    assert_all(
+        &g.render_only(&list, FULL, bottom, 2, 2).unwrap(),
+        [255, 0, 0, 255],
+    );
+    // The whole scene still leaves the hidden mesh out.
+    assert_all(&g.render(&list, FULL, 2, 2).unwrap(), [255, 0, 0, 255]);
+}
+
+#[test]
 fn normal_blend_is_source_over() {
     let Some(mut g) = gpu() else { return };
     let tex = [solid([255, 0, 0, 255]), solid([0, 0, 255, 128])];

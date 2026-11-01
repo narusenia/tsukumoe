@@ -147,6 +147,7 @@ mod tests {
             Command::AddMesh { .. } => "add_mesh",
             Command::RemoveMesh { .. } => "remove_mesh",
             Command::SetMeshPositions { .. } => "set_mesh_positions",
+            Command::SetMeshGeometry { .. } => "set_mesh_geometry",
             Command::SetMeshTexture { .. } => "set_mesh_texture",
             Command::SetMeshBlendMode { .. } => "set_mesh_blend_mode",
             Command::SetMeshOpacity { .. } => "set_mesh_opacity",
@@ -205,6 +206,12 @@ mod tests {
             Command::SetMeshPositions {
                 name: String::new(),
                 positions: vec![],
+            },
+            Command::SetMeshGeometry {
+                name: String::new(),
+                positions: vec![],
+                uvs: vec![],
+                indices: vec![],
             },
             Command::SetMeshTexture {
                 name: String::new(),

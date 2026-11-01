@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 12] = [
+pub const ACTIONS: [&str; 17] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -21,8 +21,13 @@ pub const ACTIONS: [&str; 12] = [
     "view.palette",
     "view.pie-menu",
     "tool.select",
-    "tool.mesh",
+    "tool.mesh-edit",
     "tool.deformer",
+    "mesh.delete-vertices",
+    "mesh.connect",
+    "mesh.flip-edge",
+    "mesh.retriangulate",
+    "mesh.fill-grid",
     "viewport.zoom-in",
     "viewport.zoom-out",
     "viewport.reset-camera",
@@ -30,7 +35,7 @@ pub const ACTIONS: [&str; 12] = [
 
 /// The context a binding of `action` belongs to (`None` is global).
 pub fn context_of(action: &str) -> Option<&'static str> {
-    action.starts_with("viewport.").then_some("viewport")
+    (action.starts_with("viewport.") || action.starts_with("mesh.")).then_some("viewport")
 }
 
 /// The translation key of an action's name: `edit.undo` -> `action-edit-undo`.
@@ -38,8 +43,8 @@ pub fn label_key(action: &str) -> String {
     format!("action-{}", action.replace('.', "-"))
 }
 
-/// The tools the viewport can switch between. Only the switch exists in M5-02;
-/// the tools themselves come with M5-03 and later.
+/// The tools the viewport can switch between. Mesh editing is the first tool;
+/// the others come with later units.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tool {
     #[default]
@@ -52,7 +57,7 @@ impl Tool {
     pub fn action(self) -> &'static str {
         match self {
             Tool::Select => "tool.select",
-            Tool::Mesh => "tool.mesh",
+            Tool::Mesh => "tool.mesh-edit",
             Tool::Deformer => "tool.deformer",
         }
     }

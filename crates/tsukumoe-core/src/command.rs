@@ -65,6 +65,13 @@ pub enum Command {
     RemoveMesh { name: String },
     /// Replaces the vertex positions of a mesh; the count must match its uvs.
     SetMeshPositions { name: String, positions: Vec<Point> },
+    /// Replaces the vertices, UVs and triangles of a mesh at once; counts must match as in `add_mesh`. Fails if the vertex count changes while keyforms, bone influences, blend shapes or glue depend on the vertices.
+    SetMeshGeometry {
+        name: String,
+        positions: Vec<Point>,
+        uvs: Vec<Point>,
+        indices: Vec<u32>,
+    },
     /// Sets the texture index of a mesh.
     SetMeshTexture { name: String, texture: u32 },
     /// Sets how a mesh blends with what is behind it.
@@ -288,6 +295,41 @@ impl Model {
                 let id = self.resolve::<ArtMesh>(name)?;
                 self.modify(changes, id, |m| m.positions = positions.clone());
             }
+            Command::SetMeshGeometry {
+                name,
+                positions,
+                uvs,
+                indices,
+            } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                let count_changes = self
+                    .meshes
+                    .get(id)
+                    .is_some_and(|m| m.positions.len() != positions.len());
+                // Keyforms, influences and blend shapes are caught by validation;
+                // glue nodes stay in range after a removal but would point at the wrong vertices.
+                if count_changes {
+                    let glued: Vec<_> = self
+                        .glues
+                        .iter()
+                        .filter(|(_, _, g)| {
+                            (g.mesh_a == id || g.mesh_b == id) && !g.nodes.is_empty()
+                        })
+                        .map(|(_, glue, _)| ModelError::GeometryMismatch {
+                            owner: format!("glue '{glue}'"),
+                            field: "nodes",
+                        })
+                        .collect();
+                    if !glued.is_empty() {
+                        return Err(CommandError::Invalid(glued));
+                    }
+                }
+                self.modify(changes, id, |m| {
+                    m.positions = positions.clone();
+                    m.uvs = uvs.clone();
+                    m.indices = indices.clone();
+                });
+            }
             Command::Batch { commands } => {
                 for command in commands {
                     self.run(command, changes)?;
@@ -440,6 +482,12 @@ mod tests {
             Command::SetMeshUvs {
                 name: "Skin".into(),
                 uvs: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]],
+            },
+            Command::SetMeshGeometry {
+                name: "Skin".into(),
+                positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
+                uvs: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5], [0.5, 0.5]],
+                indices: vec![0, 1, 2, 2, 1, 3],
             },
             add_mesh("Clip", "Face"),
             Command::SetMeshMasks {
@@ -685,5 +733,90 @@ mod tests {
             Err(CommandError::Invalid(_))
         ));
         assert!(model == expected);
+    }
+
+    #[test]
+    fn bad_geometry_is_rejected_and_changes_nothing() {
+        let mut model = built(vec![add_part("Face"), add_mesh("A", "Face")]);
+        let expected = built(vec![add_part("Face"), add_mesh("A", "Face")]);
+        let (positions, uvs, indices) = tri();
+        let set =
+            |positions: Vec<Point>, uvs: Vec<Point>, indices: Vec<u32>| Command::SetMeshGeometry {
+                name: "A".into(),
+                positions,
+                uvs,
+                indices,
+            };
+        let bad = [
+            set(positions.clone(), uvs[..2].to_vec(), indices.clone()),
+            set(positions.clone(), uvs.clone(), vec![0, 1, 3]),
+            set(positions.clone(), uvs.clone(), vec![0, 1]),
+        ];
+        for command in bad {
+            assert!(matches!(
+                model.apply(command),
+                Err(CommandError::Invalid(_))
+            ));
+            assert!(model == expected);
+        }
+        assert_eq!(
+            model.apply(Command::SetMeshGeometry {
+                name: "Nope".into(),
+                positions,
+                uvs,
+                indices
+            }),
+            Err(CommandError::NotFound {
+                kind: "mesh",
+                name: "Nope".into()
+            })
+        );
+    }
+
+    #[test]
+    fn changing_the_vertex_count_is_rejected_while_glue_uses_the_mesh() {
+        use crate::rig::{Glue, GlueNode};
+        let mut model = built(vec![
+            add_part("Face"),
+            add_mesh("A", "Face"),
+            add_mesh("B", "Face"),
+        ]);
+        let (a, b) = (
+            model.meshes().find("A").unwrap(),
+            model.meshes().find("B").unwrap(),
+        );
+        model
+            .glues
+            .insert(
+                "G",
+                Glue {
+                    mesh_a: a,
+                    mesh_b: b,
+                    nodes: vec![GlueNode {
+                        index_a: 0,
+                        index_b: 0,
+                        weight: 0.5,
+                    }],
+                    intensity: 1.0,
+                    keyforms: None,
+                },
+            )
+            .unwrap();
+        let grow = Command::SetMeshGeometry {
+            name: "A".into(),
+            positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            indices: vec![0, 1, 2, 2, 1, 3],
+        };
+        assert!(matches!(model.apply(grow), Err(CommandError::Invalid(_))));
+        let (positions, uvs, _) = tri();
+        model
+            .apply(Command::SetMeshGeometry {
+                name: "A".into(),
+                positions,
+                uvs,
+                indices: vec![0, 2, 1],
+            })
+            .unwrap();
     }
 }

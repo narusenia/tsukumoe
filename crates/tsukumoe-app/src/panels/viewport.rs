@@ -12,13 +12,16 @@ use eframe::egui_wgpu::RenderState;
 use egui::{
     Event, MouseWheelSource, MouseWheelUnit, PointerButton, Rect, Sense, TextureId, Ui, pos2,
 };
-use tsukumoe_gpu::{Renderer, Texture};
-use tsukumoe_ui::{hint, tr};
+use tsukumoe_gpu::{DrawOptions, Renderer, Texture};
+use tsukumoe_ui::{Theme, hint, tr};
 
+use crate::actions::Tool;
 use crate::drag::DragAssignment;
+use crate::mesh_tool::{self, Hit, Mapper, MeshTool, Op, ToolError};
+use crate::panels::mesh_overlay;
 use crate::project::Document;
 use crate::scene::{Scene, fit_view};
-use crate::view::ViewState;
+use crate::view::{Selection, ViewState};
 
 /// How long to keep drawing after a change, so physics can settle.
 const SETTLE: Duration = Duration::from_secs(3);
@@ -63,6 +66,12 @@ pub struct Viewport {
     scene: Option<Scene>,
     renderer: Renderer,
     target: Option<Target>,
+    /// The mesh being edited drawn alone on a transparent target, shown above
+    /// the veil so that it is not dimmed; `focus_mesh` names what it holds.
+    focus: Option<Target>,
+    focus_mesh: Option<String>,
+    /// Whether the last try drew `focus_mesh` into the focus target.
+    focus_drawn: bool,
     last_frame: Instant,
     active_until: Instant,
     scroll: Scroll,
@@ -89,6 +98,9 @@ impl Viewport {
             scene: None,
             renderer,
             target: None,
+            focus: None,
+            focus_mesh: None,
+            focus_drawn: false,
             last_frame: Instant::now(),
             active_until: Instant::now(),
             scroll: Scroll::Zoom,
@@ -109,30 +121,43 @@ impl Viewport {
             return;
         }
         let mut renderer = rs.renderer.write();
-        if let Some(old) = self.target.take() {
+        for old in [self.target.take(), self.focus.take()]
+            .into_iter()
+            .flatten()
+        {
             renderer.free_texture(&old.id);
         }
-        let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: size.0,
-                height: size.1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: tsukumoe_gpu::OUTPUT_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&Default::default());
-        let id = renderer.register_native_texture(&rs.device, &view, wgpu::FilterMode::Linear);
-        self.target = Some(Target { view, id, size });
+        let mut make = || {
+            let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: size.0,
+                    height: size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: tsukumoe_gpu::OUTPUT_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            let id = renderer.register_native_texture(&rs.device, &view, wgpu::FilterMode::Linear);
+            Target { view, id, size }
+        };
+        self.target = Some(make());
+        self.focus = Some(make());
+        // The new focus target is empty.
+        self.focus_mesh = None;
+        self.focus_drawn = false;
+        drop(renderer);
         self.wake();
     }
 
-    /// Draws the viewport into the free space of `ui`; returns its response.
+    /// Draws the viewport into the free space of `ui`; returns its response and
+    /// what the mesh edit tool asks for (commands to send, or why it cannot).
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -140,7 +165,8 @@ impl Viewport {
         doc: &Document,
         view: &mut ViewState,
         drag: &DragAssignment,
-    ) -> egui::Response {
+        mesh: &mut MeshTool,
+    ) -> (egui::Response, Vec<Result<Op, ToolError>>) {
         let avail = ui.available_size();
         let ppp = ui.ctx().pixels_per_point();
         let size = (
@@ -175,7 +201,11 @@ impl Viewport {
         self.drag_parameters(ui, &response, doc, view, drag);
 
         let now = Instant::now();
-        if (resized || now < self.active_until)
+        // The mesh the mesh tool edits, if the focus picture must show it.
+        let wanted = (view.tool == Tool::Mesh)
+            .then(|| mesh.mesh().map(str::to_owned))
+            .flatten();
+        if (resized || now < self.active_until || self.focus_mesh != wanted)
             && let Some(scene) = &mut self.scene
         {
             let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
@@ -193,6 +223,38 @@ impl Viewport {
             ) {
                 self.error = Some(e.to_string());
             }
+            // The edited mesh alone, even if hidden (the model is not changed).
+            let focus = wanted
+                .as_deref()
+                .and_then(|n| scene.model.mesh_index(n))
+                .zip(self.focus.as_ref());
+            match focus {
+                Some((index, focus)) => {
+                    let list = scene.frame.draw_list(&scene.model);
+                    let options = DrawOptions {
+                        only: Some(index as u32),
+                        ..Default::default()
+                    };
+                    self.focus_mesh = wanted.clone();
+                    self.focus_drawn = false;
+                    match self.renderer.render_to_view_with(
+                        &rs.device,
+                        &rs.queue,
+                        &list,
+                        view.camera.view(fitted),
+                        &focus.view,
+                        size,
+                        options,
+                    ) {
+                        Ok(()) => self.focus_drawn = true,
+                        Err(e) => self.error = Some(e.to_string()),
+                    }
+                }
+                None => {
+                    self.focus_mesh = wanted.clone();
+                    self.focus_drawn = false;
+                }
+            }
             ui.ctx().request_repaint();
         }
         self.last_frame = now;
@@ -204,10 +266,129 @@ impl Viewport {
                 egui::Color32::WHITE,
             );
         }
+        let ops = if view.tool == Tool::Mesh {
+            self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size)
+        } else {
+            Vec::new()
+        };
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }
-        response
+        (response, ops)
+    }
+
+    /// The mesh edit tool for one frame: pointer input, then the overlay.
+    #[allow(clippy::too_many_arguments)]
+    fn mesh_tool_frame(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        doc: &Document,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        tool: &mut MeshTool,
+        size: (u32, u32),
+    ) -> Vec<Result<Op, ToolError>> {
+        let mut ops = Vec::new();
+        let Some(scene) = &self.scene else {
+            return ops;
+        };
+        let theme = Theme::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        let model = doc.dispatcher.model();
+        let mesh = tool
+            .mesh()
+            .and_then(|n| Some((n.to_owned(), model.meshes().get(model.meshes().find(n)?)?)));
+        // The edited mesh is drawn again above the veil so it stays bright.
+        let focus = self
+            .focus
+            .as_ref()
+            .filter(|_| self.focus_drawn && self.focus_mesh.as_deref() == tool.mesh())
+            .map(|f| f.id);
+        mesh_overlay::veil(&painter, &theme, rect, focus);
+        let (modifiers, escape) = ui.input(|i| (i.modifiers, i.key_pressed(egui::Key::Escape)));
+        let arrow = |p: Option<egui::Pos2>| p.map(|p| [p.x, p.y]);
+        // The press position: a drag is reported only after it has moved.
+        let pressed = arrow(ui.input(|i| i.pointer.press_origin()));
+        let now = arrow(response.interact_pointer_pos());
+        let primary = PointerButton::Primary;
+        let tool_input = !drag.modifier_down(modifiers);
+        if let Some((name, mesh)) = &mesh {
+            tool.sanitize(mesh.positions.len());
+            if escape {
+                tool.cancel();
+            }
+            if tool_input
+                && response.drag_started_by(primary)
+                && let Some(at) = pressed
+            {
+                tool.press(&mesh.positions, &mesh.indices, &mapper, at, modifiers.shift);
+            }
+            if response.dragged_by(primary)
+                && let Some(at) = now
+            {
+                tool.drag(at);
+            }
+            if response.drag_stopped_by(primary)
+                && let Some(op) = tool.release(name, &mesh.positions, &mapper)
+            {
+                ops.push(Ok(op));
+            }
+        }
+        if tool_input
+            && response.clicked_by(primary)
+            && let Some(at) = now
+        {
+            let positions = mesh.as_ref().map_or(&[][..], |(_, m)| &m.positions[..]);
+            let indices = mesh.as_ref().map_or(&[][..], |(_, m)| &m.indices[..]);
+            let empty = mesh_tool::hit_test(positions, indices, &mapper, at) == Hit::Nothing;
+            let picked = (empty && !modifiers.shift && !modifiers.command)
+                .then(|| mesh_tool::pick_mesh(model, mapper.to_model(at)))
+                .flatten();
+            match (&mesh, picked) {
+                (Some((name, _)), Some(p)) if &p != name => {
+                    view.selection = Some(Selection::Mesh(p));
+                    view.touch();
+                }
+                (None, Some(p)) => {
+                    view.selection = Some(Selection::Mesh(p));
+                    view.touch();
+                }
+                (Some((name, _)), _) if modifiers.command => {
+                    if let Some(g) = mesh_tool::geometry_of(model, name) {
+                        ops.push(tool.add_at(name, &g, &mapper, at));
+                    }
+                }
+                (Some(_), _) => tool.click(positions, indices, &mapper, at, modifiers.shift),
+                (None, None) => {}
+            }
+        }
+        if mesh.is_some() {
+            mesh_overlay::grid_options(ui.ctx(), rect, tool);
+        }
+        match &mesh {
+            Some((_, m)) => {
+                let preview = tool.preview(&m.positions, &mapper);
+                mesh_overlay::paint(
+                    &painter,
+                    &theme,
+                    &mapper,
+                    &m.positions,
+                    &m.indices,
+                    tool,
+                    preview.as_deref(),
+                );
+                mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-hint"));
+            }
+            None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),
+        }
+        ops
     }
 
     /// Modifier + drag moves the assigned parameters (view state only).
@@ -242,7 +423,8 @@ impl Viewport {
     /// pinch) the camera.
     fn navigate(&mut self, ui: &Ui, response: &egui::Response, rect: Rect, view: &mut ViewState) {
         let size = [rect.width(), rect.height()];
-        let shift = ui.input(|i| i.modifiers.shift);
+        // The mesh tool takes Shift + drag for its box selection.
+        let shift = ui.input(|i| i.modifiers.shift) && view.tool != Tool::Mesh;
         if response.dragged_by(PointerButton::Middle)
             || (shift && response.dragged_by(PointerButton::Primary))
         {
