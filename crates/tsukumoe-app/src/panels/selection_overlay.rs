@@ -44,6 +44,113 @@ pub fn selection_bounds(scene: &Scene, model: &Model, view: &ViewState) -> Optio
     b
 }
 
+/// The edges that belong to one triangle only, as vertex pairs: the outline
+/// of a mesh (an inner edge is shared by two triangles).
+pub fn boundary_edges(indices: &[u32]) -> Vec<(u32, u32)> {
+    let mut all: Vec<(u32, u32)> = indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .flat_map(|t| [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])])
+        .map(|(a, b)| (a.min(b), a.max(b)))
+        .collect();
+    all.sort_unstable();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < all.len() {
+        let mut j = i;
+        while j < all.len() && all[j] == all[i] {
+            j += 1;
+        }
+        if j - i == 1 {
+            out.push(all[i]);
+        }
+        i = j;
+    }
+    out
+}
+
+/// The meshes to outline when several things are selected, and the one
+/// chosen last among them (drawn bolder). Nothing for a single selection:
+/// the box says enough.
+pub fn outlined_meshes(view: &ViewState) -> (Vec<String>, Option<String>) {
+    let meshes = view.selected_meshes();
+    if meshes.len() < 2 {
+        return (Vec::new(), None);
+    }
+    let main = meshes.last().cloned();
+    (meshes, main)
+}
+
+/// The outlines of the selected meshes where they are drawn: each in a faint
+/// accent, the main one bold. Meshes that are not drawn are skipped.
+pub fn paint_outlines(
+    painter: &Painter,
+    theme: &Theme,
+    m: &Mapper,
+    scene: &Scene,
+    view: &ViewState,
+) {
+    let (names, main) = outlined_meshes(view);
+    if names.is_empty() {
+        return;
+    }
+    let c = &theme.colors;
+    let list = scene.frame.draw_list(&scene.model);
+    let shown = list.order();
+    let clip = painter.clip_rect().expand(2.0);
+    for name in &names {
+        let Some(i) = scene.model.mesh_index(name) else {
+            continue;
+        };
+        if !shown.contains(&(i as u32)) {
+            continue;
+        }
+        let d = list.drawable(i);
+        let points = d.positions.as_chunks::<2>().0;
+        let is_main = main.as_deref() == Some(name.as_str());
+        let stroke = if is_main {
+            Stroke::new(2.5, c.accent)
+        } else {
+            Stroke::new(1.0, c.accent.gamma_multiply(0.55))
+        };
+        let screen = |v: u32| {
+            points.get(v as usize).map(|p| {
+                let s = m.to_screen(*p);
+                pos2(s[0], s[1])
+            })
+        };
+        let lines: Vec<egui::Shape> = boundary_edges(d.indices)
+            .into_iter()
+            .filter_map(|(a, b)| Some([screen(a)?, screen(b)?]))
+            .filter(|l| Rect::from_two_pos(l[0], l[1]).intersects(clip))
+            .map(|l| egui::Shape::line_segment(l, stroke))
+            .collect();
+        painter.extend(lines);
+    }
+}
+
+/// A small badge with the number of things selected, inside the top right of the box.
+pub fn paint_badge(painter: &Painter, theme: &Theme, m: &Mapper, bounds: [f32; 4], count: usize) {
+    if count < 2 {
+        return;
+    }
+    let c = &theme.colors;
+    let corner = m.to_screen([bounds[2], bounds[3]]);
+    let center = pos2(corner[0], corner[1]);
+    let text = count.to_string();
+    let galley = painter.layout_no_wrap(
+        text,
+        egui::FontId::proportional(theme.metrics.text - 1.0),
+        c.accent_text,
+    );
+    let size = vec2(galley.size().x.max(10.0) + 10.0, galley.size().y + 2.0);
+    // Inside the top right corner, so it is never cut by the edge of the view.
+    let rect = Rect::from_center_size(center + vec2(-size.x / 2.0 - 4.0, size.y / 2.0 + 4.0), size);
+    painter.rect_filled(rect, size.y / 2.0, c.accent);
+    painter.galley(rect.center() - galley.size() / 2.0, galley, c.accent_text);
+}
+
 /// Draws the box `bounds` (drawing space) in screen points.
 pub fn paint(painter: &Painter, theme: &Theme, m: &Mapper, bounds: [f32; 4]) {
     let c = &theme.colors;
@@ -197,6 +304,36 @@ mod tests {
         })
         .unwrap();
         assert_eq!(bounds_of(&m, Some(Selection::Mesh("B".into())), &[]), None);
+    }
+
+    #[test]
+    fn the_outline_of_a_mesh_is_the_edges_of_one_triangle() {
+        assert_eq!(boundary_edges(&[0, 1, 2]), [(0, 1), (0, 2), (1, 2)]);
+        // A quad of two triangles: the diagonal is inside.
+        assert_eq!(
+            boundary_edges(&[0, 1, 2, 0, 2, 3]),
+            [(0, 1), (0, 3), (1, 2), (2, 3)]
+        );
+        // Two separate triangles keep all six.
+        assert_eq!(boundary_edges(&[0, 1, 2, 3, 4, 5]).len(), 6);
+        assert!(boundary_edges(&[]).is_empty());
+    }
+
+    #[test]
+    fn several_selected_meshes_are_outlined_with_the_last_one_main() {
+        let mut view = ViewState::default();
+        assert_eq!(outlined_meshes(&view), (Vec::new(), None));
+        view.select_only(Selection::Mesh("A".into()));
+        assert_eq!(outlined_meshes(&view), (Vec::new(), None));
+        view.toggle_mesh("B");
+        view.toggle_mesh("C");
+        let (names, main) = outlined_meshes(&view);
+        assert_eq!(names, ["A", "B", "C"]);
+        assert_eq!(main.as_deref(), Some("C"));
+        // Parts and deformers in the selection are not outlined.
+        view.toggle(Selection::Part("P".into()));
+        assert_eq!(outlined_meshes(&view).0, ["A", "B", "C"]);
+        assert_eq!(view.selected_count(), 4);
     }
 
     #[test]

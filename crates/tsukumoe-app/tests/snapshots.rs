@@ -501,3 +501,83 @@ fn selection_box_in_the_dark_theme() {
 fn selection_box_in_the_light_theme() {
     bounds_snapshot(Mode::Light, "selection_box_light");
 }
+
+/// Several selected meshes: each outlined, the last one bold, the box around
+/// all of them with the count badge.
+fn multi_selection_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::mesh_tool::Mapper;
+    use tsukumoe_app::panels::selection_overlay;
+    use tsukumoe_app::scene::{Scene, fit_view};
+    use tsukumoe_app::view::{Selection, ViewState};
+    use tsukumoe_core::command::Command;
+    use tsukumoe_core::model::Model;
+    use tsukumoe_ui::Theme;
+
+    let mut model = Model::new();
+    let mut commands = vec![Command::AddPart {
+        name: "P".into(),
+        parent: None,
+    }];
+    for (mesh, x, y) in [("A", 0.0, 0.0), ("B", 3.0, 0.5), ("C", 1.2, 2.5)] {
+        let pts = vec![[x, y], [x + 2.0, y], [x + 2.0, y + 1.5], [x, y + 1.5]];
+        commands.push(Command::AddMesh {
+            name: mesh.into(),
+            part: "P".into(),
+            positions: pts.clone(),
+            uvs: pts,
+            indices: vec![0, 1, 2, 0, 2, 3],
+        });
+    }
+    for c in commands {
+        model.apply(c).unwrap();
+    }
+    let mut scene = Scene::new(&model).unwrap();
+    scene.advance(0.0);
+    let size = egui::vec2(360.0, 240.0);
+    let mapper = Mapper {
+        origin: [0.0, 0.0],
+        size: [size.x, size.y],
+        view: fit_view(scene.bounds(), size.x as u32, size.y as u32),
+    };
+    let mut view = ViewState::default();
+    view.select_all(vec![
+        Selection::Mesh("A".into()),
+        Selection::Mesh("B".into()),
+        Selection::Mesh("C".into()),
+    ]);
+    let bounds = selection_overlay::selection_bounds(&scene, &model, &view).unwrap();
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .wgpu()
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let theme = Theme::get(&ctx);
+            let rect = ui.max_rect();
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
+            selection_overlay::paint_outlines(&painter, &theme, &mapper, &scene, &view);
+            selection_overlay::paint(&painter, &theme, &mapper, bounds);
+            selection_overlay::paint_badge(
+                &painter,
+                &theme,
+                &mapper,
+                bounds,
+                view.selected_count(),
+            );
+        });
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn multi_selection_in_the_dark_theme() {
+    multi_selection_snapshot(Mode::Dark, "selection_multi_dark");
+}
+
+#[test]
+fn multi_selection_in_the_light_theme() {
+    multi_selection_snapshot(Mode::Light, "selection_multi_light");
+}
