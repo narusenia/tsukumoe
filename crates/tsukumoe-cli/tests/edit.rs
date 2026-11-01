@@ -5,36 +5,15 @@
 //! command writes nothing.
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::{Command, Output};
 
+mod common;
+
+use common::empty_project;
 use tsukumoe_cli::store;
 use tsukumoe_core::command::Command as Edit;
 use tsukumoe_core::model::Model;
-use tsukumoe_format::{Manifest, Project, write_model};
-
-fn scratch(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-/// An empty project at `<name>/project` (a directory, or an archive with `zip`).
-fn empty_project(name: &str, zip: bool) -> PathBuf {
-    let dir = scratch(name);
-    let mut project = Project::new(Manifest::new(None));
-    write_model(&Model::new(), &mut project).unwrap();
-    if zip {
-        let path = dir.join("project.zip");
-        fs::write(&path, project.write_zip().unwrap()).unwrap();
-        path
-    } else {
-        let path = dir.join("project");
-        project.write_dir(&path).unwrap();
-        path
-    }
-}
+use tsukumoe_format::Project;
 
 fn edit(project: &std::path::Path, json: &str) -> Output {
     let file = project.with_extension("command.json");

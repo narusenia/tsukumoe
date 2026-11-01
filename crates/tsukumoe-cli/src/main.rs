@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use serde_json::json;
 use tsukumoe_ai::LipsyncConfig;
 use tsukumoe_ai::wav::{self, MAX_WAV_BYTES};
-use tsukumoe_cli::{commands, generate, lipsync, parity, store};
+use tsukumoe_cli::{commands, generate, lipsync, mcp, parity, store};
 use tsukumoe_core::eval::Frame;
 use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
 use tsukumoe_format::{Project, read_model};
@@ -36,7 +36,10 @@ const USAGE: &str = "usage:
       the command API reference (Markdown)
   tsukumoe edit <project> <command.json|->
       applies a command (or an array, as one undo step) and saves the project;
-      nothing is written if it fails";
+      nothing is written if it fails
+  tsukumoe mcp <project>
+      an MCP server on stdio (JSON-RPC 2.0) that edits the project in memory;
+      the `save` tool writes it";
 
 /// The largest command file `edit` reads.
 const MAX_COMMAND_BYTES: u64 = 16 * 1024 * 1024;
@@ -538,6 +541,19 @@ fn edit(args: &[String]) -> Result<u8, Fail> {
     Ok(0)
 }
 
+fn mcp(args: &[String]) -> Result<u8, Fail> {
+    let args = Args::parse(args, &[])?;
+    let [project] = args.positional()?;
+    let mut session = mcp::Session::open(project).map_err(Fail::Failed)?;
+    eprintln!("tsukumoe mcp: serving {project}");
+    mcp::serve(
+        std::io::stdin().lock(),
+        std::io::stdout().lock(),
+        &mut session,
+    )?;
+    Ok(0)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
@@ -553,6 +569,7 @@ fn main() -> ExitCode {
             "commands" => commands(rest),
             "docs" => docs(rest),
             "edit" => edit(rest),
+            "mcp" => mcp(rest),
             other => usage(format!("unknown command {other:?}")),
         },
         None => usage("no command"),
