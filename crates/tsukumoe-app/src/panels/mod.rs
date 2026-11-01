@@ -5,3 +5,7 @@
 //! that draws it, so the logic is testable without a window.
 
 pub mod history;
+pub mod inspector;
+pub mod parameters;
+pub mod tree;
+pub mod viewport;

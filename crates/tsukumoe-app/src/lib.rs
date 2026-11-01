@@ -9,5 +9,7 @@ pub mod dispatcher;
 pub mod editor;
 pub mod panels;
 pub mod project;
+pub mod scene;
 pub mod settings;
+pub mod view;
 pub mod workspace;

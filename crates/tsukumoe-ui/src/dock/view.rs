@@ -315,10 +315,15 @@ fn tab_menu(ui: &mut Ui, id: &str, in_strip: Option<Side>, frame: &mut Frame) {
     }
 }
 
-fn panel_frame(ui: &mut Ui, rect: Rect, fill: Color32, add: impl FnOnce(&mut Ui)) {
+/// `panel` salts the child's id: two panels must not share widget ids.
+fn panel_frame(ui: &mut Ui, rect: Rect, fill: Color32, panel: &str, add: impl FnOnce(&mut Ui)) {
     let t = Theme::get(ui.ctx());
     ui.painter().rect_filled(rect, t.metrics.radius, fill);
-    let mut child = ui.new_child(UiBuilder::new().max_rect(rect.shrink(t.metrics.gap)));
+    let mut child = ui.new_child(
+        UiBuilder::new()
+            .id_salt(("dock-panel", panel))
+            .max_rect(rect.shrink(t.metrics.gap)),
+    );
     child.set_clip_rect(rect);
     add(&mut child);
 }
@@ -361,7 +366,7 @@ fn pinned_panel(
 ) {
     let t = Theme::get(ui.ctx());
     let id = layout.strip(side).open.clone().expect("open");
-    panel_frame(ui, rect, t.colors.surface, |ui| {
+    panel_frame(ui, rect, t.colors.surface, &id.clone(), |ui| {
         strip_header(ui, host, side, &id, true, frame);
         host.ui(ui, &id);
     });
@@ -407,7 +412,7 @@ fn floating_panel(
         .show(ctx, |ui| {
             ui.set_clip_rect(rect);
             ui.allocate_rect(rect, Sense::click());
-            panel_frame(ui, rect, t.colors.surface_raised, |ui| {
+            panel_frame(ui, rect, t.colors.surface_raised, id, |ui| {
                 strip_header(ui, host, side, id, pinned, frame);
                 host.ui(ui, id);
             });
@@ -577,7 +582,7 @@ fn draw_tabs(
     );
     let body = Rect::from_min_max(pos2(rect.left(), rect.top() + bar_h + 1.0), rect.max);
     if let Some(id) = tabs.get(active) {
-        panel_frame(ui, body, Color32::TRANSPARENT, |ui| host.ui(ui, id));
+        panel_frame(ui, body, Color32::TRANSPARENT, id, |ui| host.ui(ui, id));
     }
 }
 

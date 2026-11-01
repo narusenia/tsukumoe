@@ -7,12 +7,16 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::panels::{history, inspector, parameters, tree, viewport};
+use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
 use tsukumoe_ui::dock::{self, PanelHost};
 use tsukumoe_ui::{Arg, Toasts, Tone, Variant, button, hint, text_input, tr, tr_args};
 
+use crate::panels::viewport::Viewport;
 use crate::project::{Document, Recent};
 use crate::settings;
+use crate::view::ViewState;
 use crate::workspace::{Layouts, Preset, Workspace};
 
 const LAYOUTS_FILE: &str = "layouts.json";
@@ -34,6 +38,8 @@ pub struct Editor {
     pub settings_dir: Option<PathBuf>,
     pub dialog: Option<Dialog>,
     pub toasts: Toasts,
+    pub view: ViewState,
+    viewport: Option<Viewport>,
     layouts_dirty: bool,
 }
 
@@ -58,6 +64,8 @@ impl Editor {
             settings_dir,
             dialog: None,
             toasts: Toasts::default(),
+            view: ViewState::default(),
+            viewport: None,
             layouts_dirty: false,
         }
     }
@@ -89,6 +97,7 @@ impl Editor {
         match Document::open(path) {
             Ok(doc) => {
                 self.doc = Some(doc);
+                self.view = ViewState::default();
                 self.recent.push(path);
                 self.persist_state()
             }
@@ -160,14 +169,15 @@ impl Editor {
     }
 
     /// One frame of the whole editor window.
-    pub fn ui(&mut self, ui: &mut Ui) {
+    /// `rs` is the wgpu state for the viewport; without it the viewport says so.
+    pub fn ui(&mut self, ui: &mut Ui, rs: Option<&RenderState>) {
         let ctx = ui.ctx().clone();
         egui::Panel::top("tsukumoe-menu").show(ui, |ui| self.menu_bar(ui));
         egui::Panel::bottom("tsukumoe-status").show(ui, |ui| self.status_bar(ui));
         egui::CentralPanel::default().show(ui, |ui| {
             let mut layout = self.layouts.current(self.workspace).clone();
             let before = layout.clone();
-            dock::show(ui, &mut layout, &mut Panels { editor: self });
+            dock::show(ui, &mut layout, &mut Panels { editor: self, rs });
             if layout != before {
                 *self.layouts.current_mut(self.workspace) = layout;
                 self.layouts_dirty = true;
@@ -380,6 +390,7 @@ impl Editor {
 /// The dock's view of the editor: panel names and their contents.
 struct Panels<'a> {
     editor: &'a mut Editor,
+    rs: Option<&'a RenderState>,
 }
 
 impl PanelHost for Panels<'_> {
@@ -389,11 +400,44 @@ impl PanelHost for Panels<'_> {
 
     fn ui(&mut self, ui: &mut Ui, id: &str) {
         let ctx = ui.ctx().clone();
-        match (id, self.editor.doc.as_mut()) {
-            ("history", Some(doc)) => crate::panels::history::show(ui, &mut doc.dispatcher),
-            ("history", None) => {
-                hint(ui, tr(&ctx, "history-empty"));
+        let editor = &mut *self.editor;
+        let Some(doc) = editor.doc.as_mut() else {
+            match id {
+                "viewport" => viewport::placeholder(ui, false),
+                _ => {
+                    hint(ui, tr(&ctx, "history-empty"));
+                }
             }
+            return;
+        };
+        match id {
+            "history" => history::show(ui, &mut doc.dispatcher),
+            "tree" => tree::show(ui, doc.dispatcher.model(), &mut editor.view),
+            "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
+            "inspector" => {
+                let command =
+                    inspector::show(ui, doc.dispatcher.model(), editor.view.selection.as_ref());
+                if let Some(command) = command {
+                    editor.submit(&ctx, command);
+                }
+            }
+            "viewport" => match self.rs {
+                Some(rs) => {
+                    if editor.viewport.as_ref().map(Viewport::doc_id) != Some(doc.id) {
+                        match Viewport::new(rs, doc) {
+                            Ok(v) => editor.viewport = Some(v),
+                            Err(e) => {
+                                editor.viewport = None;
+                                hint(ui, e);
+                            }
+                        }
+                    }
+                    if let Some(vp) = editor.viewport.as_mut() {
+                        vp.show(ui, rs, doc, &mut editor.view);
+                    }
+                }
+                None => viewport::placeholder(ui, true),
+            },
             _ => {
                 hint(ui, tr(&ctx, "panel-empty"));
             }
@@ -420,7 +464,7 @@ mod tests {
             .build_ui_state(
                 |ui, editor: &mut Editor| {
                     tsukumoe_ui::init(ui.ctx());
-                    editor.ui(ui);
+                    editor.ui(ui, None);
                 },
                 editor,
             )

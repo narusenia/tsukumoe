@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tsukumoe_format::{Project, read_model, write_model};
 
@@ -16,6 +17,8 @@ pub const RECENT_MAX: usize = 10;
 /// An open project: its files, the editing model behind the dispatcher, and
 /// where it was read from.
 pub struct Document {
+    /// Distinct for every opened document; views key their caches on it.
+    pub id: u64,
     pub path: PathBuf,
     project: Project,
     pub dispatcher: Dispatcher,
@@ -31,7 +34,9 @@ impl Document {
             Project::read_zip(&bytes).map_err(|e| err(&e))?
         };
         let model = read_model(&project).map_err(|e| err(&e))?;
+        static NEXT: AtomicU64 = AtomicU64::new(1);
         Ok(Self {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
             path: path.to_owned(),
             project,
             dispatcher: Dispatcher::new(model),
