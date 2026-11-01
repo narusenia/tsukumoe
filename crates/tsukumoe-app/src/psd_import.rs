@@ -5,7 +5,7 @@
 //! project, and the user's choices. It draws nothing, so it is tested without
 //! a window. The dialog in `editor.rs` only shows and edits it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use tsukumoe_psd::{Action, Choices, Limits, MAP_PATH, Note, Plan, Prepared, texture_paths};
@@ -51,6 +51,11 @@ pub struct PsdImport {
     pub stage: Stage,
     pub error: Option<String>,
     pub choices: Choices,
+    /// Set when the project was just made for this import: its folder and the
+    /// files written, so cancelling can remove them.
+    pub created: Option<(PathBuf, Vec<String>)>,
+    /// The import was applied.
+    pub confirmed: bool,
     prepared: Option<Prepared>,
     plan: Option<Plan>,
     loading: Option<Receiver<Result<Prepared, String>>>,
@@ -69,6 +74,8 @@ impl PsdImport {
             stage: Stage::Path,
             error: None,
             choices: Choices::default(),
+            created: None,
+            confirmed: false,
             prepared: None,
             plan: None,
             loading: None,
@@ -282,6 +289,7 @@ impl PsdImport {
             doc.put_file(&path, png);
         }
         doc.put_file(MAP_PATH, plan.map.to_json());
+        self.confirmed = true;
         Ok(())
     }
 }

@@ -32,9 +32,14 @@ pub const MENU: &[Def] = &[
     Def::Sub {
         label: "menu-file",
         items: &[
+            item("file.new", "menu-new"),
+            item("file.new-from-psd", "menu-new-from-psd"),
+            Def::Separator,
             item("file.open", "menu-open"),
+            item("file.open-folder", "menu-open-folder"),
             item("file.save", "menu-save"),
             item("file.save-as", "menu-save-as"),
+            item("file.save-as-folder", "menu-save-as-folder"),
             item("file.import-psd", "menu-import-psd"),
             Def::Sub {
                 label: "menu-recent",
@@ -85,7 +90,9 @@ pub struct State {
 impl State {
     pub fn enabled(&self, action: &str) -> bool {
         match action {
-            "file.save" | "file.save-as" | "file.import-psd" => self.has_doc,
+            "file.save" | "file.save-as" | "file.save-as-folder" | "file.import-psd" => {
+                self.has_doc
+            }
             "edit.undo" => self.can_undo,
             "edit.redo" => self.can_redo,
             _ => true,
@@ -236,13 +243,21 @@ mod tests {
         for a in [
             "file.save",
             "file.save-as",
+            "file.save-as-folder",
             "file.import-psd",
             "edit.undo",
             "edit.redo",
         ] {
             assert!(!is_enabled(&none, a), "{a}");
         }
-        assert!(is_enabled(&none, "file.open"));
+        for a in [
+            "file.new",
+            "file.new-from-psd",
+            "file.open",
+            "file.open-folder",
+        ] {
+            assert!(is_enabled(&none, a), "{a}");
+        }
         let state = State {
             has_doc: true,
             can_undo: true,
