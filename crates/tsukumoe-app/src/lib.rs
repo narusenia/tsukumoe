@@ -4,6 +4,7 @@
 //! The Tsukumoe editor. Panels and state live here (and are tested without a
 //! window); `main.rs` only starts the window.
 
+pub mod actions;
 pub mod app;
 pub mod commands;
 pub mod dispatcher;

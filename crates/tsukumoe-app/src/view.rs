@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 use tsukumoe_core::elements::Parameter;
 
+use crate::actions::Tool;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
     Part(String),
@@ -75,6 +77,7 @@ impl Camera {
 #[derive(Clone, Debug, Default)]
 pub struct ViewState {
     pub selection: Option<Selection>,
+    pub tool: Tool,
     pub camera: Camera,
     /// Current parameter values by name; absent means the default.
     params: BTreeMap<String, f32>,

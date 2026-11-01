@@ -7,12 +7,13 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::actions::{self, ACTIONS, Tool};
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
 use tsukumoe_ui::dock::{self, PanelHost};
-use tsukumoe_ui::{Arg, Toasts, Tone, Variant, button, hint, text_input, tr, tr_args};
+use tsukumoe_ui::{Arg, Keymap, Toasts, Tone, Variant, button, hint, text_input, tr, tr_args};
 
 use crate::panels::viewport::Viewport;
 use crate::project::{Document, Recent};
@@ -22,12 +23,15 @@ use crate::workspace::{Layouts, Preset, Workspace};
 
 const LAYOUTS_FILE: &str = "layouts.json";
 const STATE_FILE: &str = "state.json";
+const KEYMAP_FILE: &str = "keymap.json";
 
 pub enum Dialog {
     Open(String),
     SaveAs(String),
     SaveLayout(String),
     ConfirmPreset(Preset),
+    /// The shortcut list: the text of each action's field, and the last error.
+    Keymap(Vec<String>, Option<String>),
 }
 
 pub struct Editor {
@@ -41,6 +45,9 @@ pub struct Editor {
     pub toasts: Toasts,
     pub view: ViewState,
     pub palette: Palette,
+    pub keymap: Keymap,
+    /// Whether the pointer was over the viewport last frame (a keymap context).
+    viewport_hovered: bool,
     viewport: Option<Viewport>,
     layouts_dirty: bool,
 }
@@ -58,6 +65,9 @@ impl Editor {
         let state: serde_json::Value = read(STATE_FILE)
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
+        let keymap = read(KEYMAP_FILE)
+            .and_then(|t| Keymap::from_json(&t).ok())
+            .unwrap_or_else(actions::cubism_compatible);
         Self {
             doc: None,
             workspace: serde_json::from_value(state["workspace"].clone()).unwrap_or_default(),
@@ -68,6 +78,8 @@ impl Editor {
             toasts: Toasts::default(),
             view: ViewState::default(),
             palette: Palette::default(),
+            keymap,
+            viewport_hovered: false,
             viewport: None,
             layouts_dirty: false,
         }
@@ -140,6 +152,43 @@ impl Editor {
         }
     }
 
+    fn save_keymap(&mut self, ctx: &Context) {
+        if let Some(dir) = &self.settings_dir
+            && let Err(e) = settings::write(dir, KEYMAP_FILE, &self.keymap.to_json(ctx))
+        {
+            self.toasts.push(ctx, Tone::Error, e);
+        }
+    }
+
+    /// Runs an action by name (a key press, a menu item, a pie menu item).
+    /// Unknown names, e.g. from a hand-edited keymap, do nothing.
+    pub fn run_action(&mut self, ctx: &Context, action: &str) {
+        match action {
+            "file.open" => self.dialog = Some(Dialog::Open(String::new())),
+            "file.save" => {
+                let r = self.save();
+                self.report(ctx, r, Some(tr(ctx, "app-saved")));
+            }
+            "edit.undo" => drop(self.undo()),
+            "edit.redo" => drop(self.redo()),
+            "view.palette" => self.open_palette(),
+            "viewport.zoom-in" | "viewport.zoom-out" => {
+                let f = if action.ends_with("in") { 1.25 } else { 0.8 };
+                self.view.camera.zoom_at(f, [0.5, 0.5]);
+                self.view.touch();
+            }
+            "viewport.reset-camera" => {
+                self.view.camera.reset();
+                self.view.touch();
+            }
+            other => {
+                if let Some(tool) = Tool::from_action(other) {
+                    self.view.tool = tool;
+                }
+            }
+        }
+    }
+
     /// Shows the command palette panel and puts the cursor in its search field.
     pub fn open_palette(&mut self) {
         self.layouts.current_mut(self.workspace).reveal("palette");
@@ -182,6 +231,15 @@ impl Editor {
     /// `rs` is the wgpu state for the viewport; without it the viewport says so.
     pub fn ui(&mut self, ui: &mut Ui, rs: Option<&RenderState>) {
         let ctx = ui.ctx().clone();
+        let active: &[&str] = if self.viewport_hovered {
+            &["viewport"]
+        } else {
+            &[]
+        };
+        self.viewport_hovered = false;
+        for action in self.keymap.triggered(&ctx, active) {
+            self.run_action(&ctx, &action);
+        }
         egui::Panel::top("tsukumoe-menu").show(ui, |ui| self.menu_bar(ui));
         egui::Panel::bottom("tsukumoe-status").show(ui, |ui| self.status_bar(ui));
         egui::CentralPanel::default().show(ui, |ui| {
@@ -255,6 +313,30 @@ impl Editor {
                         ui.close();
                     }
                 });
+            });
+            ui.menu_button(t("menu-view"), |ui| {
+                if tsukumoe_ui::menu_item(
+                    ui,
+                    &t("menu-palette"),
+                    self.keymap.shortcut_text(&ctx, "view.palette").as_deref(),
+                )
+                .clicked()
+                {
+                    self.open_palette();
+                    ui.close();
+                }
+                if tsukumoe_ui::menu_item(ui, &t("keymap-title"), None).clicked() {
+                    let texts = ACTIONS
+                        .iter()
+                        .map(|a| {
+                            self.keymap
+                                .keys_text(a, actions::context_of(a))
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    self.dialog = Some(Dialog::Keymap(texts, None));
+                    ui.close();
+                }
             });
             ui.menu_button(t("menu-layout"), |ui| {
                 for preset in Preset::ALL {
@@ -333,6 +415,17 @@ impl Editor {
             return;
         };
         let t = |key: &str| tr(ctx, key);
+        if let Dialog::Keymap(texts, error) = &mut dialog {
+            let mut open = true;
+            let changed = self.keymap_dialog(ctx, texts, error, &mut open);
+            if changed {
+                self.save_keymap(ctx);
+            }
+            if open {
+                self.dialog = Some(dialog);
+            }
+            return;
+        }
         let mut open = true;
         let mut done = false;
         let mut cancel = false;
@@ -341,6 +434,7 @@ impl Editor {
             Dialog::SaveAs(_) => (t("dialog-save-as-title"), "dialog-save-as"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
+            Dialog::Keymap(..) => unreachable!("handled above"),
         };
         tsukumoe_ui::dialog(ctx, id, &title, &mut open, |ui| {
             match &mut dialog {
@@ -355,6 +449,7 @@ impl Editor {
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
                 }
+                Dialog::Keymap(..) => {}
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -394,6 +489,77 @@ impl Editor {
         if open {
             self.dialog = Some(dialog);
         }
+    }
+}
+
+impl Editor {
+    /// The shortcut list. Each field applies when it loses focus; returns
+    /// whether the keymap changed.
+    fn keymap_dialog(
+        &mut self,
+        ctx: &Context,
+        texts: &mut [String],
+        error: &mut Option<String>,
+        open: &mut bool,
+    ) -> bool {
+        let t = |key: &str| tr(ctx, key);
+        let mut changed = false;
+        let mut reset = false;
+        tsukumoe_ui::dialog(ctx, "dialog-keymap", &t("keymap-title"), open, |ui| {
+            hint(ui, t("keymap-hint"));
+            for (action, text) in ACTIONS.iter().zip(texts.iter_mut()) {
+                ui.horizontal(|ui| {
+                    ui.set_min_width(420.0);
+                    ui.label(t(&actions::label_key(action)));
+                    let r = text_input(ui, text, action, "");
+                    if r.lost_focus() {
+                        let context = actions::context_of(action);
+                        let text = text.trim();
+                        if text.is_empty() {
+                            changed |= self.keymap.unbind(action, context);
+                            *error = None;
+                        } else {
+                            match self.keymap.bind(action, context, text) {
+                                Ok(()) => {
+                                    changed = true;
+                                    *error = None;
+                                }
+                                Err(_) => *error = Some(t("keymap-bad")),
+                            }
+                        }
+                    }
+                });
+            }
+            for (a, b) in self.keymap.conflicts() {
+                let name = |id: &str| t(&actions::label_key(id));
+                hint(
+                    ui,
+                    tr_args(
+                        ctx,
+                        "keymap-conflict",
+                        &[
+                            ("a", Arg::from(name(&a).as_str())),
+                            ("b", Arg::from(name(&b).as_str())),
+                        ],
+                    ),
+                );
+            }
+            if let Some(e) = error.as_ref() {
+                hint(ui, e.clone());
+            }
+            reset = button(ui, &t("keymap-reset"), Variant::Secondary).clicked();
+        });
+        if reset {
+            self.keymap = actions::cubism_compatible();
+            for (action, text) in ACTIONS.iter().zip(texts.iter_mut()) {
+                *text = self
+                    .keymap
+                    .keys_text(action, actions::context_of(action))
+                    .unwrap_or_default();
+            }
+            changed = true;
+        }
+        changed
     }
 }
 
@@ -448,7 +614,7 @@ impl PanelHost for Panels<'_> {
                         }
                     }
                     if let Some(vp) = editor.viewport.as_mut() {
-                        vp.show(ui, rs, doc, &mut editor.view);
+                        editor.viewport_hovered = vp.show(ui, rs, doc, &mut editor.view).hovered();
                     }
                 }
                 None => viewport::placeholder(ui, true),
@@ -574,6 +740,65 @@ mod tests {
         assert!(editor.doc.as_ref().unwrap().dispatcher.error().is_some());
         assert!(editor.undo() && parts(&editor) == n - 1);
         assert!(editor.redo() && parts(&editor) == n);
+    }
+
+    fn open_minimal() -> Editor {
+        let mut editor = Editor::new(None);
+        editor
+            .open(
+                &Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../tsukumoe-format/tests/fixtures/minimal"),
+            )
+            .unwrap();
+        editor
+    }
+
+    #[test]
+    fn a_shortcut_runs_its_action_and_tools_switch() {
+        use tsukumoe_core::command::Command;
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        assert!(editor.submit(
+            &ctx,
+            Command::AddPart {
+                name: "P".into(),
+                parent: None
+            }
+        ));
+        let mut h = harness(editor);
+        h.run();
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+        h.run();
+        assert!(
+            !h.state().doc.as_ref().unwrap().dispatcher.can_undo(),
+            "Mod+Z undid it"
+        );
+        h.key_press(egui::Key::M);
+        h.run();
+        assert_eq!(h.state().view.tool, Tool::Mesh);
+        h.state_mut().run_action(&ctx, "nonsense.action");
+    }
+
+    #[test]
+    fn user_key_assignments_are_saved_and_restored() {
+        let dir = scratch("keymap");
+        let ctx = Context::default();
+        let mut editor = Editor::new(Some(dir.clone()));
+        editor.keymap.bind("edit.undo", None, "Mod+Y").unwrap();
+        editor.save_keymap(&ctx);
+        let again = Editor::new(Some(dir.clone()));
+        assert_eq!(
+            again.keymap.keys_text("edit.undo", None).as_deref(),
+            Some("Mod+Y")
+        );
+        // a damaged file falls back to the preset
+        settings::write(&dir, KEYMAP_FILE, "{").unwrap();
+        let broken = Editor::new(Some(dir.clone()));
+        assert_eq!(
+            broken.keymap.keys_text("edit.undo", None).as_deref(),
+            Some("Mod+Z")
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

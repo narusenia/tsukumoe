@@ -29,6 +29,7 @@ wgpu.workspace = true
 
 [dev-dependencies]
 egui_kittest.workspace = true
+tsukumoe-i18n.workspace = true
 pollster.workspace = true
 
 [lints]
