@@ -16,9 +16,10 @@ use tsukumoe_gpu::{DrawOptions, Renderer, Texture};
 use tsukumoe_ui::{Keymap, Theme, hint, tr};
 
 use crate::actions::Tool;
+use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
-use crate::mesh_tool::{self, Hit, Mapper, MeshTool, Op, ToolError};
-use crate::panels::mesh_overlay;
+use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
+use crate::panels::{deformer_overlay, mesh_overlay};
 use crate::project::Document;
 use crate::scene::{Scene, fit_view};
 use crate::view::{Selection, ViewState};
@@ -167,6 +168,7 @@ impl Viewport {
         view: &mut ViewState,
         drag: &DragAssignment,
         mesh: &mut MeshTool,
+        deformer: &mut DeformerTool,
         keymap: &Keymap,
     ) -> (
         egui::Response,
@@ -272,15 +274,135 @@ impl Viewport {
                 egui::Color32::WHITE,
             );
         }
-        let (ops, actions) = if view.tool == Tool::Mesh {
-            self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size, keymap)
-        } else {
-            (Vec::new(), Vec::new())
+        let (ops, actions) = match view.tool {
+            Tool::Mesh => {
+                self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size, keymap)
+            }
+            Tool::Deformer => self
+                .deformer_tool_frame(ui, &response, rect, doc, view, drag, deformer, size, keymap),
+            Tool::Select => (Vec::new(), Vec::new()),
         };
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }
         (response, ops, actions)
+    }
+
+    /// The deformer tool for one frame: pointer input, then the overlay.
+    #[allow(clippy::too_many_arguments)]
+    fn deformer_tool_frame(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        doc: &Document,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        tool: &mut DeformerTool,
+        size: (u32, u32),
+        keymap: &Keymap,
+    ) -> (Vec<Result<Op, ToolError>>, Vec<&'static str>) {
+        let mut ops = Vec::new();
+        let mut actions = Vec::new();
+        let Some(scene) = &self.scene else {
+            return (ops, actions);
+        };
+        let theme = Theme::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        let model = doc.dispatcher.model();
+        // Rotation handles are a twentieth of the view wide.
+        let radius = (mapper.view[2] - mapper.view[0]) * 0.05;
+        let name = tool.deformer().map(str::to_owned);
+        let shape = name
+            .as_deref()
+            .and_then(|n| deformer_tool::Shape::of(model, n, radius));
+        let (modifiers, escape) = ui.input(|i| (i.modifiers, i.key_pressed(egui::Key::Escape)));
+        let arrow = |p: Option<egui::Pos2>| p.map(|p| [p.x, p.y]);
+        let pressed = arrow(ui.input(|i| i.pointer.press_origin()));
+        let now = arrow(response.interact_pointer_pos());
+        let primary = PointerButton::Primary;
+        let tool_input = !drag.modifier_down(modifiers);
+        if let (Some(name), Some(shape)) = (&name, &shape) {
+            tool.sanitize(shape.world_points().len());
+            if escape {
+                tool.cancel();
+            }
+            if tool_input
+                && response.drag_started_by(primary)
+                && let Some(at) = pressed
+            {
+                tool.press(shape, &mapper, at, modifiers.shift);
+            }
+            if response.dragged_by(primary)
+                && let Some(at) = now
+            {
+                tool.drag(at);
+            }
+            if response.drag_stopped_by(primary)
+                && let Some(op) = tool.release(name, shape, &mapper)
+            {
+                ops.push(Ok(op));
+            }
+        }
+        if tool_input
+            && response.clicked_by(primary)
+            && let Some(at) = now
+        {
+            let on_shape = shape.as_ref().is_some_and(|s| {
+                deformer_tool::hit_test(s, &mapper, at) != deformer_tool::Hit::Nothing
+            });
+            match (&shape, on_shape) {
+                (Some(shape), true) => tool.click(shape, &mapper, at, modifiers.shift),
+                _ => match deformer_tool::pick_deformer(model, &mapper, at, radius) {
+                    Some(picked) if !modifiers.shift => {
+                        view.selection = Some(if model.warps().find(&picked).is_some() {
+                            Selection::Warp(picked)
+                        } else {
+                            Selection::Rotation(picked)
+                        });
+                        view.touch();
+                    }
+                    _ => {
+                        if let Some(shape) = &shape {
+                            tool.click(shape, &mapper, at, modifiers.shift);
+                        }
+                    }
+                },
+            }
+        }
+        let ctx = ui.ctx().clone();
+        response.context_menu(|ui| {
+            let shortcut = |a: &str| keymap.shortcut_text(&ctx, a);
+            if let Some(action) =
+                mesh_overlay::menu_ui(ui, &deformer_tool::MENU_ACTIONS, &|_| true, &shortcut)
+            {
+                actions.push(action);
+                ui.close();
+            }
+        });
+        match (&name, &shape) {
+            (Some(name), Some(shape)) => {
+                let related = deformer_tool::related(model, name, radius);
+                let preview = tool.preview(shape, &mapper);
+                deformer_overlay::paint(
+                    &painter,
+                    &theme,
+                    &mapper,
+                    preview.as_ref().unwrap_or(shape),
+                    &related,
+                    tool,
+                );
+                deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-hint"));
+            }
+            _ => deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-pick")),
+        }
+        deformer_overlay::options(ui.ctx(), rect, tool);
+        (ops, actions)
     }
 
     /// The mesh edit tool for one frame: pointer input, then the overlay.
@@ -391,7 +513,9 @@ impl Viewport {
             let ctx = ui.ctx().clone();
             response.context_menu(|ui| {
                 let shortcut = |a: &str| keymap.shortcut_text(&ctx, a);
-                if let Some(action) = mesh_overlay::menu_ui(ui, tool, &shortcut) {
+                if let Some(action) =
+                    mesh_overlay::menu_ui(ui, &MENU_ACTIONS, &|a| tool.menu_enabled(a), &shortcut)
+                {
                     actions.push(action);
                     ui.close();
                 }

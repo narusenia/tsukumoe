@@ -172,23 +172,24 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
         });
 }
 
-/// The items of the right-click menu: one button per action of
-/// [`crate::mesh_tool::MENU_ACTIONS`], disabled when the selection does not
-/// fit, with its shortcut on the right. Returns the action that was clicked.
+/// The items of a right-click menu: one button per action, disabled when
+/// `enabled` says the selection does not fit, with its shortcut on the right.
+/// Returns the action that was clicked.
 pub fn menu_ui(
     ui: &mut egui::Ui,
-    tool: &MeshTool,
+    actions: &[&'static str],
+    enabled: &dyn Fn(&str) -> bool,
     shortcut: &dyn Fn(&str) -> Option<String>,
 ) -> Option<&'static str> {
     let ctx = ui.ctx().clone();
     let mut chosen = None;
-    for action in crate::mesh_tool::MENU_ACTIONS {
+    for &action in actions {
         let label = tsukumoe_ui::tr(&ctx, &crate::actions::label_key(action));
         let mut button = egui::Button::new(label);
         if let Some(keys) = shortcut(action) {
             button = button.shortcut_text(keys);
         }
-        if ui.add_enabled(tool.menu_enabled(action), button).clicked() {
+        if ui.add_enabled(enabled(action), button).clicked() {
             chosen = Some(action);
         }
     }
@@ -210,7 +211,9 @@ mod tests {
                 |ui, (tool, chosen): &mut (MeshTool, Option<&'static str>)| {
                     tsukumoe_ui::init(ui.ctx());
                     tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
-                    if let Some(action) = menu_ui(ui, tool, &|_| None) {
+                    if let Some(action) =
+                        menu_ui(ui, &MENU_ACTIONS, &|a| tool.menu_enabled(a), &|_| None)
+                    {
                         *chosen = Some(action);
                     }
                 },

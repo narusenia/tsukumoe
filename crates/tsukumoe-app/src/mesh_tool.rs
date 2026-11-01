@@ -123,13 +123,15 @@ impl From<EditError> for ToolError {
 
 /// The actions of the right-click menu, in order. Each one is run through
 /// `Editor::run_action`, so the menu has no logic of its own.
-pub const MENU_ACTIONS: [&str; 6] = [
+pub const MENU_ACTIONS: [&str; 8] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
     "mesh.connect",
     "mesh.flip-edge",
     "mesh.delete-vertices",
+    "deformer.create-warp",
+    "deformer.create-rotation",
 ];
 
 /// A command and the name it gets in the history list.
@@ -990,15 +992,30 @@ mod tests {
         let mut t = tool();
         let enabled = |t: &MeshTool| MENU_ACTIONS.map(|a| t.menu_enabled(a));
         // Nothing selected: only the whole-mesh actions.
-        assert_eq!(enabled(&t), [true, true, true, false, false, false]);
+        assert_eq!(
+            enabled(&t),
+            [true, true, true, false, false, false, true, true]
+        );
         click(&mut t, &g, &m, [100.0, 100.0], false);
-        assert_eq!(enabled(&t), [true, true, true, false, false, true]);
+        assert_eq!(
+            enabled(&t),
+            [true, true, true, false, false, true, true, true]
+        );
         click(&mut t, &g, &m, [0.0, 0.0], true);
-        assert_eq!(enabled(&t), [true, true, true, true, false, true]);
+        assert_eq!(
+            enabled(&t),
+            [true, true, true, true, false, true, true, true]
+        );
         click(&mut t, &g, &m, [100.0, 0.0], true);
-        assert_eq!(enabled(&t), [true, true, true, false, false, true]);
+        assert_eq!(
+            enabled(&t),
+            [true, true, true, false, false, true, true, true]
+        );
         click(&mut t, &g, &m, [50.0, 50.0], false);
-        assert_eq!(enabled(&t), [true, true, true, false, true, false]);
+        assert_eq!(
+            enabled(&t),
+            [true, true, true, false, true, false, true, true]
+        );
     }
 
     #[test]

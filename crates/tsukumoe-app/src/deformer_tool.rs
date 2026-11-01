@@ -19,6 +19,9 @@ use tsukumoe_core::rig::DeformerRef;
 
 use crate::mesh_tool::{Mapper, Op};
 
+/// The actions of the deformer tool's right-click menu.
+pub const MENU_ACTIONS: [&str; 2] = ["deformer.create-warp", "deformer.create-rotation"];
+
 /// A control point or a handle is picked within this many points of the pointer.
 pub const PICK_RADIUS: f32 = 8.0;
 /// A press that moves less than this many points is a click.
@@ -501,6 +504,58 @@ impl DeformerTool {
         let hit = hit_test(shape, m, at);
         self.select(hit, shift);
     }
+}
+
+/// How a deformer relates to the one being edited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Parent,
+    Child,
+}
+
+/// The parents (up the chain) and the direct child deformers of `name`, as
+/// shapes, for the overlay to show in other colours.
+pub fn related(model: &Model, name: &str, radius_world: f32) -> Vec<(Role, Shape)> {
+    let Some(me) = model
+        .warps()
+        .find(name)
+        .map(DeformerRef::Warp)
+        .or_else(|| model.rotations().find(name).map(DeformerRef::Rotation))
+    else {
+        return Vec::new();
+    };
+    let parent_of = |r: DeformerRef| match r {
+        DeformerRef::Warp(id) => model.warps().get(id).and_then(|d| d.parent),
+        DeformerRef::Rotation(id) => model.rotations().get(id).and_then(|d| d.parent),
+    };
+    let mut out = Vec::new();
+    let mut up = parent_of(me);
+    // Bounded: the model has no loops, but never trust that in a draw loop.
+    for _ in 0..16 {
+        let Some(r) = up else { break };
+        if let Some(shape) = name_of(model, r).and_then(|n| Shape::of(model, &n, radius_world)) {
+            out.push((Role::Parent, shape));
+        }
+        up = parent_of(r);
+    }
+    let children = model
+        .warps()
+        .iter()
+        .filter(|(_, _, d)| d.parent == Some(me))
+        .map(|(_, n, _)| n.to_owned())
+        .chain(
+            model
+                .rotations()
+                .iter()
+                .filter(|(_, _, d)| d.parent == Some(me))
+                .map(|(_, n, _)| n.to_owned()),
+        );
+    for n in children {
+        if let Some(shape) = Shape::of(model, &n, radius_world) {
+            out.push((Role::Child, shape));
+        }
+    }
+    out
 }
 
 /// The deformer a `DeformerRef` names, for callers that hold ids.
