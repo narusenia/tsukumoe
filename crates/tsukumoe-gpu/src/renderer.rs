@@ -117,11 +117,17 @@ struct Mask {
 pub struct DrawOptions {
     /// Clear the target first; `false` draws over what is there.
     pub clear: bool,
+    /// Draw only this mesh (an index into the model's meshes), even if it is
+    /// hidden. An editor uses it to show the mesh being edited.
+    pub only: Option<u32>,
 }
 
 impl Default for DrawOptions {
     fn default() -> Self {
-        Self { clear: true }
+        Self {
+            clear: true,
+            only: None,
+        }
     }
 }
 
@@ -429,8 +435,17 @@ impl Renderer {
         size: (u32, u32),
         options: DrawOptions,
     ) -> Result<(), Error> {
+        let single;
+        let order: &[u32] = match options.only {
+            Some(mesh) => {
+                single = [mesh];
+                &single
+            }
+            None => list.order(),
+        };
         // Check every texture first so a failure leaves the target alone.
-        for d in list.drawables() {
+        for &m in order {
+            let d = list.drawable(m as usize);
             if self.textures.get(d.texture as usize).is_none() {
                 return Err(Error::MissingTexture(d.texture));
             }
@@ -456,7 +471,6 @@ impl Renderer {
         // dynamic offset, rather than a buffer and a bind group each. Slot 0
         // is for the mask passes.
         let slot = |n: usize| (n * UNIFORM_STRIDE) as u32;
-        let order = list.order();
         let mut uniforms = vec![0u8; UNIFORM_STRIDE * (order.len() + 1)];
         let mut put = |n: usize, p: Params| {
             uniforms[n * UNIFORM_STRIDE..][..size_of::<Params>()]
@@ -575,7 +589,7 @@ impl Renderer {
             d.opacity > 0.0 && !d.indices.is_empty()
         };
         // Nothing drawn: an empty pass still clears the target.
-        if !list.order().iter().any(|&m| drawn(m)) {
+        if !order.iter().any(|&m| drawn(m)) {
             drop(begin_pass(&mut encoder, target_view, options.clear));
         }
 

@@ -190,7 +190,10 @@ impl Headless {
             view,
             &frame.view,
             (width, height),
-            DrawOptions { clear },
+            DrawOptions {
+                clear,
+                ..Default::default()
+            },
         )
     }
 
@@ -221,6 +224,30 @@ impl Headless {
         width: u32,
         height: u32,
     ) -> Result<Image, Error> {
+        self.render_with(list, view, width, height, None)
+    }
+
+    /// [`Headless::render`] of the one mesh `mesh` (a mesh index), shown even
+    /// when it is hidden.
+    pub fn render_only(
+        &mut self,
+        list: &DrawList,
+        view: [f32; 4],
+        mesh: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<Image, Error> {
+        self.render_with(list, view, width, height, Some(mesh))
+    }
+
+    fn render_with(
+        &mut self,
+        list: &DrawList,
+        view: [f32; 4],
+        width: u32,
+        height: u32,
+        only: Option<u32>,
+    ) -> Result<Image, Error> {
         let target = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("target"),
             size: wgpu::Extent3d {
@@ -235,8 +262,18 @@ impl Headless {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        self.renderer
-            .render(&self.device, &self.queue, list, view, &target)?;
+        self.renderer.render_to_view_with(
+            &self.device,
+            &self.queue,
+            list,
+            view,
+            &target.create_view(&Default::default()),
+            (width, height),
+            DrawOptions {
+                only,
+                ..Default::default()
+            },
+        )?;
 
         let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
