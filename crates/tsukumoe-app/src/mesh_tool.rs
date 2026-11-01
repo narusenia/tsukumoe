@@ -63,6 +63,8 @@ pub enum ToolError {
     NeedVertices,
     NeedTwoVertices,
     NeedEdge,
+    /// Re-triangulating would change nothing.
+    NoChange,
     Edit(EditError),
 }
 
@@ -73,6 +75,7 @@ impl ToolError {
             Self::NeedVertices => "mesh-edit-need-vertices",
             Self::NeedTwoVertices => "mesh-edit-need-two",
             Self::NeedEdge => "mesh-edit-need-edge",
+            Self::NoChange => "mesh-edit-no-change",
             Self::Edit(EditError::OutsideMesh) => "mesh-edit-outside",
             Self::Edit(EditError::TooClose) => "mesh-edit-too-close",
             Self::Edit(EditError::BoundaryEdge) => "mesh-edit-outline-edge",
@@ -475,6 +478,17 @@ impl MeshTool {
         Ok(geometry_op(name, "mesh_connect", out))
     }
 
+    /// Re-triangulates the whole mesh as a constrained Delaunay triangulation;
+    /// the selected edge stays as it is.
+    pub fn retriangulate(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        let keep: Vec<(u32, u32)> = self.edge.into_iter().collect();
+        let out = mesh_edit::retriangulate(g, &keep)?;
+        if out == *g {
+            return Err(ToolError::NoChange);
+        }
+        Ok(geometry_op(name, "mesh_retriangulate", out))
+    }
+
     /// Flips the selected edge; the selection is dropped, as the edge is gone.
     pub fn flip_selected(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
         let (a, b) = self.edge.ok_or(ToolError::NeedEdge)?;
@@ -742,6 +756,33 @@ mod tests {
     }
 
     #[test]
+    fn retriangulate_keeps_the_selected_edge_and_refuses_a_no_op() {
+        let g = Geometry {
+            positions: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            uvs: vec![[0.0, 0.0]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        let mut t = tool();
+        // Square corner pairs are cocircular, so nothing flips.
+        let square = Geometry {
+            positions: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            ..g.clone()
+        };
+        assert_eq!(t.retriangulate("Skin", &square), Err(ToolError::NoChange));
+        // A skewed quad where the drawn diagonal is the wrong one.
+        let skew = Geometry {
+            positions: vec![[0.0, 0.0], [2.0, 0.0], [3.0, 2.0], [-0.5, 2.0]],
+            ..g.clone()
+        };
+        let (command, label) = t.retriangulate("Skin", &skew).unwrap();
+        assert_eq!(label, "mesh_retriangulate: Skin");
+        assert!(matches!(command, Command::SetMeshGeometry { .. }));
+        // With that diagonal selected it is kept, so nothing changes.
+        t.edge = Some((0, 2));
+        assert_eq!(t.retriangulate("Skin", &skew), Err(ToolError::NoChange));
+    }
+
+    #[test]
     fn changing_the_mesh_drops_the_selection_and_sanitize_drops_stale_ids() {
         let (g, m) = square();
         let mut t = tool();
@@ -801,6 +842,7 @@ mod tests {
             ToolError::NeedVertices,
             ToolError::NeedTwoVertices,
             ToolError::NeedEdge,
+            ToolError::NoChange,
             EditError::OutsideMesh.into(),
             EditError::TooClose.into(),
             EditError::BoundaryEdge.into(),

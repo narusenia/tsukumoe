@@ -13,6 +13,7 @@
     { "action": "mesh.delete-vertices", "context": "viewport", "keys": "Backspace" },
     { "action": "mesh.connect", "context": "viewport", "keys": "E" },
     { "action": "mesh.flip-edge", "context": "viewport", "keys": "F" },
+    { "action": "mesh.retriangulate", "context": "viewport", "keys": "D" },
     { "action": "viewport.zoom-in", "context": "viewport", "keys": "Equals" },
     { "action": "viewport.zoom-out", "context": "viewport", "keys": "Minus" },
     { "action": "viewport.reset-camera", "context": "viewport", "keys": "0" }

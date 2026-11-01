@@ -230,6 +230,11 @@ impl Editor {
 
     /// A mesh tool key (delete, connect, flip) on the mesh being edited.
     fn run_mesh_action(&mut self, ctx: &Context, action: &str) {
+        // D also switches to the deformer tool; keep that outside the mesh tool.
+        if action == "mesh.retriangulate" && self.view.tool != Tool::Mesh {
+            self.view.tool = Tool::Deformer;
+            return;
+        }
         let Some(name) = self.mesh_tool.mesh().map(str::to_owned) else {
             return;
         };
@@ -246,6 +251,7 @@ impl Editor {
         let op = match action {
             "mesh.delete-vertices" => self.mesh_tool.delete_selected(&name, &g),
             "mesh.connect" => self.mesh_tool.connect_selected(&name, &g),
+            "mesh.retriangulate" => self.mesh_tool.retriangulate(&name, &g),
             _ => self.mesh_tool.flip_selected(&name, &g),
         };
         self.apply_mesh_op(ctx, op);
@@ -326,7 +332,7 @@ impl Editor {
                     self.pie = Some(tsukumoe_ui::PieMenu::open(at, self.pie_config.items(ctx)));
                 }
             }
-            "mesh.delete-vertices" | "mesh.connect" | "mesh.flip-edge" => {
+            "mesh.delete-vertices" | "mesh.connect" | "mesh.flip-edge" | "mesh.retriangulate" => {
                 self.run_mesh_action(ctx, action);
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
@@ -1581,6 +1587,9 @@ mod tests {
             .click(&positions, &indices, &m, [100.0, 100.0], false);
         assert!(editor.run_action(&ctx, "mesh.delete-vertices"));
         assert_eq!(count(&editor.doc.as_ref().unwrap().dispatcher), 9);
+        // D outside the mesh tool still picks the deformer tool.
+        assert!(editor.run_action(&ctx, "mesh.retriangulate"));
+        assert_eq!(editor.view.tool, Tool::Deformer);
     }
 
     #[test]
