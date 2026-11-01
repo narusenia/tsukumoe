@@ -20,6 +20,7 @@ pub mod panels;
 pub mod picker;
 pub mod pie;
 pub mod project;
+pub mod proportional;
 pub mod psd_import;
 pub mod scene;
 pub mod settings;

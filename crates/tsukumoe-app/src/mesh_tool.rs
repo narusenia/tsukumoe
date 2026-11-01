@@ -15,7 +15,10 @@ use tsukumoe_core::deformer_space::Space;
 use tsukumoe_core::elements::Point;
 use tsukumoe_core::mesh_edit::{self, EditError, Geometry};
 use tsukumoe_core::model::Model;
+use tsukumoe_core::proportional;
 use tsukumoe_core::rig::ArtMesh;
+
+use crate::proportional::{Proportional, Snapshot};
 
 /// A vertex is picked within this many points of the pointer.
 pub const VERTEX_RADIUS: f32 = 8.0;
@@ -165,6 +168,10 @@ pub struct MeshTool {
     pub grid: (u32, u32),
     /// Settings of `mesh.contour`; kept across meshes.
     pub contour: ContourParams,
+    /// Proportional edit; the viewport copies the editor's options here.
+    pub proportional: Proportional,
+    /// The drawn points at the press, kept while proportional edit is on.
+    snapshot: Option<Snapshot>,
 }
 
 fn dist_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -311,6 +318,8 @@ impl Default for MeshTool {
             gesture: None,
             grid: (4, 4),
             contour: ContourParams::default(),
+            proportional: Proportional::default(),
+            snapshot: None,
         }
     }
 }
@@ -327,6 +336,7 @@ impl MeshTool {
                 mesh: name.map(str::to_owned),
                 grid: self.grid,
                 contour: self.contour,
+                proportional: self.proportional,
                 ..Self::default()
             };
         }
@@ -455,6 +465,10 @@ impl MeshTool {
         shift: bool,
     ) {
         let hit = hit_test(positions, indices, m, at);
+        self.snapshot = self.proportional.on.then(|| Snapshot {
+            positions: positions.to_vec(),
+            edges: edges(indices),
+        });
         self.gesture = Some(Gesture::Pending { at, hit, shift });
     }
 
@@ -492,6 +506,40 @@ impl MeshTool {
     /// Abandons a drag (Escape) without changing anything.
     pub fn cancel(&mut self) {
         self.gesture = None;
+        self.snapshot = None;
+    }
+
+    /// How far each vertex follows the drag: 1 for the selected ones and
+    /// less around them with proportional edit on; `None` with it off (only
+    /// the selected ones move). Measured on the points drawn at the press.
+    fn weights(&self, m: &Mapper) -> Option<Vec<f32>> {
+        let snap = self.snapshot.as_ref().filter(|_| self.proportional.on)?;
+        let base: Vec<u32> = self.vertices.iter().copied().collect();
+        Some(proportional::weights(
+            &snap.positions,
+            &snap.edges,
+            &base,
+            &self.proportional.influence(m),
+        ))
+    }
+
+    /// The weights of a move in progress, for the overlay's shading.
+    pub fn drag_weights(&self, m: &Mapper) -> Option<Vec<f32>> {
+        matches!(self.gesture, Some(Gesture::Move { .. }))
+            .then(|| self.weights(m))
+            .flatten()
+    }
+
+    /// The vertices that move and by how much of the drag: the selected ones
+    /// whole, or all that have a weight.
+    fn follow(&self, weights: Option<&[f32]>, len: usize) -> Vec<(usize, f32)> {
+        match weights.filter(|w| w.len() == len) {
+            Some(w) => (0..len)
+                .filter(|&i| w[i] > 0.0)
+                .map(|i| (i, w[i]))
+                .collect(),
+            None => self.vertices.iter().map(|&v| (v as usize, 1.0)).collect(),
+        }
     }
 
     /// `positions` with the selected vertices moved by the drag from `from` to `to`.
@@ -499,9 +547,10 @@ impl MeshTool {
         let (a, b) = (m.to_model(from), m.to_model(to));
         let d = [b[0] - a[0], b[1] - a[1]];
         let mut out = positions.to_vec();
-        for &v in &self.vertices {
-            if let Some(p) = out.get_mut(v as usize) {
-                *p = [p[0] + d[0], p[1] + d[1]];
+        let weights = self.weights(m);
+        for (i, k) in self.follow(weights.as_deref(), out.len()) {
+            if let Some(p) = out.get_mut(i) {
+                *p = [p[0] + d[0] * k, p[1] + d[1] * k];
             }
         }
         out
@@ -520,10 +569,13 @@ impl MeshTool {
         let (a, b) = (m.to_model(from), m.to_model(to));
         let d = [b[0] - a[0], b[1] - a[1]];
         let mut out = stored.to_vec();
-        for &v in &self.vertices {
-            if let Some(p) = out.get_mut(v as usize) {
+        let weights = self.weights(m);
+        for (i, k) in self.follow(weights.as_deref(), out.len()) {
+            if let Some(p) = out.get_mut(i) {
                 let w = space.point_to_world(*p);
-                *p = space.point_from_world([w[0] + d[0], w[1] + d[1]]).ok()?;
+                *p = space
+                    .point_from_world([w[0] + d[0] * k, w[1] + d[1] * k])
+                    .ok()?;
             }
         }
         Some(out)
@@ -591,18 +643,21 @@ impl MeshTool {
     ) -> Option<Op> {
         match self.gesture.take()? {
             Gesture::Pending { hit, shift, .. } => {
+                self.snapshot = None;
                 self.select(hit, shift);
                 None
             }
             Gesture::Rect { from, to, add } => {
+                self.snapshot = None;
                 self.select_in(shown, m, from, to, add);
                 None
             }
             Gesture::Move { from, to } => {
-                if from == to {
-                    return None;
-                }
-                let moved = self.moved_stored(stored, m, from, to, space)?;
+                let moved = (from != to)
+                    .then(|| self.moved_stored(stored, m, from, to, space))
+                    .flatten();
+                self.snapshot = None;
+                let moved = moved?;
                 Some((
                     Command::SetMeshPositions {
                         name: name.to_owned(),
@@ -848,6 +903,110 @@ mod tests {
         t.drag([10.0, 10.0]);
         t.cancel();
         assert!(t.release("Skin", &g.positions, &m).is_none());
+    }
+
+    /// A square of 4 corners with proportional edit on, a radius of 150 points
+    /// (1.5 units), the corner at (1, 0) selected and dragged 0.5 up.
+    fn proportional_drag(configure: impl FnOnce(&mut MeshTool)) -> (MeshTool, Geometry, Mapper) {
+        let (g, m) = square();
+        let mut t = tool();
+        t.proportional.on = true;
+        t.proportional.radius = 150.0;
+        t.proportional.falloff = proportional::Falloff::Linear;
+        configure(&mut t);
+        click(&mut t, &g, &m, [100.0, 100.0], false);
+        t.press(&g.positions, &g.indices, &m, [100.0, 100.0], false);
+        t.drag([100.0, 50.0]);
+        (t, g, m)
+    }
+
+    #[test]
+    fn proportional_edit_moves_neighbours_by_their_weight_and_ends_in_one_command() {
+        let (mut t, g, m) = proportional_drag(|_| {});
+        let preview = t.preview(&g.positions, &m).unwrap();
+        // The selected corner follows fully; a neighbour one unit away by 1 - 1/1.5.
+        assert!((preview[1][1] - 0.5).abs() < 1e-6);
+        let k = 1.0 - 1.0 / 1.5;
+        assert!((preview[0][1] - 0.5 * k).abs() < 1e-5, "{:?}", preview[0]);
+        assert!((preview[2][1] - (1.0 + 0.5 * k)).abs() < 1e-5);
+        // The far corner is 2 along the edges: beyond the radius.
+        assert_eq!(preview[3], g.positions[3]);
+        let live = t
+            .dragging_stored(&g.positions, &m, &Space::Drawing)
+            .unwrap();
+        assert_eq!(live, preview);
+        let (command, label) = t.release("Skin", &g.positions, &m).unwrap();
+        assert_eq!(label, "mesh_move_vertices: Skin");
+        assert_eq!(
+            command,
+            Command::SetMeshPositions {
+                name: "Skin".into(),
+                positions: live
+            }
+        );
+        // The drag is over: no weights, no snapshot.
+        assert!(t.drag_weights(&m).is_none() && t.preview(&g.positions, &m).is_none());
+    }
+
+    #[test]
+    fn proportional_edit_measures_on_the_press_not_on_the_moving_shape() {
+        let (t, g, m) = proportional_drag(|_| {});
+        let first = t.drag_weights(&m).unwrap();
+        let mut t = t;
+        t.drag([100.0, 20.0]);
+        assert_eq!(t.drag_weights(&m).unwrap(), first);
+        // Widening the radius mid drag widens the weights.
+        t.proportional.radius = 300.0;
+        let wide = t.drag_weights(&m).unwrap();
+        assert!(wide[0] > first[0]);
+        let _ = g;
+    }
+
+    #[test]
+    fn a_zero_weight_outside_the_radius_and_off_means_selected_only() {
+        let (t, g, m) = proportional_drag(|t| t.proportional.radius = 50.0);
+        let preview = t.preview(&g.positions, &m).unwrap();
+        assert_eq!(preview[0], g.positions[0]);
+        assert_eq!(preview[3], g.positions[3]);
+        let (t, g, m) = proportional_drag(|t| t.proportional.on = false);
+        let preview = t.preview(&g.positions, &m).unwrap();
+        assert_eq!(preview[0], g.positions[0]);
+        assert!((preview[1][1] - 0.5).abs() < 1e-6);
+        assert!(t.drag_weights(&m).is_none());
+    }
+
+    #[test]
+    fn proportional_edit_keeps_several_selected_vertices_whole() {
+        let (g, m) = square();
+        let mut t = tool();
+        t.proportional.on = true;
+        t.proportional.radius = 150.0;
+        click(&mut t, &g, &m, [0.0, 100.0], false);
+        click(&mut t, &g, &m, [100.0, 100.0], true);
+        t.press(&g.positions, &g.indices, &m, [100.0, 100.0], false);
+        t.drag([100.0, 50.0]);
+        let preview = t.preview(&g.positions, &m).unwrap();
+        assert!((preview[0][1] - 0.5).abs() < 1e-6 && (preview[1][1] - 0.5).abs() < 1e-6);
+        assert!(preview[2][1] > 1.0 && preview[2][1] < 1.5);
+    }
+
+    #[test]
+    fn proportional_edit_through_a_deformer_moves_neighbours_in_drawing_space() {
+        let (model, g, m) = warped();
+        let (shown, space) = drawn(&model);
+        let mut t = tool();
+        t.proportional.on = true;
+        t.proportional.radius = 1000.0;
+        t.press(&shown, &g.indices, &m, m.to_screen(shown[2]), false);
+        t.drag(m.to_screen([14.5, 25.0]));
+        let live = t.dragging_stored(&g.positions, &m, &space).unwrap();
+        // The pressed vertex is where the pointer is; the others moved too.
+        let moved = live
+            .iter()
+            .zip(&g.positions)
+            .filter(|(a, b)| a != b)
+            .count();
+        assert!(moved > 1, "{live:?}");
     }
 
     #[test]

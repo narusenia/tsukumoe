@@ -95,6 +95,8 @@ pub struct ViewState {
     /// Counts changes the viewport must redraw for.
     revision: u64,
     pub param_filter: String,
+    /// Proportional edit options; not saved with the project or the layout.
+    pub proportional: crate::proportional::Proportional,
 }
 
 impl ViewState {

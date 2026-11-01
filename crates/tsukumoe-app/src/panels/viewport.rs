@@ -206,6 +206,7 @@ impl Viewport {
             self.view_revision = view.revision();
             self.wake();
         }
+        mesh.proportional = view.proportional;
         self.navigate(ui, &response, rect, view);
         self.drag_parameters(ui, &response, doc, view, drag);
         // A shape being dragged is drawn as it will be committed, before it is.
