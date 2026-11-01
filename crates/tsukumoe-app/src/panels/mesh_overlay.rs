@@ -16,9 +16,19 @@ use crate::mesh_tool::{self, MeshTool};
 const DOT: f32 = 3.0;
 const DOT_SELECTED: f32 = 4.5;
 
-/// Dims the picture so that the mesh being edited stands out.
-pub fn veil(painter: &Painter, theme: &Theme, rect: Rect) {
+/// Dims the picture so that the mesh being edited stands out: a veil over
+/// `rect`, then `focus` (the edited mesh drawn alone on a transparent
+/// texture) above it, so that mesh is not dimmed.
+pub fn veil(painter: &Painter, theme: &Theme, rect: Rect, focus: Option<egui::TextureId>) {
     painter.rect_filled(rect, 0.0, theme.colors.background.gamma_multiply(0.45));
+    if let Some(id) = focus {
+        painter.image(
+            id,
+            rect,
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
 }
 
 /// Draws `positions` (or `preview` while a vertex drag is on) as edges and dots.

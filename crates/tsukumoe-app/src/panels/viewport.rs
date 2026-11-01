@@ -12,7 +12,7 @@ use eframe::egui_wgpu::RenderState;
 use egui::{
     Event, MouseWheelSource, MouseWheelUnit, PointerButton, Rect, Sense, TextureId, Ui, pos2,
 };
-use tsukumoe_gpu::{Renderer, Texture};
+use tsukumoe_gpu::{DrawOptions, Renderer, Texture};
 use tsukumoe_ui::{Theme, hint, tr};
 
 use crate::actions::Tool;
@@ -66,6 +66,12 @@ pub struct Viewport {
     scene: Option<Scene>,
     renderer: Renderer,
     target: Option<Target>,
+    /// The mesh being edited drawn alone on a transparent target, shown above
+    /// the veil so that it is not dimmed; `focus_mesh` names what it holds.
+    focus: Option<Target>,
+    focus_mesh: Option<String>,
+    /// Whether the last try drew `focus_mesh` into the focus target.
+    focus_drawn: bool,
     last_frame: Instant,
     active_until: Instant,
     scroll: Scroll,
@@ -92,6 +98,9 @@ impl Viewport {
             scene: None,
             renderer,
             target: None,
+            focus: None,
+            focus_mesh: None,
+            focus_drawn: false,
             last_frame: Instant::now(),
             active_until: Instant::now(),
             scroll: Scroll::Zoom,
@@ -112,26 +121,38 @@ impl Viewport {
             return;
         }
         let mut renderer = rs.renderer.write();
-        if let Some(old) = self.target.take() {
+        for old in [self.target.take(), self.focus.take()]
+            .into_iter()
+            .flatten()
+        {
             renderer.free_texture(&old.id);
         }
-        let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: size.0,
-                height: size.1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: tsukumoe_gpu::OUTPUT_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&Default::default());
-        let id = renderer.register_native_texture(&rs.device, &view, wgpu::FilterMode::Linear);
-        self.target = Some(Target { view, id, size });
+        let mut make = || {
+            let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d {
+                    width: size.0,
+                    height: size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: tsukumoe_gpu::OUTPUT_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            let id = renderer.register_native_texture(&rs.device, &view, wgpu::FilterMode::Linear);
+            Target { view, id, size }
+        };
+        self.target = Some(make());
+        self.focus = Some(make());
+        // The new focus target is empty.
+        self.focus_mesh = None;
+        self.focus_drawn = false;
+        drop(renderer);
         self.wake();
     }
 
@@ -180,7 +201,11 @@ impl Viewport {
         self.drag_parameters(ui, &response, doc, view, drag);
 
         let now = Instant::now();
-        if (resized || now < self.active_until)
+        // The mesh the mesh tool edits, if the focus picture must show it.
+        let wanted = (view.tool == Tool::Mesh)
+            .then(|| mesh.mesh().map(str::to_owned))
+            .flatten();
+        if (resized || now < self.active_until || self.focus_mesh != wanted)
             && let Some(scene) = &mut self.scene
         {
             let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
@@ -197,6 +222,38 @@ impl Viewport {
                 size,
             ) {
                 self.error = Some(e.to_string());
+            }
+            // The edited mesh alone, even if hidden (the model is not changed).
+            let focus = wanted
+                .as_deref()
+                .and_then(|n| scene.model.mesh_index(n))
+                .zip(self.focus.as_ref());
+            match focus {
+                Some((index, focus)) => {
+                    let list = scene.frame.draw_list(&scene.model);
+                    let options = DrawOptions {
+                        only: Some(index as u32),
+                        ..Default::default()
+                    };
+                    self.focus_mesh = wanted.clone();
+                    self.focus_drawn = false;
+                    match self.renderer.render_to_view_with(
+                        &rs.device,
+                        &rs.queue,
+                        &list,
+                        view.camera.view(fitted),
+                        &focus.view,
+                        size,
+                        options,
+                    ) {
+                        Ok(()) => self.focus_drawn = true,
+                        Err(e) => self.error = Some(e.to_string()),
+                    }
+                }
+                None => {
+                    self.focus_mesh = wanted.clone();
+                    self.focus_drawn = false;
+                }
             }
             ui.ctx().request_repaint();
         }
@@ -248,7 +305,13 @@ impl Viewport {
         let mesh = tool
             .mesh()
             .and_then(|n| Some((n.to_owned(), model.meshes().get(model.meshes().find(n)?)?)));
-        mesh_overlay::veil(&painter, &theme, rect);
+        // The edited mesh is drawn again above the veil so it stays bright.
+        let focus = self
+            .focus
+            .as_ref()
+            .filter(|_| self.focus_drawn && self.focus_mesh.as_deref() == tool.mesh())
+            .map(|f| f.id);
+        mesh_overlay::veil(&painter, &theme, rect, focus);
         let (modifiers, escape) = ui.input(|i| (i.modifiers, i.key_pressed(egui::Key::Escape)));
         let arrow = |p: Option<egui::Pos2>| p.map(|p| [p.x, p.y]);
         // The press position: a drag is reported only after it has moved.
