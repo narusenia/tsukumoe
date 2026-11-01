@@ -2,7 +2,7 @@
 
 - REQ: REQ-TRK-003（Windows は Spout2 で映像を出力できる）
 - 単位: M4-03c-1
-- 状態: 着手中
+- 状態: 完了
 - 依存: M4-03a
 - クレート: `tsukumoe-host`（Windows 限定・feature `spout`（既定オフ）で `spout-rs` 0.2.0（`vendored`）と `windows` 0.62（D3D11 / DXGI の最小 feature）を optional 依存に足す。ユーザー承認済みの依存追加はこの 2 つのみ）
 
@@ -65,11 +65,11 @@
 
 ## 受入条件
 
-- [ ] 既定のビルド（feature なし）で依存・挙動が変わらない
-- [ ] `--features spout`（Windows）でビルドでき、`--spout` で Spout 送信側として公開する
-- [ ] OBS などの Spout 受信側で映像を受け取れる（利用者の環境で確認）
-- [ ] 透過の縁が汚れない・上下が正しい（利用者の環境で確認）
-- [ ] feature なし・Windows 以外で `--spout` を指定すると理由つきのエラーで終了する
+- [x] 既定のビルド（feature なし）で依存・挙動が変わらない
+- [x] `--features spout`（Windows）でビルドでき、`--spout` で Spout 送信側として公開する
+- [x] OBS などの Spout 受信側で映像を受け取れる（利用者の環境で確認）
+- [x] 透過の縁が汚れない・上下が正しい（利用者の環境で確認）
+- [x] feature なし・Windows 以外で `--spout` を指定すると理由つきのエラーで終了する
 
 ## 決めたこと
 

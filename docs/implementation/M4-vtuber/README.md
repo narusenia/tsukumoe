@@ -8,7 +8,7 @@
 | M4-02 | [標準パラメータマッピング](standard-mapping.md) | TRK-002 | M | M4-01, M3-02 | 完了 |
 | M4-03a | [ホスト: トラッキング配線・透過ウィンドウ](host-live.md) | TRK-003, TRK-004 | M | M1-11, M4-01, M4-02 | 完了 |
 | M4-03b | [ホスト: Syphon 出力（macOS）](host-syphon.md) | TRK-003 | M | M4-03a | 完了 |
-| M4-03c-1 | [ホスト: Spout2 出力（Windows）](host-spout.md) | TRK-003 | M | M4-03a | 着手中 |
+| M4-03c-1 | [ホスト: Spout2 出力（Windows）](host-spout.md) | TRK-003 | M | M4-03a | 完了 |
 | M4-03c-2 | ホスト: 仮想カメラ（Windows） | TRK-003 | M | M4-03a | 未着手 |
 | M4-03c-3 | ホスト: 仮想カメラ（macOS） | TRK-003 | M | M4-03a | 未着手 |
 | M4-04 | [推論プロバイダ抽象](inference-provider.md) | AI-003 | M | — | 完了 |
