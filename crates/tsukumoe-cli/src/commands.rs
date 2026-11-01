@@ -18,6 +18,8 @@ pub fn command_tools() -> Vec<Value> {
     let mut root = serde_json::to_value(schema_for!(Command)).expect("schema is JSON");
     let variants = root["oneOf"].take();
     let variants = variants.as_array().expect("Command is an enum");
+    // Definitions the variants share (a type used by two variants is not inlined).
+    let defs = root["$defs"].as_object().cloned().unwrap_or_default();
     variants
         .iter()
         .map(|variant| {
@@ -34,6 +36,12 @@ pub fn command_tools() -> Vec<Value> {
             // variant schema does not contain.
             if retarget(&mut schema) {
                 schema["$defs"] = json!({ "Command": command_schema() });
+            }
+            if schema.to_string().contains("#/$defs/") {
+                let own = schema["$defs"].as_object().cloned().unwrap_or_default();
+                let all: serde_json::Map<String, Value> =
+                    defs.clone().into_iter().chain(own).collect();
+                schema["$defs"] = Value::Object(all);
             }
             json!({ "name": name, "description": description, "inputSchema": schema })
         })
