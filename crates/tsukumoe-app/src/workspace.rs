@@ -9,9 +9,10 @@ use serde_json::{Value, json};
 use tsukumoe_ui::dock::Layout;
 
 /// The standard panels, by id. Every layout must stay within this set.
-pub const PANELS: [&str; 7] = [
+pub const PANELS: [&str; 8] = [
     "viewport",
     "tree",
+    "deformers",
     "parameters",
     "inspector",
     "history",
@@ -287,5 +288,28 @@ mod tests {
         let layout = l.current(Workspace::Modeling);
         assert_eq!(layout.panels().len(), PANELS.len());
         assert!(layout.right.panels.contains(&"tree".to_owned()));
+    }
+
+    #[test]
+    fn both_presets_hold_the_deformers_panel_next_to_the_parts_panel() {
+        for preset in Preset::ALL {
+            for workspace in Workspace::ALL {
+                let layout = builtin_layout(preset, workspace);
+                assert!(layout.contains("deformers"), "{preset:?} {workspace:?}");
+                assert_eq!(layout.panels().len(), PANELS.len());
+            }
+        }
+    }
+
+    #[test]
+    fn an_old_layout_without_the_deformers_panel_gets_it_in_the_right_strip() {
+        // Saved before the panel existed: seven panels, none of them the new one.
+        let old = r#"{"current":{"modeling":{"root":{"type":"split","axis":"horizontal","ratio":0.5,
+            "a":{"type":"tabs","tabs":["viewport","tree"]},
+            "b":{"type":"tabs","tabs":["parameters","inspector","history","palette","ai_diff"]}}}}}"#;
+        let l = Layouts::from_json(old);
+        let layout = l.current(Workspace::Modeling);
+        assert!(layout.right.panels.contains(&"deformers".to_owned()));
+        assert_eq!(layout.panels().len(), PANELS.len());
     }
 }

@@ -151,10 +151,12 @@ impl PsdImport {
         };
         let files = &doc.project().files;
         let textures = texture_paths(files.keys().map(String::as_str));
+        // The map with the renames made since it was written.
+        let map = doc.psd_map_bytes();
         match prepared.plan(
             doc.dispatcher.model(),
             &textures,
-            files.get(MAP_PATH).map(Vec::as_slice),
+            map.as_deref(),
             &self.choices,
         ) {
             Ok(plan) => {
@@ -394,6 +396,107 @@ mod tests {
         assert!(d.dirty());
         assert!(d.dispatcher.undo());
         assert_eq!(d.dispatcher.model().meshes().len(), 0);
+    }
+
+    #[test]
+    fn renaming_a_mesh_or_part_keeps_the_reimport_matching_the_same_layers() {
+        use tsukumoe_core::command::Command;
+        let dir = scratch("renamed");
+        let mut d = doc(&dir);
+        let file = psd(
+            &dir,
+            "a.psd",
+            vec![face(vec![layer("eye", 8, 5)]), layer("bg", 32, 1)],
+        );
+        let mut s = PsdImport::new();
+        s.path = file;
+        s.load_blocking(&d);
+        s.confirm(&mut d).unwrap();
+        let nothing = |s: &mut PsdImport, d: &Document| {
+            s.load_blocking(d);
+            s.rows().is_empty() && !s.can_confirm()
+        };
+        assert!(nothing(&mut s, &d));
+        // Rename the mesh and its part: the same file still finds its layers.
+        d.dispatcher
+            .submit(Command::RenameMesh {
+                name: "Face/eye".into(),
+                new_name: "Eye".into(),
+            })
+            .unwrap();
+        d.dispatcher
+            .submit(Command::RenamePart {
+                name: "Face".into(),
+                new_name: "Head".into(),
+            })
+            .unwrap();
+        assert!(
+            nothing(&mut s, &d),
+            "no layer is seen as new or missing after a rename"
+        );
+        // The map says the new names, and saving keeps them.
+        let map = tsukumoe_psd::PsdMap::parse(&d.psd_map_bytes().unwrap()).unwrap();
+        assert!(
+            map.layers
+                .iter()
+                .any(|l| l.mesh == "Eye" && l.part == "Head")
+        );
+        assert!(map.groups.iter().any(|g| g.part == "Head"));
+        // Undo and redo follow, in both directions.
+        assert!(d.dispatcher.undo() && d.dispatcher.undo());
+        assert!(nothing(&mut s, &d));
+        let map = tsukumoe_psd::PsdMap::parse(&d.psd_map_bytes().unwrap()).unwrap();
+        assert!(
+            map.layers
+                .iter()
+                .any(|l| l.mesh == "Face/eye" && l.part == "Face")
+        );
+        assert!(d.dispatcher.redo() && d.dispatcher.redo());
+        assert!(nothing(&mut s, &d));
+        d.save().unwrap();
+        let saved = tsukumoe_psd::PsdMap::parse(d.project().files.get(MAP_PATH).unwrap()).unwrap();
+        assert!(saved.layers.iter().any(|l| l.mesh == "Eye"));
+        // Reopened, the reimport still matches.
+        let mut reopened = Document::open(&d.path).unwrap();
+        let mut again = PsdImport::new();
+        again.path = dir.join("a.psd").display().to_string();
+        again.load_blocking(&reopened);
+        assert!(again.rows().is_empty());
+        let _ = &mut reopened;
+    }
+
+    #[test]
+    fn names_swapped_between_two_meshes_move_the_map_entries_with_them() {
+        use tsukumoe_core::command::Command;
+        let dir = scratch("swapped");
+        let mut d = doc(&dir);
+        let file = psd(&dir, "a.psd", vec![layer("a", 8, 5), layer("b", 4, 6)]);
+        let mut s = PsdImport::new();
+        s.path = file;
+        s.load_blocking(&d);
+        s.confirm(&mut d).unwrap();
+        for (name, new_name) in [("a", "tmp"), ("b", "a"), ("tmp", "b")] {
+            d.dispatcher
+                .submit(Command::RenameMesh {
+                    name: name.into(),
+                    new_name: new_name.into(),
+                })
+                .unwrap();
+        }
+        let map = tsukumoe_psd::PsdMap::parse(&d.psd_map_bytes().unwrap()).unwrap();
+        let mesh_of = |key: &str| {
+            map.layers
+                .iter()
+                .find(|l| l.key == key)
+                .unwrap()
+                .mesh
+                .clone()
+        };
+        // The layer "a" still has the mesh that was made from it, now called "b".
+        assert_eq!(mesh_of("a"), "b");
+        assert_eq!(mesh_of("b"), "a");
+        s.load_blocking(&d);
+        assert!(s.rows().is_empty());
     }
 
     #[test]

@@ -17,9 +17,11 @@ use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, parameters, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
+use crate::tree_model::{self, TreeView};
+use crate::tree_ops;
 use eframe::egui_wgpu::RenderState;
 use egui::{Context, Ui};
-use tsukumoe_ui::dock::{self, PanelHost};
+use tsukumoe_ui::dock::{self, PanelHost, TabStyle};
 use tsukumoe_ui::{
     Arg, Icon, Keymap, Toasts, Tone, Variant, button, checkbox, hint, label, text_input, tr,
     tr_args,
@@ -34,6 +36,7 @@ use crate::workspace::{Layouts, Preset, Workspace};
 
 const LAYOUTS_FILE: &str = "layouts.json";
 const STATE_FILE: &str = "state.json";
+const TREE_FILE: &str = "tree.json";
 const KEYMAP_FILE: &str = "keymap.json";
 const DRAG_FILE: &str = "drag.json";
 const PIE_FILE: &str = "pie.json";
@@ -43,6 +46,8 @@ pub enum Dialog {
     SaveAs(String),
     SaveLayout(String),
     ConfirmPreset(Preset),
+    /// Deleting these takes `count` elements with it.
+    ConfirmDelete(Vec<Selection>, usize),
     /// The shortcut list: the text of each action's field, and the last error.
     Keymap(Vec<String>, Option<String>),
     /// The drag-to-parameter assignment being edited.
@@ -72,6 +77,12 @@ pub struct Editor {
     pub palette: Palette,
     pub keymap: Keymap,
     pub drag: DragAssignment,
+    /// The tree panels' state of each workspace (the open one is in `view`),
+    /// and what was last written to `tree.json`.
+    trees: [(TreeView, TreeView); 2],
+    trees_saved: String,
+    /// How the dock writes its tab headings; saved with the editor's state.
+    pub tab_style: TabStyle,
     /// The mesh edit tool's selection and drag; view state, not model.
     pub mesh_tool: MeshTool,
     /// The deformer tool's selection and drag; view state, not model.
@@ -117,7 +128,10 @@ impl Editor {
             read(DRAG_FILE).map_or_else(DragAssignment::default, |t| DragAssignment::from_json(&t));
         let pie_config =
             read(PIE_FILE).map_or_else(PieConfig::default, |t| PieConfig::from_json(&t));
-        Self {
+        let tree_file: serde_json::Value = read(TREE_FILE)
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        let mut editor = Self {
             doc: None,
             workspace: serde_json::from_value(state["workspace"].clone()).unwrap_or_default(),
             layouts,
@@ -129,6 +143,12 @@ impl Editor {
             palette: Palette::default(),
             keymap,
             drag,
+            trees: Default::default(),
+            trees_saved: String::new(),
+            tab_style: state["tab_style"]
+                .as_str()
+                .and_then(TabStyle::from_key)
+                .unwrap_or_default(),
             mesh_tool: MeshTool::default(),
             deformer_tool: DeformerTool::default(),
             pie_config,
@@ -141,7 +161,72 @@ impl Editor {
             last_dir: state["last_dir"].as_str().map(PathBuf::from),
             pending: Vec::new(),
             stash: None,
+        };
+        for (i, w) in Workspace::ALL.iter().enumerate() {
+            let saved = &tree_file[w.key()];
+            editor.trees[i] = (
+                TreeView::from_json(&saved["parts"]),
+                TreeView::from_json(&saved["deformers"]),
+            );
         }
+        editor.load_tree_views();
+        editor.trees_saved = editor.tree_json();
+        editor
+    }
+
+    fn workspace_index(&self) -> usize {
+        Workspace::ALL
+            .iter()
+            .position(|w| *w == self.workspace)
+            .unwrap_or(0)
+    }
+
+    /// Takes the open workspace's tree state into the view.
+    fn load_tree_views(&mut self) {
+        let (parts, deformers) = self.trees[self.workspace_index()].clone();
+        self.view.parts = parts;
+        self.view.deformers = deformers;
+    }
+
+    /// Puts the view's tree state back into the open workspace's slot.
+    fn store_tree_views(&mut self) {
+        let i = self.workspace_index();
+        self.trees[i] = (self.view.parts.clone(), self.view.deformers.clone());
+    }
+
+    /// The tree state of every workspace as the file holds it.
+    fn tree_json(&self) -> String {
+        let mut file = serde_json::Map::new();
+        for (i, w) in Workspace::ALL.iter().enumerate() {
+            let (parts, deformers) = &self.trees[i];
+            file.insert(
+                w.key().to_owned(),
+                serde_json::json!({"parts": parts.to_json(), "deformers": deformers.to_json()}),
+            );
+        }
+        serde_json::to_string_pretty(&serde_json::Value::Object(file)).unwrap_or_default()
+    }
+
+    /// Writes the tree state when it changed (not while a mouse button is down).
+    fn save_trees(&mut self, ctx: &Context) {
+        if let Some(doc) = &self.doc {
+            let model = doc.dispatcher.model();
+            self.view.parts.prune(model, tree_model::Panel::Parts);
+            self.view
+                .deformers
+                .prune(model, tree_model::Panel::Deformers);
+        }
+        self.store_tree_views();
+        let json = self.tree_json();
+        if json == self.trees_saved || ctx.input(|i| i.pointer.any_down()) {
+            return;
+        }
+        if let Some(dir) = &self.settings_dir
+            && let Err(e) = settings::write(dir, TREE_FILE, &json)
+        {
+            self.toasts.push(ctx, Tone::Error, e);
+        }
+        self.trees_saved = json;
     }
 
     fn persist_state(&self) -> Result<(), String> {
@@ -152,6 +237,7 @@ impl Editor {
             "workspace": self.workspace,
             "recent": self.recent.to_json(),
             "last_dir": self.last_dir,
+            "tab_style": self.tab_style.key(),
         });
         settings::write(
             dir,
@@ -172,7 +258,9 @@ impl Editor {
         match Document::open(path) {
             Ok(doc) => {
                 self.doc = Some(doc);
+                self.store_tree_views();
                 self.view = ViewState::default();
+                self.load_tree_views();
                 self.mesh_tool = MeshTool::default();
                 self.deformer_tool = DeformerTool::default();
                 self.recent.push(path);
@@ -241,22 +329,24 @@ impl Editor {
             return Vec::new();
         };
         let model = doc.dispatcher.model();
-        match &self.view.selection {
-            Some(Selection::Mesh(_)) => self
-                .view
-                .selected_meshes()
-                .into_iter()
-                .map(Target::Mesh)
-                .collect(),
-            Some(Selection::Warp(n) | Selection::Rotation(n)) => vec![Target::Deformer(n.clone())],
-            Some(Selection::Part(_)) => self
-                .view
-                .meshes_of(model)
-                .into_iter()
-                .map(Target::Mesh)
-                .collect(),
-            _ => Vec::new(),
+        let mut out: Vec<Target> = Vec::new();
+        for item in self.view.selected() {
+            let found = match item {
+                Selection::Mesh(n) => vec![Target::Mesh(n)],
+                Selection::Warp(n) | Selection::Rotation(n) => vec![Target::Deformer(n)],
+                Selection::Part(n) => tree_model::meshes_under_part(model, &n)
+                    .into_iter()
+                    .map(Target::Mesh)
+                    .collect(),
+                Selection::Parameter(_) => Vec::new(),
+            };
+            for t in found {
+                if !out.contains(&t) {
+                    out.push(t);
+                }
+            }
         }
+        out
     }
 
     /// Makes a warp or a rotation deformer around the selection and selects it.
@@ -287,6 +377,106 @@ impl Editor {
                 }
             }
             Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+        }
+    }
+
+    /// What a tree panel asked for, sent through the one door.
+    pub fn apply_tree_out(&mut self, ctx: &Context, out: tree::Out) {
+        match out {
+            tree::Out::Command(command) => {
+                self.submit(ctx, command);
+            }
+            tree::Out::Reparent(target, parent) => {
+                let made = self.doc.as_ref().map(|d| {
+                    deformer_ops::set_parent(d.dispatcher.model(), &target, parent.as_deref())
+                });
+                match made {
+                    Some(Ok((command, label))) => {
+                        self.submit_labeled(ctx, command, Some(label));
+                    }
+                    Some(Err(e)) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+                    None => {}
+                }
+            }
+            tree::Out::Rename { kind, from, to } => {
+                let command = tree_ops::rename_command(kind, &from, &to);
+                let old = tree_ops::renamed(kind, &from);
+                let was_selected = self.view.is_selected(&old);
+                let renamed =
+                    self.submit_labeled(ctx, command, Some(format!("tree_rename: {from} -> {to}")));
+                if renamed && was_selected {
+                    self.view.select_only(tree_ops::renamed(kind, &to));
+                }
+                // Anything outside the editor that names it (the runtime API, a .tmod) is
+                // left as it was: say so, once.
+                if renamed {
+                    let text = tr(ctx, "tree-rename-external");
+                    self.toasts.push(ctx, Tone::Neutral, text);
+                }
+            }
+            tree::Out::Delete(items) => {
+                let Some(doc) = &self.doc else { return };
+                let plan = tree_ops::delete_plan(doc.dispatcher.model(), &items);
+                if plan.commands.is_empty() {
+                    return;
+                }
+                if plan.needs_confirm {
+                    self.dialog = Some(Dialog::ConfirmDelete(items, plan.count));
+                } else {
+                    self.delete_items(ctx, &items);
+                }
+            }
+            tree::Out::Duplicate(items) => {
+                let Some(doc) = &self.doc else { return };
+                match tree_ops::duplicate_commands(doc.dispatcher.model(), &items) {
+                    Ok((commands, made)) if !commands.is_empty() => {
+                        let label = match made.as_slice() {
+                            [one] => format!("tree_duplicate: {}", selection_name(one)),
+                            many => format!("tree_duplicate: {} items", many.len()),
+                        };
+                        if self.submit_labeled(
+                            ctx,
+                            tsukumoe_core::command::Command::Batch { commands },
+                            Some(label),
+                        ) {
+                            self.view.select_all(made);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        let text = format!("{} ({e})", tr(ctx, e.key()));
+                        self.toasts.push(ctx, Tone::Error, text);
+                    }
+                }
+            }
+            tree::Out::SetPart(item, part) => {
+                if let Some(command) = tree_ops::set_part_command(&item, part.as_deref()) {
+                    let label = format!("tree_set_part: {}", selection_name(&item));
+                    self.submit_labeled(ctx, command, Some(label));
+                }
+            }
+        }
+    }
+
+    /// Deletes `items` (a part with what is under it) as one undo step.
+    fn delete_items(&mut self, ctx: &Context, items: &[Selection]) {
+        let Some(doc) = &self.doc else { return };
+        let plan = tree_ops::delete_plan(doc.dispatcher.model(), items);
+        if plan.commands.is_empty() {
+            return;
+        }
+        let label = match items {
+            [one] => format!("tree_delete: {}", selection_name(one)),
+            many => format!("tree_delete: {} items", many.len()),
+        };
+        if self.submit_labeled(
+            ctx,
+            tsukumoe_core::command::Command::Batch {
+                commands: plan.commands,
+            },
+            Some(label),
+        ) {
+            self.view.clear_selection();
         }
     }
 
@@ -430,7 +620,19 @@ impl Editor {
                 self.view.touch();
             }
             other => {
-                if let Some(tool) = Tool::from_action(other) {
+                if let Some(id) = other
+                    .strip_prefix("panel.show.")
+                    .filter(|id| crate::workspace::PANELS.contains(id))
+                {
+                    self.layouts.current_mut(self.workspace).show_panel(id);
+                    self.layouts_dirty = true;
+                } else if let Some(style) = other
+                    .strip_prefix("view.tab-style.")
+                    .and_then(TabStyle::from_key)
+                {
+                    self.tab_style = style;
+                    let _ = self.persist_state();
+                } else if let Some(tool) = Tool::from_action(other) {
                     self.view.tool = tool;
                 } else if let Some(path) = other.strip_prefix("file.open-recent:") {
                     let path = PathBuf::from(path);
@@ -617,7 +819,9 @@ impl Editor {
         crate::project::discard_project(dir, written);
         self.recent.remove(dir);
         self.doc = self.stash.take();
+        self.store_tree_views();
         self.view = ViewState::default();
+        self.load_tree_views();
         self.viewport = None;
         let _ = self.persist_state();
     }
@@ -659,7 +863,9 @@ impl Editor {
 
     pub fn switch_workspace(&mut self, workspace: Workspace) {
         if self.workspace != workspace {
+            self.store_tree_views();
             self.workspace = workspace;
+            self.load_tree_views();
             let _ = self.persist_state();
         }
     }
@@ -706,6 +912,7 @@ impl Editor {
             }
         });
         self.dialogs(&ctx);
+        self.save_trees(&ctx);
         // Writing while a divider is dragged would spam the disk.
         if self.layouts_dirty && !ctx.input(|i| i.pointer.any_down()) {
             let result = self.persist_layouts();
@@ -736,6 +943,12 @@ impl Editor {
                 .filter(|s| s.workspace == self.workspace)
                 .map(|s| s.name.clone())
                 .collect(),
+            visible_panels: crate::workspace::PANELS
+                .iter()
+                .filter(|id| self.layouts.current(self.workspace).is_visible(id))
+                .map(|id| (*id).to_owned())
+                .collect(),
+            tab_style: self.tab_style,
         };
         menu::resolve(menu::MENU, &state, &|key| tr(ctx, key), &|action| {
             self.keymap.shortcut_text(ctx, action)
@@ -853,6 +1066,7 @@ impl Editor {
             Dialog::SaveAsFolder(_) => (t("dialog-save-folder-title"), "dialog-save-folder"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
+            Dialog::ConfirmDelete(..) => (t("tree-delete-title"), "dialog-confirm-delete"),
             Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {
                 unreachable!("handled above")
             }
@@ -879,6 +1093,12 @@ impl Editor {
                 }
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
+                }
+                Dialog::ConfirmDelete(_, count) => {
+                    hint(
+                        ui,
+                        tr_args(ctx, "tree-delete-body", &[("count", Arg::from(*count))]),
+                    );
                 }
                 Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {}
             }
@@ -933,6 +1153,7 @@ impl Editor {
                     }
                 }
                 Dialog::ConfirmPreset(preset) => self.apply_preset(*preset),
+                Dialog::ConfirmDelete(items, _) => self.delete_items(ctx, items),
                 _ => {}
             }
             open = false;
@@ -1287,9 +1508,12 @@ fn show_entries(ui: &mut Ui, entries: &[menu::Entry], chosen: &mut Option<String
                 label,
                 enabled,
                 shortcut,
+                checked,
             } => {
                 ui.add_enabled_ui(*enabled, |ui| {
-                    if tsukumoe_ui::menu_item(ui, label, shortcut.as_deref()).clicked() {
+                    if tsukumoe_ui::menu_item_checked(ui, label, shortcut.as_deref(), *checked)
+                        .clicked()
+                    {
                         *chosen = Some(action.clone());
                         ui.close();
                     }
@@ -1309,10 +1533,15 @@ impl PanelHost for Panels<'_> {
         tr(ctx, &format!("panel-{id}"))
     }
 
+    fn tab_style(&self) -> TabStyle {
+        self.editor.tab_style
+    }
+
     fn icon(&self, id: &str) -> Option<Icon> {
         Some(match id {
             "viewport" => Icon::Image,
             "tree" => Icon::ListTree,
+            "deformers" => Icon::Grid,
             "parameters" => Icon::Sliders,
             "inspector" => Icon::Info,
             "history" => Icon::History,
@@ -1336,27 +1565,14 @@ impl PanelHost for Panels<'_> {
         };
         match id {
             "history" => history::show(ui, &mut doc.dispatcher),
-            "tree" => {
-                for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view) {
-                    match out {
-                        tree::Out::Command(command) => {
-                            editor.submit(&ctx, command);
-                        }
-                        tree::Out::Reparent(target, parent) => {
-                            let model = editor.doc.as_ref().map(|d| d.dispatcher.model());
-                            match model
-                                .map(|m| deformer_ops::set_parent(m, &target, parent.as_deref()))
-                            {
-                                Some(Ok((command, label))) => {
-                                    editor.submit_labeled(&ctx, command, Some(label));
-                                }
-                                Some(Err(e)) => {
-                                    editor.toasts.push(&ctx, Tone::Error, tr(&ctx, e.key()));
-                                }
-                                None => {}
-                            }
-                        }
-                    }
+            "tree" | "deformers" => {
+                let panel = if id == "tree" {
+                    tree_model::Panel::Parts
+                } else {
+                    tree_model::Panel::Deformers
+                };
+                for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view, panel) {
+                    editor.apply_tree_out(&ctx, out);
                 }
             }
             "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
@@ -1388,18 +1604,11 @@ impl PanelHost for Panels<'_> {
                         }
                     }
                     if let Some(vp) = editor.viewport.as_mut() {
-                        let target = match &editor.view.selection {
-                            Some(Selection::Mesh(name)) => Some(name.as_str()),
-                            _ => None,
-                        };
-                        editor.mesh_tool.set_mesh(target);
-                        let deformer = match &editor.view.selection {
-                            Some(Selection::Warp(name) | Selection::Rotation(name)) => {
-                                Some(name.as_str())
-                            }
-                            _ => None,
-                        };
-                        editor.deformer_tool.set_deformer(deformer);
+                        // The tools work on the mesh and the deformer chosen last.
+                        let mesh = editor.view.last_mesh();
+                        editor.mesh_tool.set_mesh(mesh.as_deref());
+                        let deformer = editor.view.last_deformer();
+                        editor.deformer_tool.set_deformer(deformer.as_deref());
                         let (response, ops, actions) = vp.show(
                             ui,
                             rs,
@@ -1425,6 +1634,17 @@ impl PanelHost for Panels<'_> {
                 hint(ui, tr(&ctx, "panel-empty"));
             }
         }
+    }
+}
+
+/// The name an element of the selection has.
+fn selection_name(s: &Selection) -> &str {
+    match s {
+        Selection::Part(n)
+        | Selection::Mesh(n)
+        | Selection::Warp(n)
+        | Selection::Rotation(n)
+        | Selection::Parameter(n) => n,
     }
 }
 
@@ -1810,6 +2030,274 @@ mod tests {
         let d = &editor.doc.as_ref().unwrap().dispatcher;
         let mesh = d.model().meshes().find("DefMesh").unwrap();
         assert!(d.model().meshes().get(mesh).unwrap().parent.is_some());
+    }
+
+    #[test]
+    fn the_tree_renames_deletes_duplicates_and_moves_through_the_one_door() {
+        use crate::tree_model::Kind;
+        use tsukumoe_core::command::Command;
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        for command in [
+            Command::AddPart {
+                name: "TreeA".into(),
+                parent: None,
+            },
+            Command::AddPart {
+                name: "TreeB".into(),
+                parent: Some("TreeA".into()),
+            },
+            Command::AddMesh {
+                name: "TreeMesh".into(),
+                part: "TreeB".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            assert!(editor.submit(&ctx, command));
+        }
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let model = |e: &Editor| {
+            let d = &e.doc.as_ref().unwrap().dispatcher;
+            (
+                d.model().meshes().find("TreeMesh").is_some(),
+                d.model().parts().find("TreeB").is_some(),
+            )
+        };
+        let base = steps(&editor);
+        // Rename: one step, named, and the selection follows.
+        editor.view.select_only(Selection::Mesh("TreeMesh".into()));
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Rename {
+                kind: Kind::Mesh,
+                from: "TreeMesh".into(),
+                to: "Renamed".into(),
+            },
+        );
+        assert_eq!(steps(&editor), base + 1);
+        assert_eq!(
+            editor.view.selection,
+            Some(Selection::Mesh("Renamed".into()))
+        );
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        assert_eq!(
+            d.name_of(base).as_deref(),
+            Some("tree_rename: TreeMesh -> Renamed")
+        );
+        // A rename says once that outside users of the old name are not updated.
+        assert!(!editor.toasts.is_empty());
+        // A taken name is refused and the model stays.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Rename {
+                kind: Kind::Part,
+                from: "TreeB".into(),
+                to: "TreeA".into(),
+            },
+        );
+        assert_eq!(steps(&editor), base + 1);
+        // Duplicate: the copy is selected, one step.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Duplicate(vec![Selection::Mesh("Renamed".into())]),
+        );
+        assert_eq!(steps(&editor), base + 2);
+        assert_eq!(
+            editor.view.selection,
+            Some(Selection::Mesh("Renamed.copy".into()))
+        );
+        // Move to another part.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::SetPart(Selection::Mesh("Renamed.copy".into()), Some("TreeA".into())),
+        );
+        assert_eq!(steps(&editor), base + 3);
+        // A part with something under it asks first; nothing goes until it is confirmed.
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Delete(vec![Selection::Part("TreeB".into())]),
+        );
+        assert!(matches!(editor.dialog, Some(Dialog::ConfirmDelete(_, 2))));
+        assert_eq!(steps(&editor), base + 3);
+        assert_eq!(model(&editor), (false, true));
+        editor.delete_items(&ctx, &[Selection::Part("TreeB".into())]);
+        assert_eq!(steps(&editor), base + 4);
+        assert!(editor.view.selection.is_none());
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.name_of(base + 3).as_deref(), Some("tree_delete: TreeB"));
+        // One undo brings the part and its mesh back.
+        assert!(d.undo());
+        assert!(
+            d.model().parts().find("TreeB").is_some()
+                && d.model().meshes().find("Renamed").is_some()
+        );
+        assert!(d.model().validate().is_empty());
+        // A mesh goes at once, without asking.
+        editor.dialog = None;
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Delete(vec![Selection::Mesh("Renamed.copy".into())]),
+        );
+        assert!(editor.dialog.is_none());
+        assert_eq!(steps(&editor), base + 4);
+    }
+
+    #[test]
+    fn the_panel_actions_bring_a_panel_to_the_front_in_this_workspace_only() {
+        use crate::workspace::PANELS;
+        let ctx = Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
+        let mut editor = Editor::new(None);
+        for id in PANELS {
+            assert!(editor.run_action(&ctx, &format!("panel.show.{id}")), "{id}");
+            let layout = editor.layouts.current(editor.workspace);
+            assert!(layout.is_visible(id), "{id} shows after its action");
+        }
+        // A tab group shows one tab at a time: selecting one hides the other.
+        editor.run_action(&ctx, "panel.show.tree");
+        editor.run_action(&ctx, "panel.show.deformers");
+        let layout = editor.layouts.current(editor.workspace);
+        assert!(layout.is_visible("deformers") && !layout.is_visible("tree"));
+        // The menu says so too.
+        let entries = editor.menu_entries(&ctx);
+        let checked = |action: &str| {
+            fn find(entries: &[menu::Entry], action: &str) -> Option<Option<bool>> {
+                entries.iter().find_map(|e| match e {
+                    menu::Entry::Item {
+                        action: a, checked, ..
+                    } if a == action => Some(*checked),
+                    menu::Entry::Sub { entries, .. } => find(entries, action),
+                    _ => None,
+                })
+            }
+            find(&entries, action).flatten()
+        };
+        assert_eq!(checked("panel.show.deformers"), Some(true));
+        assert_eq!(checked("panel.show.tree"), Some(false));
+        // The other workspace keeps its own layout.
+        let other = Workspace::ALL
+            .iter()
+            .copied()
+            .find(|w| *w != editor.workspace)
+            .unwrap();
+        let before = editor.layouts.current(other).clone();
+        editor.run_action(&ctx, "panel.show.history");
+        assert_eq!(*editor.layouts.current(other), before);
+        // A layout that lacks the panel gets it in the right strip.
+        let layout = editor.layouts.current_mut(editor.workspace);
+        layout.remove("palette");
+        assert!(!layout.contains("palette"));
+        editor.run_action(&ctx, "panel.show.palette");
+        let layout = editor.layouts.current(editor.workspace);
+        assert!(
+            layout.right.panels.contains(&"palette".to_owned()) && layout.is_visible("palette")
+        );
+        // An unknown panel is not an action.
+        assert!(!editor.run_action(&ctx, "panel.show.nope"));
+    }
+
+    #[test]
+    fn the_tab_style_is_chosen_from_the_menu_and_kept_in_the_settings() {
+        let dir = scratch("tab-style");
+        let ctx = Context::default();
+        let mut editor = Editor::new(Some(dir.clone()));
+        assert_eq!(editor.tab_style, TabStyle::Compact);
+        assert!(editor.run_action(&ctx, "view.tab-style.full"));
+        assert_eq!(editor.tab_style, TabStyle::Full);
+        // A new editor reads it back.
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Full);
+        assert!(editor.run_action(&ctx, "view.tab-style.compact"));
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Compact);
+        // A damaged setting gives the default.
+        crate::settings::write(&dir, STATE_FILE, r#"{"tab_style":"wide"}"#).unwrap();
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Compact);
+        assert!(!editor.run_action(&ctx, "view.tab-style.wide"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_tree_state_is_saved_per_workspace_and_comes_back() {
+        use crate::tree_model::{Kind, Sort};
+        let dir = scratch("tree-state");
+        let ctx = Context::default();
+        let mut editor = Editor::new(Some(dir.clone()));
+        editor.view.parts.filter = "eye".into();
+        editor.view.parts.sort = Sort::Name;
+        editor.view.deformers.toggle_kind(Kind::Rotation);
+        editor.save_trees(&ctx);
+        // The other workspace has its own state, starting from the default.
+        let other = Workspace::ALL
+            .iter()
+            .copied()
+            .find(|w| *w != editor.workspace)
+            .unwrap();
+        let first = editor.workspace;
+        editor.switch_workspace(other);
+        assert_eq!(editor.view.parts.filter, "");
+        editor.view.parts.hidden_only = true;
+        editor.save_trees(&ctx);
+        editor.switch_workspace(first);
+        assert_eq!(editor.view.parts.filter, "eye");
+        assert!(!editor.view.parts.hidden_only);
+        // A new editor reads both back.
+        let mut again = Editor::new(Some(dir.clone()));
+        assert_eq!(again.workspace, first);
+        assert_eq!(again.view.parts.filter, "eye");
+        assert_eq!(again.view.parts.sort, Sort::Name);
+        assert!(again.view.deformers.kinds.contains(&Kind::Rotation));
+        again.switch_workspace(other);
+        assert!(again.view.parts.hidden_only && again.view.parts.filter.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn closed_folders_survive_opening_a_project_and_forget_names_that_are_gone() {
+        let dir = scratch("tree-folders");
+        let ctx = Context::default();
+        let mut editor = open_minimal();
+        editor.settings_dir = Some(dir.clone());
+        // `Fold` is a part with a part in it; `Gone` does not exist.
+        for (name, parent) in [("Fold", None), ("Inside", Some("Fold"))] {
+            assert!(editor.submit(
+                &ctx,
+                tsukumoe_core::command::Command::AddPart {
+                    name: name.into(),
+                    parent: parent.map(Into::into),
+                }
+            ));
+        }
+        editor.view.parts.set_open("p:Fold", false);
+        editor.view.parts.set_open("p:Gone", false);
+        editor.save_trees(&ctx);
+        assert!(editor.view.parts.collapsed.contains("p:Fold"));
+        assert!(!editor.view.parts.collapsed.contains("p:Gone"));
+        // Reopening the project keeps what was closed.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tsukumoe-format/tests/fixtures/minimal");
+        // (The reopened project has no `Fold`, so the closed state goes with it.)
+        editor.view.parts.set_open("p:Face", false);
+        editor.open(&path).unwrap();
+        assert!(editor.view.parts.collapsed.contains("p:Face"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_damaged_tree_file_gives_the_defaults_without_failing() {
+        let dir = scratch("tree-damaged");
+        for text in [
+            "",
+            "not json",
+            "[1,2]",
+            r#"{"modeling":7,"animation":{"parts":{"sort":"x"}}}"#,
+        ] {
+            crate::settings::write(&dir, TREE_FILE, text).unwrap();
+            let editor = Editor::new(Some(dir.clone()));
+            assert!(editor.view.parts.collapsed.is_empty() && editor.view.parts.filter.is_empty());
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

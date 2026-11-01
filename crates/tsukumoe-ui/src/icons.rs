@@ -76,6 +76,11 @@ icons! {
     Menu => "menu",
     History => "history",
     ListTree => "list-tree",
+    Grid => "grid-3x3",
+    ArrowUpDown => "arrow-up-down",
+    ChevronsUpDown => "chevrons-up-down",
+    ChevronsDownUp => "chevrons-down-up",
+    Locate => "locate",
     Sparkles => "sparkles",
 }
 

@@ -12,4 +12,4 @@ pub use model::{
     Axis, DEFAULT_WIDTH, Edge, Layout, MAX_RATIO, MAX_WIDTH, MIN_RATIO, MIN_WIDTH, Node, Side,
     Strip, Target,
 };
-pub use view::{PanelHost, drop_edge, show};
+pub use view::{PanelHost, TabStyle, drop_edge, show};

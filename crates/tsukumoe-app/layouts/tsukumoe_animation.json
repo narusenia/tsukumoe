@@ -6,7 +6,8 @@
     "a": {
       "type": "tabs",
       "tabs": [
-        "tree"
+        "tree",
+        "deformers"
       ],
       "active": 0
     },

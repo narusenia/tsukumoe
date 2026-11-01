@@ -193,6 +193,34 @@ pub fn examples() -> Vec<Command> {
                 reflect_y: false,
             },
         },
+        Command::RenamePart {
+            name: "Face".into(),
+            new_name: "Head".into(),
+        },
+        Command::RenameMesh {
+            name: "Skin".into(),
+            new_name: "Scalp".into(),
+        },
+        Command::RenameWarp {
+            name: "FaceWarp".into(),
+            new_name: "HeadWarp".into(),
+        },
+        Command::RenameRotation {
+            name: "HeadRotation".into(),
+            new_name: "Turn".into(),
+        },
+        Command::SetMeshPart {
+            name: "Skin".into(),
+            part: "Head".into(),
+        },
+        Command::SetDeformerPart {
+            name: "FaceWarp".into(),
+            part: "Head".into(),
+        },
+        Command::SetPartParent {
+            name: "Face".into(),
+            parent: Some("Body".into()),
+        },
         Command::SetMeshGeometry {
             name: "Skin".into(),
             positions: triangle.clone(),
@@ -256,6 +284,13 @@ pub fn tag(command: &Command) -> &'static str {
         Command::SetMeshParent { .. } => "set_mesh_parent",
         Command::SetWarpBasePoints { .. } => "set_warp_base_points",
         Command::SetRotationBase { .. } => "set_rotation_base",
+        Command::RenamePart { .. } => "rename_part",
+        Command::RenameMesh { .. } => "rename_mesh",
+        Command::RenameWarp { .. } => "rename_warp",
+        Command::RenameRotation { .. } => "rename_rotation",
+        Command::SetMeshPart { .. } => "set_mesh_part",
+        Command::SetDeformerPart { .. } => "set_deformer_part",
+        Command::SetPartParent { .. } => "set_part_parent",
         Command::SetMeshTexture { .. } => "set_mesh_texture",
         Command::SetMeshBlendMode { .. } => "set_mesh_blend_mode",
         Command::SetMeshOpacity { .. } => "set_mesh_opacity",

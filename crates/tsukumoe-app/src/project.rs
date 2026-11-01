@@ -8,12 +8,90 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use std::collections::HashMap;
+
+use tsukumoe_core::arena::Id;
+use tsukumoe_core::elements::Part;
 use tsukumoe_core::model::Model;
+use tsukumoe_core::rig::ArtMesh;
 use tsukumoe_format::{Manifest, Project, read_model, write_model};
+use tsukumoe_psd::PsdMap;
 
 use crate::dispatcher::Dispatcher;
 
 pub const RECENT_MAX: usize = 10;
+
+/// The names parts and meshes had when the PSD map was last made to agree
+/// with the model, by internal id. A rename keeps the id, so comparing these
+/// with the model finds renames however they came about (a command, an undo,
+/// a redo, two names swapped).
+#[derive(Default)]
+struct Names {
+    parts: HashMap<Id<Part>, String>,
+    meshes: HashMap<Id<ArtMesh>, String>,
+}
+
+impl Names {
+    fn of(model: &Model) -> Self {
+        Self {
+            parts: model
+                .parts()
+                .iter()
+                .map(|(id, n, _)| (id, n.to_owned()))
+                .collect(),
+            meshes: model
+                .meshes()
+                .iter()
+                .map(|(id, n, _)| (id, n.to_owned()))
+                .collect(),
+        }
+    }
+
+    /// Old name to new name, for the elements that kept their id and changed name.
+    fn renames(&self, model: &Model) -> (HashMap<String, String>, HashMap<String, String>) {
+        let parts = model
+            .parts()
+            .iter()
+            .filter_map(|(id, n, _)| {
+                let old = self.parts.get(&id)?;
+                (old != n).then(|| (old.clone(), n.to_owned()))
+            })
+            .collect();
+        let meshes = model
+            .meshes()
+            .iter()
+            .filter_map(|(id, n, _)| {
+                let old = self.meshes.get(&id)?;
+                (old != n).then(|| (old.clone(), n.to_owned()))
+            })
+            .collect();
+        (parts, meshes)
+    }
+}
+
+/// `map` with its part and mesh names changed as `parts` and `meshes` say (all
+/// at once, so two names can swap).
+pub fn rename_in_map(
+    map: &mut PsdMap,
+    parts: &HashMap<String, String>,
+    meshes: &HashMap<String, String>,
+) {
+    let part = |n: &mut String| {
+        if let Some(new) = parts.get(n.as_str()) {
+            *n = new.clone();
+        }
+    };
+    part(&mut map.root_part);
+    for g in &mut map.groups {
+        part(&mut g.part);
+    }
+    for l in &mut map.layers {
+        part(&mut l.part);
+        if let Some(new) = meshes.get(l.mesh.as_str()) {
+            l.mesh = new.clone();
+        }
+    }
+}
 
 /// An open project: its files, the editing model behind the dispatcher, and
 /// where it was read from.
@@ -23,6 +101,7 @@ pub struct Document {
     pub path: PathBuf,
     project: Project,
     pub dispatcher: Dispatcher,
+    names: Names,
 }
 
 impl Document {
@@ -40,6 +119,7 @@ impl Document {
             id: NEXT.fetch_add(1, Ordering::Relaxed),
             path: path.to_owned(),
             project,
+            names: Names::of(&model),
             dispatcher: Dispatcher::new(model),
         })
     }
@@ -70,10 +150,43 @@ impl Document {
         Ok((texture.width, texture.height, alpha))
     }
 
+    /// The PSD map as it should be read now: the stored one with the names
+    /// the parts and meshes have been given since it was made. A map that
+    /// cannot be read is returned as it is (the import reports it).
+    pub fn psd_map_bytes(&self) -> Option<Vec<u8>> {
+        let stored = self.project.files.get(tsukumoe_psd::MAP_PATH)?;
+        let (parts, meshes) = self.names.renames(self.dispatcher.model());
+        if parts.is_empty() && meshes.is_empty() {
+            return Some(stored.clone());
+        }
+        match PsdMap::parse(stored) {
+            Ok(mut map) => {
+                rename_in_map(&mut map, &parts, &meshes);
+                Some(map.to_json())
+            }
+            Err(_) => Some(stored.clone()),
+        }
+    }
+
+    /// Writes the renames into the stored map and takes the names as seen.
+    /// Call it before the map is replaced or saved.
+    pub fn sync_names(&mut self) {
+        if let Some(bytes) = self.psd_map_bytes() {
+            self.project
+                .files
+                .insert(tsukumoe_psd::MAP_PATH.to_owned(), bytes);
+        }
+        self.names = Names::of(self.dispatcher.model());
+    }
+
     /// Adds or replaces a file of the project (a texture, the PSD map). It is
     /// written on the next save.
     pub fn put_file(&mut self, path: &str, bytes: Vec<u8>) {
         self.project.files.insert(path.to_owned(), bytes);
+        if path == tsukumoe_psd::MAP_PATH {
+            // A new map is made for the model as it is now.
+            self.names = Names::of(self.dispatcher.model());
+        }
     }
 
     pub fn name(&self) -> String {
@@ -106,6 +219,7 @@ impl Document {
 
     fn write_to(&mut self, path: &Path, folder: bool) -> Result<(), String> {
         let err = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
+        self.sync_names();
         write_model(self.dispatcher.model(), &mut self.project).map_err(|e| err(&e))?;
         if folder {
             self.project.write_dir(path).map_err(|e| err(&e))?;

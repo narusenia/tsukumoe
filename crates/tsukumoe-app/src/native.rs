@@ -7,7 +7,9 @@
 
 use std::sync::mpsc::{Receiver, channel};
 
-use muda::{IsMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+use muda::{
+    CheckMenuItem, IsMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
+};
 
 use crate::menu::Entry;
 
@@ -105,12 +107,24 @@ fn build(entries: &[Entry]) -> Vec<Box<dyn IsMenuItem>> {
                     label,
                     enabled,
                     shortcut,
+                    checked,
                 } => {
                     let text = match shortcut {
                         Some(keys) => format!("{label}    {keys}"),
                         None => label.clone(),
                     };
-                    Box::new(MenuItem::with_id(MenuId::new(action), text, *enabled, None))
+                    match checked {
+                        Some(on) => Box::new(CheckMenuItem::with_id(
+                            MenuId::new(action),
+                            text,
+                            *enabled,
+                            *on,
+                            None,
+                        )),
+                        None => {
+                            Box::new(MenuItem::with_id(MenuId::new(action), text, *enabled, None))
+                        }
+                    }
                 }
             }
         })

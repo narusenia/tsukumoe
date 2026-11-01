@@ -307,8 +307,11 @@ fn deformer_overlay_in_the_light_theme() {
     deformer_overlay_snapshot(Mode::Light, "deformer_light");
 }
 
-/// The tree with deformer rows nested under their parents, one selected.
-fn tree_snapshot(mode: Mode, name: &str) {
+/// The parts panel or the deformers panel over a model with nested parts and
+/// deformers: eye column, indent, guide lines (the selected row's ancestors
+/// stronger), a closed folder, a hidden mesh, selected meshes and a selected warp, the parent
+/// badges on mesh rows in the parts panel and the linked rows lit in each panel.
+fn tree_snapshot(mode: Mode, panel: tsukumoe_app::tree_model::Panel, name: &str) {
     use tsukumoe_app::panels::tree;
     use tsukumoe_app::view::{Selection, ViewState};
     use tsukumoe_core::command::{Command, RotationBase};
@@ -325,12 +328,24 @@ fn tree_snapshot(mode: Mode, name: &str) {
     let mut model = Model::new();
     let mut commands = vec![
         Command::AddPart {
-            name: "Face".into(),
+            name: "Body".into(),
             parent: None,
+        },
+        Command::AddPart {
+            name: "Head".into(),
+            parent: Some("Body".into()),
+        },
+        Command::AddPart {
+            name: "Hair".into(),
+            parent: Some("Head".into()),
+        },
+        Command::AddPart {
+            name: "Arm".into(),
+            parent: Some("Body".into()),
         },
         Command::AddWarpDeformer {
             name: "FaceWarp".into(),
-            part: "Face".into(),
+            part: "Head".into(),
             parent: None,
             rows: 1,
             columns: 1,
@@ -338,19 +353,27 @@ fn tree_snapshot(mode: Mode, name: &str) {
         },
         Command::AddRotationDeformer {
             name: "HeadRotation".into(),
-            part: "Face".into(),
+            part: "Head".into(),
             parent: Some("FaceWarp".into()),
             base,
         },
+        Command::AddRotationDeformer {
+            name: "ArmRotation".into(),
+            part: "Arm".into(),
+            parent: None,
+            base,
+        },
     ];
-    for (mesh, parent) in [
-        ("Skin", None),
-        ("Eye", Some("HeadRotation")),
-        ("Mouth", Some("FaceWarp")),
+    for (mesh, part, parent) in [
+        ("HairFront", "Hair", Some("HeadRotation")),
+        ("HairBack", "Hair", None),
+        ("Eye", "Head", Some("HeadRotation")),
+        ("Mouth", "Head", Some("FaceWarp")),
+        ("Sleeve", "Arm", Some("ArmRotation")),
     ] {
         commands.push(Command::AddMesh {
             name: mesh.into(),
-            part: "Face".into(),
+            part: part.into(),
             positions: tri.clone(),
             uvs: tri.clone(),
             indices: vec![0, 1, 2],
@@ -362,13 +385,24 @@ fn tree_snapshot(mode: Mode, name: &str) {
             });
         }
     }
+    commands.push(Command::SetMeshVisible {
+        name: "HairBack".into(),
+        visible: false,
+    });
     for c in commands {
         model.apply(c).unwrap();
     }
     let mut view = ViewState::default();
-    view.selection = Some(Selection::Rotation("HeadRotation".into()));
+    let pick = |n: &str| Selection::Mesh(n.into());
+    view.select_all(vec![
+        Selection::Warp("FaceWarp".into()),
+        pick("Eye"),
+        pick("HairFront"),
+    ]);
+    view.parts.set_open("p:Arm", false);
+    view.tree_mut(panel).seen = view.selection.clone();
     let mut harness = Harness::builder()
-        .with_size(egui::vec2(260.0, 220.0))
+        .with_size(egui::vec2(300.0, 330.0))
         .wgpu()
         .build_ui_state(
             move |ui, state: &mut (Model, ViewState)| {
@@ -377,7 +411,7 @@ fn tree_snapshot(mode: Mode, name: &str) {
                 tsukumoe_ui::install_cjk_font(&ctx);
                 set_language(&ctx, Language::En);
                 set_mode(&ctx, mode);
-                tree::show(ui, &state.0, &mut state.1);
+                tree::show(ui, &state.0, &mut state.1, panel);
             },
             (model, view),
         );
@@ -386,13 +420,39 @@ fn tree_snapshot(mode: Mode, name: &str) {
 }
 
 #[test]
-fn tree_with_deformers_in_the_dark_theme() {
-    tree_snapshot(Mode::Dark, "tree_dark");
+fn parts_panel_in_the_dark_theme() {
+    tree_snapshot(
+        Mode::Dark,
+        tsukumoe_app::tree_model::Panel::Parts,
+        "tree_parts_dark",
+    );
 }
 
 #[test]
-fn tree_with_deformers_in_the_light_theme() {
-    tree_snapshot(Mode::Light, "tree_light");
+fn parts_panel_in_the_light_theme() {
+    tree_snapshot(
+        Mode::Light,
+        tsukumoe_app::tree_model::Panel::Parts,
+        "tree_parts_light",
+    );
+}
+
+#[test]
+fn deformers_panel_in_the_dark_theme() {
+    tree_snapshot(
+        Mode::Dark,
+        tsukumoe_app::tree_model::Panel::Deformers,
+        "tree_deformers_dark",
+    );
+}
+
+#[test]
+fn deformers_panel_in_the_light_theme() {
+    tree_snapshot(
+        Mode::Light,
+        tsukumoe_app::tree_model::Panel::Deformers,
+        "tree_deformers_light",
+    );
 }
 
 /// The box around the selection over a stand-in picture of two meshes.
@@ -445,4 +505,84 @@ fn selection_box_in_the_dark_theme() {
 #[test]
 fn selection_box_in_the_light_theme() {
     bounds_snapshot(Mode::Light, "selection_box_light");
+}
+
+/// Several selected meshes: each outlined, the last one bold, the box around
+/// all of them with the count badge.
+fn multi_selection_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::mesh_tool::Mapper;
+    use tsukumoe_app::panels::selection_overlay;
+    use tsukumoe_app::scene::{Scene, fit_view};
+    use tsukumoe_app::view::{Selection, ViewState};
+    use tsukumoe_core::command::Command;
+    use tsukumoe_core::model::Model;
+    use tsukumoe_ui::Theme;
+
+    let mut model = Model::new();
+    let mut commands = vec![Command::AddPart {
+        name: "P".into(),
+        parent: None,
+    }];
+    for (mesh, x, y) in [("A", 0.0, 0.0), ("B", 3.0, 0.5), ("C", 1.2, 2.5)] {
+        let pts = vec![[x, y], [x + 2.0, y], [x + 2.0, y + 1.5], [x, y + 1.5]];
+        commands.push(Command::AddMesh {
+            name: mesh.into(),
+            part: "P".into(),
+            positions: pts.clone(),
+            uvs: pts,
+            indices: vec![0, 1, 2, 0, 2, 3],
+        });
+    }
+    for c in commands {
+        model.apply(c).unwrap();
+    }
+    let mut scene = Scene::new(&model).unwrap();
+    scene.advance(0.0);
+    let size = egui::vec2(360.0, 240.0);
+    let mapper = Mapper {
+        origin: [0.0, 0.0],
+        size: [size.x, size.y],
+        view: fit_view(scene.bounds(), size.x as u32, size.y as u32),
+    };
+    let mut view = ViewState::default();
+    view.select_all(vec![
+        Selection::Mesh("A".into()),
+        Selection::Mesh("B".into()),
+        Selection::Mesh("C".into()),
+    ]);
+    let bounds = selection_overlay::selection_bounds(&scene, &model, &view).unwrap();
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .wgpu()
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let theme = Theme::get(&ctx);
+            let rect = ui.max_rect();
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
+            selection_overlay::paint_outlines(&painter, &theme, &mapper, &scene, &view);
+            selection_overlay::paint(&painter, &theme, &mapper, bounds);
+            selection_overlay::paint_badge(
+                &painter,
+                &theme,
+                &mapper,
+                bounds,
+                view.selected_count(),
+            );
+        });
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn multi_selection_in_the_dark_theme() {
+    multi_selection_snapshot(Mode::Dark, "selection_multi_dark");
+}
+
+#[test]
+fn multi_selection_in_the_light_theme() {
+    multi_selection_snapshot(Mode::Light, "selection_multi_light");
 }

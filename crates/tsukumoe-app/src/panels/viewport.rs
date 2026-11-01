@@ -304,7 +304,17 @@ impl Viewport {
                 size: [rect.width(), rect.height()],
                 view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
             };
-            selection_overlay::paint(&ui.painter_at(rect), &Theme::get(ui.ctx()), &mapper, bounds);
+            let painter = ui.painter_at(rect);
+            let theme = Theme::get(ui.ctx());
+            selection_overlay::paint_outlines(&painter, &theme, &mapper, scene, view);
+            selection_overlay::paint(&painter, &theme, &mapper, bounds);
+            selection_overlay::paint_badge(
+                &painter,
+                &theme,
+                &mapper,
+                bounds,
+                view.selected_count(),
+            );
         }
         if let Some(e) = &self.error {
             hint(ui, e.clone());
