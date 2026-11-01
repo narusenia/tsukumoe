@@ -10,6 +10,7 @@ use std::io::{Read, Seek};
 use serde::Serialize;
 use tsukumoe_core::rig::BlendMode;
 
+use crate::image::Image;
 use crate::reader::{EntryKind, Limits, Psd, PsdError, WarningKind};
 
 /// Something the import cannot carry over exactly. Never silent.
@@ -100,6 +101,8 @@ impl Scan {
         let mut layer_of_entry: BTreeMap<usize, usize> = BTreeMap::new();
         let (mut group_counts, mut layer_counts) = (BTreeMap::new(), BTreeMap::new());
         let total = psd.entries.len();
+        // One buffer for every layer: only one layer's pixels are alive.
+        let mut image = Image::empty();
         let key_of = |scan: &Scan, parent: Option<usize>, name: &str| match parent {
             Some(g) => format!("{}/{name}", scan.groups[g].key),
             None => name.to_owned(),
@@ -123,11 +126,11 @@ impl Scan {
                 EntryKind::Layer => {
                     let base = key_of(&scan, parent, &e.name);
                     let key = numbered(&mut layer_counts, base);
-                    let image = psd.decode_layer(r, i, limits)?;
+                    psd.decode_layer_into(r, i, limits, &mut image)?;
                     let bounds = image.opaque_bounds();
                     let (rect, image_hash) = match bounds {
                         Some(b) => {
-                            let hash = image.crop(b).hash();
+                            let hash = image.hash_rect(b);
                             (
                                 Some([
                                     e.rect.left + b.left,

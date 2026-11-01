@@ -793,19 +793,18 @@ pub fn render_textures<R: Read + Seek>(
     limits: &Limits,
     mut sink: impl FnMut(&str, Vec<u8>) -> Result<(), String>,
 ) -> Result<(), String> {
+    let mut image = crate::Image::empty();
     for job in &plan.textures {
         let l: &ScannedLayer = &scan.layers[job.layer];
-        let image = psd
-            .decode_layer(r, l.entry, limits)
+        psd.decode_layer_into(r, l.entry, limits, &mut image)
             .map_err(|e: PsdError| e.to_string())?;
         let b = image
             .opaque_bounds()
             .ok_or("a layer became transparent since the scan")?;
-        let cropped = image.crop(b);
-        if cropped.hash() != l.image_hash {
+        if image.hash_rect(b) != l.image_hash {
             return Err(format!("layer '{}' changed since it was scanned", l.key));
         }
-        sink(&job.path, cropped.to_png()?)?;
+        sink(&job.path, image.crop(b).to_png()?)?;
     }
     Ok(())
 }

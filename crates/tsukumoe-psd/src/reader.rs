@@ -534,6 +534,21 @@ impl Psd {
         index: usize,
         limits: &Limits,
     ) -> Result<Image, PsdError> {
+        let mut out = Image::empty();
+        self.decode_layer_into(r, index, limits, &mut out)?;
+        Ok(out)
+    }
+
+    /// Like [`Psd::decode_layer`], into `out`, whose buffer is reused when it
+    /// is big enough: scanning many layers then allocates once for the
+    /// largest instead of once per layer.
+    pub fn decode_layer_into<R: Read + Seek>(
+        &self,
+        r: &mut R,
+        index: usize,
+        limits: &Limits,
+        out: &mut Image,
+    ) -> Result<(), PsdError> {
         let entry = self
             .entries
             .get(index)
@@ -543,7 +558,8 @@ impl Psd {
         }
         let (w, h) = (entry.rect.width() as usize, entry.rect.height() as usize);
         if w == 0 || h == 0 {
-            return Ok(Image::empty());
+            *out = Image::empty();
+            return Ok(());
         }
         let bytes = w as u64 * h as u64 * 4;
         if bytes > limits.max_layer_bytes {
@@ -551,7 +567,12 @@ impl Psd {
         }
         let bps = usize::from(self.depth / 8);
         let row_len = w * bps;
-        let mut rgba = vec![0u8; bytes as usize];
+        let mut rgba = std::mem::take(&mut out.rgba);
+        rgba.clear();
+        if rgba.capacity() < bytes as usize {
+            note_allocation();
+        }
+        rgba.resize(bytes as usize, 0);
         let mut seen = [false; 4];
         let mut row = vec![0u8; row_len];
         let mut packed = Vec::new();
@@ -624,12 +645,27 @@ impl Psd {
                 .iter_mut()
                 .for_each(|p| p[3] = 255);
         }
-        Ok(Image {
+        *out = Image {
             width: w as u32,
             height: h as u32,
             rgba,
-        })
+        };
+        Ok(())
     }
+}
+
+thread_local! {
+    static ALLOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn note_allocation() {
+    ALLOCATIONS.with(|c| c.set(c.get() + 1));
+}
+
+/// How many times a layer buffer had to grow on this thread (for tests that
+/// check buffers are reused).
+pub fn layer_buffer_allocations() -> usize {
+    ALLOCATIONS.with(std::cell::Cell::get)
 }
 
 fn store_row(rgba: &mut [u8], row: &[u8], y: usize, w: usize, slot: usize, bps: usize) {

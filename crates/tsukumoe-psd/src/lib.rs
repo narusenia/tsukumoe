@@ -20,7 +20,10 @@ pub use plan::{
     Action, Choices, Existing, Item, Plan, ROOT_PART, TextureJob, plan, remap_uvs, render_textures,
     texture_paths,
 };
-pub use reader::{Channel, Entry, EntryKind, Limits, Psd, PsdError, Rect, Warning, WarningKind};
+pub use reader::{
+    Channel, Entry, EntryKind, Limits, Psd, PsdError, Rect, Warning, WarningKind,
+    layer_buffer_allocations,
+};
 pub use scan::{Note, Scan, ScannedGroup, ScannedLayer, blend_mode};
 
 #[cfg(test)]

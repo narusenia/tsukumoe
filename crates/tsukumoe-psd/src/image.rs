@@ -71,6 +71,19 @@ impl Image {
         }
     }
 
+    /// [`Image::crop`] then [`Image::hash`], without the copy.
+    pub fn hash_rect(&self, rect: Rect) -> String {
+        let (w, cw) = (self.width as usize, rect.width() as usize);
+        let mut h = Sha256::new();
+        h.update(rect.width().to_le_bytes());
+        h.update(rect.height().to_le_bytes());
+        for y in rect.top as usize..rect.bottom as usize {
+            let start = (y * w + rect.left as usize) * 4;
+            h.update(&self.rgba[start..start + cw * 4]);
+        }
+        hex(&h.finalize())
+    }
+
     /// SHA-256 of the size and the pixels, as 64 hex digits.
     pub fn hash(&self) -> String {
         let mut h = Sha256::new();

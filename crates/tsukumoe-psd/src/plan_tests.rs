@@ -529,3 +529,26 @@ fn texture_files_added_in_the_middle_renumber_other_meshes() {
     let files: Vec<_> = p.textures.keys().cloned().collect();
     assert_eq!(files.last().unwrap(), "textures/zeta.png");
 }
+
+#[test]
+fn scanning_and_writing_reuse_one_layer_buffer() {
+    // Six layers of the same size: the buffer grows once, not once per layer.
+    let nodes = (0..6)
+        .map(|i| layer(&format!("l{i}"), 0, 0, 40, 40, i as u8 + 1))
+        .collect();
+    let bytes = spec(nodes);
+    let before = layer_buffer_allocations();
+    let (psd, scan, plan) = make_plan(&Proj::default(), &bytes, &Choices::default());
+    assert_eq!(layer_buffer_allocations() - before, 1);
+    let before = layer_buffer_allocations();
+    render_textures(
+        &plan,
+        &scan,
+        &psd,
+        &mut Cursor::new(&bytes),
+        &Limits::default(),
+        |_, _| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(layer_buffer_allocations() - before, 1);
+}
