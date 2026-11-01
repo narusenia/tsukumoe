@@ -2,7 +2,7 @@
 
 - REQ: REQ-TRK-003（macOS は Syphon で映像を出力できる）
 - 単位: M4-03b
-- 状態: 未着手
+- 状態: 着手中
 - 依存: M4-03a
 - クレート: `tsukumoe-host`（macOS 限定・feature `syphon`（既定オフ）で `syphon-wgpu` を optional 依存に足す。ユーザー承認済みの依存追加はこれのみ）
 
@@ -35,19 +35,22 @@
 
 ## 受入条件
 
-- [ ] 既定のビルド（feature なし）で依存・挙動が変わらない
-- [ ] `--features syphon`（macOS）でビルドでき、`--syphon` で Syphon サーバとして公開する
+進捗（着手中）: ビルドと単体テストまで確認済み。この環境には `Syphon.framework` が無く、起動・OBS での受信・透過の縁の確認ができていない。
+
+- [x] 既定のビルド（feature なし）で依存・挙動が変わらない
+- [x] `--features syphon`（macOS）でビルドでき、`--syphon` で Syphon サーバとして公開する
 - [ ] OBS などの Syphon クライアントで映像を受け取れる（利用者の環境で確認）
 - [ ] 透過の縁が汚れない（利用者の環境で確認）
-- [ ] feature なし・macOS 以外で `--syphon` を指定すると理由つきのエラーで終了する
+- [x] feature なし・macOS 以外で `--syphon` を指定すると理由つきのエラーで終了する
 
 ## 決めたこと
 
 - `syphon-wgpu` を macOS 限定・optional・feature `syphon`（既定オフ）で足す
 - `Syphon.framework` は利用者が導入する（本リポジトリは同梱・インストールしない）
 - 出力は `FrameSink` trait の裏に置き、c（仮想カメラ・Spout2）が同じ形で足せるようにする
-
-## 決めること（着手時）
-
-- `syphon-wgpu` の実際の版（0.4.x のどれか）と、wgpu 30 での動作の確認結果
-- 公開用テクスチャの作り方（ウィンドウの描画先を直接渡せるか、`Bgra8Unorm` の別テクスチャに描き直すか）
+- `syphon-wgpu` は 0.4.3（`syphon-core` 0.4.0・`syphon-metal` 0.4.2 を連れてくる）。README は「wgpu 29 対象」と書くが、Cargo.toml の依存は `wgpu` / `wgpu-hal` `^30.0` で、ワークスペースの wgpu 30.0.1 にそのまま解決し `cargo check -p tsukumoe-host --features syphon` が通った（README の記述が古い）
+- 公開用テクスチャ: レンダラの出力は `Rgba8Unorm` で、wgpu のテクスチャコピーは RGBA と BGRA を変換できないため、ウィンドウの描画先は直接渡さない。`SyphonSink` が `Bgra8Unorm` のテクスチャを持ち、全画面 1 パス（`textureLoad` で読んで書く。値は変えず、チャンネルの並びだけフォーマットが入れ替える。premultiplied のまま）で描き直してから `publish` する。クライアントがいない間はこのパスも公開も飛ばす。サイズが変わると Syphon サーバとテクスチャを作り直す（ウィンドウ端のドラッグ中は毎フレーム作り直しになる。問題になったら見直す）
+- `--syphon-size` 指定時は、`Output` が固定サイズの `Rgba8Unorm` テクスチャを別に持ち、`Viewer::draw`（モデルを進めずに現在のポーズを描く）で描いて渡す。ウィンドウの描画は変えない
+- `--syphon-name` / `--syphon-size` は `--syphon` なしでは指定できない（黙って無視せずエラー）
+- 出力を有効にしている間はトラッキングと同じく毎フレーム描画する（受信側に一定の流れが要るため）
+- `syphon-core` は `Syphon.framework` を同梱の中身から組み直してリンクする（リンクは通る）が、ランタイムの `@rpath` はそのクレート自身のテスト用にしか足さない。そのためホストの `build.rs` が feature 有効時に `-rpath /Library/Frameworks` を足す。フレームワークが無いと、起動時に dyld が探した場所つきでエラーにして終了する（`SyphonSink::new` の導入案内のエラーは、読み込めたが使えないときの保険）
