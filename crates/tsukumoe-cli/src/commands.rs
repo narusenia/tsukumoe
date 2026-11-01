@@ -121,6 +121,10 @@ pub fn examples() -> Vec<Command> {
             name: "Face".into(),
             opacity: 0.5,
         },
+        Command::SetPartVisible {
+            name: "Face".into(),
+            visible: false,
+        },
         Command::AddMesh {
             name: "Skin".into(),
             part: "Face".into(),
@@ -134,6 +138,10 @@ pub fn examples() -> Vec<Command> {
         Command::SetMeshPositions {
             name: "Skin".into(),
             positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
+        },
+        Command::SetMeshVisible {
+            name: "Skin".into(),
+            visible: false,
         },
         Command::Batch {
             commands: vec![add_parameter, add_part],
@@ -151,9 +159,11 @@ pub fn tag(command: &Command) -> &'static str {
         Command::AddPart { .. } => "add_part",
         Command::RemovePart { .. } => "remove_part",
         Command::SetPartOpacity { .. } => "set_part_opacity",
+        Command::SetPartVisible { .. } => "set_part_visible",
         Command::AddMesh { .. } => "add_mesh",
         Command::RemoveMesh { .. } => "remove_mesh",
         Command::SetMeshPositions { .. } => "set_mesh_positions",
+        Command::SetMeshVisible { .. } => "set_mesh_visible",
         Command::Batch { .. } => "batch",
     }
 }

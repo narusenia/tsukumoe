@@ -51,6 +51,8 @@ pub enum Command {
     RemovePart { name: String },
     /// Sets the opacity of a part.
     SetPartOpacity { name: String, opacity: f32 },
+    /// Shows or hides a part; a hidden part hides every mesh under it.
+    SetPartVisible { name: String, visible: bool },
     /// Adds an art mesh to a part; positions and uvs are [x, y] pairs, indices are triangle vertex indices.
     AddMesh {
         name: String,
@@ -63,6 +65,8 @@ pub enum Command {
     RemoveMesh { name: String },
     /// Replaces the vertex positions of a mesh; the count must match its uvs.
     SetMeshPositions { name: String, positions: Vec<Point> },
+    /// Shows or hides a mesh; a hidden mesh is not in the draw list.
+    SetMeshVisible { name: String, visible: bool },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
     Batch { commands: Vec<Command> },
@@ -204,6 +208,14 @@ impl Model {
             Command::SetPartOpacity { name, opacity } => {
                 let id = self.resolve::<Part>(name)?;
                 self.modify(changes, id, |p| p.opacity = *opacity);
+            }
+            Command::SetPartVisible { name, visible } => {
+                let id = self.resolve::<Part>(name)?;
+                self.modify(changes, id, |p| p.visible = *visible);
+            }
+            Command::SetMeshVisible { name, visible } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| m.visible = *visible);
             }
             Command::AddMesh {
                 name,
@@ -356,6 +368,14 @@ mod tests {
             Command::SetMeshPositions {
                 name: "Skin".into(),
                 positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
+            },
+            Command::SetMeshVisible {
+                name: "Skin".into(),
+                visible: false,
+            },
+            Command::SetPartVisible {
+                name: "Face".into(),
+                visible: false,
             },
         ]
     }

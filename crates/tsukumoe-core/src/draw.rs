@@ -63,9 +63,9 @@ impl<'a> DrawList<'a> {
         self.model.meshes.is_empty()
     }
 
-    /// Mesh indices, back to front.
+    /// Mesh indices, back to front; hidden meshes are not listed.
     pub fn order(&self) -> &'a [u32] {
-        &self.frame.order
+        &self.frame.order[..self.frame.shown]
     }
 
     /// The drawing order differs from the previous frame.
@@ -277,5 +277,42 @@ mod tests {
         let a = f.draw_list(&c).drawable(0);
         assert!(!a.geometry_changed && a.style_changed);
         assert_eq!(a.opacity, 0.0);
+    }
+
+    fn set_visible(m: &mut Model, mesh: &str, visible: bool) {
+        let id = m.meshes.find(mesh).unwrap();
+        m.meshes.get_mut(id).unwrap().visible = visible;
+    }
+
+    #[test]
+    fn hidden_meshes_and_meshes_of_hidden_parts_are_not_listed() {
+        let mut m = model(flat());
+        set_visible(&mut m, "B", false);
+        let c = m.compile().unwrap();
+        let mut f = Frame::new(&c);
+        evaluate(&c, &mut f, 0.0);
+        assert_eq!(f.draw_list(&c).order(), [0, 2]);
+        assert_eq!(f.draw_list(&c).drawables().count(), 2);
+
+        // A hidden parent part hides the meshes of its child parts too.
+        let mut m = model(flat());
+        let root = m.parts.insert("Root", Part::default()).unwrap();
+        let child = m.parts.find("Part").unwrap();
+        m.parts.get_mut(child).unwrap().parent = Some(root);
+        m.parts.get_mut(root).unwrap().visible = false;
+        let c = m.compile().unwrap();
+        let mut f = Frame::new(&c);
+        evaluate(&c, &mut f, 0.0);
+        assert!(f.draw_list(&c).order().is_empty());
+    }
+
+    #[test]
+    fn a_hidden_mesh_comes_back_in_its_draw_order() {
+        let mut m = model([keyform(0.0, 1.0, 900.0), keyform(0.0, 1.0, 900.0)]);
+        set_visible(&mut m, "A", false);
+        let c = m.compile().unwrap();
+        let mut f = Frame::new(&c);
+        evaluate(&c, &mut f, 0.0);
+        assert_eq!(f.draw_list(&c).order(), [1, 2]);
     }
 }

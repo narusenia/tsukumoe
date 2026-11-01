@@ -94,6 +94,8 @@ pub mod id {
     pub const POSE_GROUPS: u32 = 0x97;
     pub const POSE_ENTRIES: u32 = 0x98;
     pub const POSE_LINKS: u32 = 0x99;
+    /// Optional: ascending indices of the meshes the draw list leaves out.
+    pub const MESH_HIDDEN: u32 = 0x9A;
 }
 
 /// The name of a section ID in this version, for tools that print the table.
@@ -154,6 +156,7 @@ pub fn section_name(section: u32) -> Option<&'static str> {
         POSE_GROUPS => "pose_groups",
         POSE_ENTRIES => "pose_entries",
         POSE_LINKS => "pose_links",
+        MESH_HIDDEN => "mesh_hidden",
         _ => return None,
     })
 }
@@ -456,6 +459,18 @@ pub fn write_with(
         )?;
     }
 
+    if !model.mesh_hidden.is_empty() {
+        s.push(Section {
+            id: id::MESH_HIDDEN,
+            flags: 0,
+            count: u32::try_from(model.mesh_hidden.len()).map_err(|_| Error::Section {
+                id: id::MESH_HIDDEN,
+                reason: "too many elements",
+            })?,
+            data: Cow::Borrowed(bytemuck::cast_slice(&model.mesh_hidden)),
+        });
+    }
+
     Ok(assemble(&s))
 }
 
@@ -602,6 +617,7 @@ impl<'a> Tmod<'a> {
                 || id == id::TEXTURE_TABLE
                 || id == id::TEXTURE_DATA
                 || (id::PLAYBACK_STRINGS..=id::POSE_LINKS).contains(&id)
+                || id == id::MESH_HIDDEN
         };
         for e in &entries {
             if !known(e.id) && e.flags & SECTION_REQUIRED != 0 {
@@ -699,6 +715,11 @@ impl<'a> Tmod<'a> {
             blend_weights: arr!(id::BLEND_WEIGHTS),
             blend_deltas: arr!(id::BLEND_DELTAS),
             blend_refs: arr!(id::BLEND_REFS),
+            mesh_hidden: if find(id::MESH_HIDDEN).is_some() {
+                arr!(id::MESH_HIDDEN)
+            } else {
+                Cow::Borrowed(&[])
+            },
         };
         model.check()?;
 

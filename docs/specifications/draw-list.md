@@ -15,7 +15,7 @@ All buffers are contiguous, little-endian, and hold plain `f32` / `u32`, so a C 
 | positions | `f32` | `x, y` per vertex in drawing space, all meshes in mesh order |
 | uvs | `f32` | `u, v` per vertex, same vertex order |
 | indices | `u32` | triangle list of all meshes in mesh order; **local to each mesh** (add no offset; a renderer that uploads one vertex buffer adds the mesh's `vertex_start` as base vertex) |
-| order | `u32` | mesh indices, back to front |
+| order | `u32` | mesh indices, back to front; hidden meshes (the mesh or one of its parts is hidden) are not listed |
 
 ## Per drawable
 
@@ -44,7 +44,7 @@ Compared exactly (bit equality of `f32`) with the previous call of `evaluate` on
 
 ## Not in the draw list
 
-Visibility culling (opacity 0), mask buffer generation and texture binding belong to the renderer.
+Visibility culling by opacity (opacity 0), mask buffer generation and texture binding belong to the renderer.
 
 ## Capture format (cross-environment parity)
 

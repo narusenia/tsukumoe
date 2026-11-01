@@ -169,6 +169,7 @@ fn rich() -> Model {
     face.texture = 2;
     face.blend_mode = BlendMode::Additive;
     face.double_sided = true;
+    face.visible = false;
     face.influences = vec![
         VertexInfluences {
             bones: [Some(spine), Some(arm), None, None],
@@ -486,6 +487,7 @@ fn omitted_fields_take_their_defaults() {
     assert_eq!(mesh.multiply_color, [1.0; 3]);
     let (_, _, part) = model.parts().iter().next().unwrap();
     assert!(part.visible && part.opacity == 1.0);
+    assert!(mesh.visible);
 }
 
 fn with_model_json(json: &str) -> Project {

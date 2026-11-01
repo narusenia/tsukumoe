@@ -83,6 +83,8 @@ pub struct ArtMesh {
     pub multiply_color: [f32; 3],
     pub screen_color: [f32; 3],
     pub double_sided: bool,
+    /// A hidden mesh is kept in the model but left out of the draw list.
+    pub visible: bool,
     /// Empty, or one entry per vertex.
     pub influences: Vec<VertexInfluences>,
     pub keyforms: Option<KeyformGrid<MeshKeyform>>,
@@ -105,6 +107,7 @@ impl ArtMesh {
             multiply_color: [1.0; 3],
             screen_color: [0.0; 3],
             double_sided: false,
+            visible: true,
             influences: Vec::new(),
             keyforms: None,
         }

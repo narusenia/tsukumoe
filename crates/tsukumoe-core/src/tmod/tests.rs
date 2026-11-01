@@ -901,3 +901,44 @@ fn bad_playback_data_is_not_written() {
     m.motions.get_mut(id).unwrap().curves[0].segments[0] = Segment::Linear([-1.0, 0.0]);
     assert!(PlaybackData::from_model(&m).is_err());
 }
+
+#[test]
+fn hidden_meshes_survive_a_round_trip_and_are_optional() {
+    let mut m = Model::new();
+    let part = m
+        .parts
+        .insert("P", crate::elements::Part::default())
+        .unwrap();
+    for n in ["A", "B", "C"] {
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        m.meshes
+            .insert(n, ArtMesh::new(part, tri.clone(), tri, vec![0, 1, 2]))
+            .unwrap();
+    }
+    let plain = write(&m.compile().unwrap(), &[]).unwrap();
+    let id = m.meshes.find("B").unwrap();
+    m.meshes.get_mut(id).unwrap().visible = false;
+    let c = m.compile().unwrap();
+    assert_eq!(&*c.mesh_hidden, [1]);
+    let bytes = write(&c, &[]).unwrap();
+    let buf = AlignedBuf::from_bytes(&bytes);
+    let t = Tmod::parse(&buf).unwrap();
+    assert_eq!(&*t.model.mesh_hidden, [1]);
+    let mut f = Frame::new(&t.model);
+    f.evaluate(&t.model);
+    assert_eq!(f.draw_list(&t.model).order(), [0, 2]);
+    // Without a hidden mesh the file has no such section.
+    let buf = AlignedBuf::from_bytes(&plain);
+    assert!(Tmod::parse(&buf).unwrap().model.mesh_hidden.is_empty());
+    assert!(
+        !Tmod::parse(&buf)
+            .unwrap()
+            .sections
+            .iter()
+            .any(|s| s.id == id::MESH_HIDDEN)
+    );
+    // An index past the meshes is rejected.
+    let mut bad = c.clone();
+    bad.mesh_hidden = Cow::Owned(vec![7]);
+    assert!(write(&bad, &[]).map_or(true, |b| parse(&b).is_err()));
+}

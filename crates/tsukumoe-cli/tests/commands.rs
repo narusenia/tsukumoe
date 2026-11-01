@@ -79,7 +79,7 @@ fn commands_lists_the_same_tools_as_the_server() {
         .handle(br#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
         .unwrap();
     let served = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(listed.len(), 10);
+    assert_eq!(listed.len(), tsukumoe_cli::commands::examples().len());
     for tool in &listed {
         assert!(
             served.contains(tool),

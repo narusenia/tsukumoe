@@ -143,9 +143,11 @@ mod tests {
             Command::AddPart { .. } => "add_part",
             Command::RemovePart { .. } => "remove_part",
             Command::SetPartOpacity { .. } => "set_part_opacity",
+            Command::SetPartVisible { .. } => "set_part_visible",
             Command::AddMesh { .. } => "add_mesh",
             Command::RemoveMesh { .. } => "remove_mesh",
             Command::SetMeshPositions { .. } => "set_mesh_positions",
+            Command::SetMeshVisible { .. } => "set_mesh_visible",
             Command::Batch { .. } => "batch",
         }
     }
@@ -180,6 +182,10 @@ mod tests {
                 name: String::new(),
                 opacity: 0.0,
             },
+            Command::SetPartVisible {
+                name: String::new(),
+                visible: true,
+            },
             Command::AddMesh {
                 name: String::new(),
                 part: String::new(),
@@ -193,6 +199,10 @@ mod tests {
             Command::SetMeshPositions {
                 name: String::new(),
                 positions: vec![],
+            },
+            Command::SetMeshVisible {
+                name: String::new(),
+                visible: true,
             },
             Command::Batch { commands: vec![] },
         ];

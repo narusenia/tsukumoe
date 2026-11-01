@@ -93,6 +93,20 @@ Sets the opacity of a part.
 {"type":"set_part_opacity","name":"Face","opacity":0.5}
 ```
 
+### `set_part_visible`
+
+Shows or hides a part; a hidden part hides every mesh under it.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"set_part_visible"` | yes |  |
+| `visible` | boolean | yes |  |
+
+```json
+{"type":"set_part_visible","name":"Face","visible":false}
+```
+
 ### `add_mesh`
 
 Adds an art mesh to a part; positions and uvs are [x, y] pairs, indices are triangle vertex indices.
@@ -135,6 +149,20 @@ Replaces the vertex positions of a mesh; the count must match its uvs.
 
 ```json
 {"type":"set_mesh_positions","name":"Skin","positions":[[0.0,0.0],[2.0,0.0],[0.0,2.0]]}
+```
+
+### `set_mesh_visible`
+
+Shows or hides a mesh; a hidden mesh is not in the draw list.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"set_mesh_visible"` | yes |  |
+| `visible` | boolean | yes |  |
+
+```json
+{"type":"set_mesh_visible","name":"Skin","visible":false}
 ```
 
 ### `batch`
