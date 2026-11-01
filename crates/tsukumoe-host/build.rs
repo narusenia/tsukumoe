@@ -17,4 +17,18 @@ fn main() {
         // Then the framework a user installed from the official release.
         println!("cargo:rustc-link-arg=-Wl,-rpath,/Library/Frameworks");
     }
+    // Spout2 (compiled in by spout-rs) imports TaskDialogIndirect, which only
+    // exists in comctl32 v6. rustc links with /MANIFEST:NO, which drops the
+    // manifest dependency Spout2 asks for by pragma, so the exe would not start.
+    if std::env::var_os("CARGO_FEATURE_SPOUT").is_some()
+        && std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").is_ok_and(|env| env == "msvc")
+    {
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' \
+             name='Microsoft.Windows.Common-Controls' version='6.0.0.0' \
+             processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+        );
+    }
 }
