@@ -7,3 +7,4 @@ pub mod commands;
 pub mod generate;
 pub mod lipsync;
 pub mod parity;
+pub mod store;

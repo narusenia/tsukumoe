@@ -1,17 +1,18 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! `tsukumoe convert | generate | validate | inspect | render | diff | parity | lipsync | commands | docs`.
+//! `tsukumoe convert | generate | validate | inspect | render | diff | parity | lipsync | commands | docs | edit | mcp`.
 //! See `docs/implementation/M1-core/cli.md` and `M4-vtuber/lipsync.md`.
 
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
 
 use serde_json::json;
 use tsukumoe_ai::LipsyncConfig;
 use tsukumoe_ai::wav::{self, MAX_WAV_BYTES};
-use tsukumoe_cli::{commands, generate, lipsync, parity};
+use tsukumoe_cli::{commands, generate, lipsync, parity, store};
 use tsukumoe_core::eval::Frame;
 use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
 use tsukumoe_format::{Project, read_model};
@@ -32,7 +33,13 @@ const USAGE: &str = "usage:
   tsukumoe commands
       the edit commands with their argument schemas (JSON, the MCP tool list)
   tsukumoe docs commands
-      the command API reference (Markdown)";
+      the command API reference (Markdown)
+  tsukumoe edit <project> <command.json|->
+      applies a command (or an array, as one undo step) and saves the project;
+      nothing is written if it fails";
+
+/// The largest command file `edit` reads.
+const MAX_COMMAND_BYTES: u64 = 16 * 1024 * 1024;
 
 /// A failure: `Usage` exits 2, `Failed` exits 1.
 enum Fail {
@@ -510,6 +517,27 @@ fn docs(args: &[String]) -> Result<u8, Fail> {
     Ok(0)
 }
 
+fn edit(args: &[String]) -> Result<u8, Fail> {
+    let args = Args::parse(args, &[])?;
+    let [project, input] = args.positional()?;
+    let mut bytes = Vec::new();
+    if input == "-" {
+        std::io::stdin()
+            .take(MAX_COMMAND_BYTES)
+            .read_to_end(&mut bytes)?;
+    } else {
+        fs::File::open(input)
+            .and_then(|f| f.take(MAX_COMMAND_BYTES).read_to_end(&mut bytes))
+            .map_err(|e| Fail::Failed(format!("{input}: {e}")))?;
+    }
+    let command = store::parse_commands(&bytes).map_err(Fail::Failed)?;
+    let (mut project_files, mut model) = store::open(project).map_err(Fail::Failed)?;
+    model.apply(command)?;
+    store::save(project, &mut project_files, &model).map_err(Fail::Failed)?;
+    println!("{}", json!({ "ok": true }));
+    Ok(0)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.split_first() {
@@ -524,6 +552,7 @@ fn main() -> ExitCode {
             "lipsync" => lipsync(rest),
             "commands" => commands(rest),
             "docs" => docs(rest),
+            "edit" => edit(rest),
             other => usage(format!("unknown command {other:?}")),
         },
         None => usage("no command"),
