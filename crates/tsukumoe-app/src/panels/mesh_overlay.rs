@@ -114,9 +114,11 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                     ui.horizontal(|ui| {
                         ui.label(tsukumoe_ui::tr(ctx, "mesh-edit-grid"));
                         let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
-                        ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()));
+                        ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
+                            .accessible_name(tsukumoe_ui::tr(ctx, "mesh-edit-grid-cols"));
                         ui.label("\u{d7}");
-                        ui.add(egui::DragValue::new(&mut tool.grid.1).range(range));
+                        ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
+                            .accessible_name(tsukumoe_ui::tr(ctx, "mesh-edit-grid-rows"));
                     });
                 });
         });

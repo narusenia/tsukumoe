@@ -133,6 +133,20 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     let retriangulated = tsukumoe_core::mesh_edit::retriangulate(&geometry, &[]).unwrap();
     let delaunay = t0.elapsed();
     std::hint::black_box(&retriangulated);
+    // Grid fill: the default 4 x 4, and the largest 64 x 64 for the record.
+    let t0 = Instant::now();
+    let filled = tsukumoe_core::mesh_edit::fill_grid(&geometry, 4, 4);
+    let grid = t0.elapsed();
+    std::hint::black_box(&filled);
+    let t0 = Instant::now();
+    let big = tsukumoe_core::mesh_edit::fill_grid(&geometry, 64, 64);
+    let grid_big = t0.elapsed();
+    std::hint::black_box(&big);
+    eprintln!(
+        "mesh_frame_time: fill_grid 4x4 {:.2} ms, 64x64 {:.2} ms",
+        grid.as_secs_f64() * 1e3,
+        grid_big.as_secs_f64() * 1e3
+    );
     eprintln!(
         "mesh_frame_time: retriangulate {:.2} ms",
         delaunay.as_secs_f64() * 1e3
@@ -151,6 +165,7 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     // Debug builds are several times slower: they report but do not judge.
     if !cfg!(debug_assertions) {
         assert!(p(0.99) <= BUDGET, "p99 {:?} is over the budget", p(0.99));
+        assert!(grid <= BUDGET, "fill_grid 4x4 {grid:?} is over the budget");
         assert!(
             delaunay <= BUDGET,
             "retriangulate {delaunay:?} is over the budget"

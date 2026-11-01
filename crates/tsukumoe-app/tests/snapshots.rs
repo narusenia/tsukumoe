@@ -50,7 +50,7 @@ fn editor_in_the_light_theme() {
 }
 
 /// The mesh edit overlay on a small mesh: two selected vertices, a drag box
-/// and the veil, drawn without the GPU picture behind it.
+/// the veil and the grid options box, drawn without the GPU picture behind it.
 fn mesh_overlay_snapshot(mode: Mode, name: &str) {
     use tsukumoe_app::mesh_tool::{Mapper, MeshTool};
     use tsukumoe_app::panels::mesh_overlay;
@@ -95,6 +95,7 @@ fn mesh_overlay_snapshot(mode: Mode, name: &str) {
             painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
             mesh_overlay::veil(&painter, &theme, rect);
             mesh_overlay::paint(&painter, &theme, &mapper, &positions, &indices, tool, None);
+            mesh_overlay::grid_options(&ctx, rect, tool);
         },
         tool,
     );
