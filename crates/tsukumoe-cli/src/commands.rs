@@ -9,7 +9,7 @@ use std::fmt::Write;
 
 use schemars::schema_for;
 use serde_json::{Value, json};
-use tsukumoe_core::command::Command;
+use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::rig::BlendMode;
 
 /// One tool per `Command` variant, as `{name, description, inputSchema}`.
@@ -140,6 +140,51 @@ pub fn examples() -> Vec<Command> {
             name: "Skin".into(),
             positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
         },
+        Command::AddWarpDeformer {
+            name: "FaceWarp".into(),
+            part: "Face".into(),
+            parent: None,
+            rows: 1,
+            columns: 1,
+            base_points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        },
+        Command::AddRotationDeformer {
+            name: "HeadRotation".into(),
+            part: "Face".into(),
+            parent: Some("FaceWarp".into()),
+            base: RotationBase {
+                origin: [0.0, 0.0],
+                angle_degrees: 0.0,
+                scale: 1.0,
+                reflect_x: false,
+                reflect_y: false,
+            },
+        },
+        Command::RemoveDeformer {
+            name: "HeadRotation".into(),
+        },
+        Command::SetDeformerParent {
+            name: "HeadRotation".into(),
+            parent: Some("FaceWarp".into()),
+        },
+        Command::SetMeshParent {
+            name: "Skin".into(),
+            parent: Some("FaceWarp".into()),
+        },
+        Command::SetWarpBasePoints {
+            name: "FaceWarp".into(),
+            points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
+        },
+        Command::SetRotationBase {
+            name: "HeadRotation".into(),
+            base: RotationBase {
+                origin: [0.0, 0.0],
+                angle_degrees: 15.0,
+                scale: 1.0,
+                reflect_x: false,
+                reflect_y: false,
+            },
+        },
         Command::SetMeshGeometry {
             name: "Skin".into(),
             positions: triangle.clone(),
@@ -196,6 +241,13 @@ pub fn tag(command: &Command) -> &'static str {
         Command::RemoveMesh { .. } => "remove_mesh",
         Command::SetMeshPositions { .. } => "set_mesh_positions",
         Command::SetMeshGeometry { .. } => "set_mesh_geometry",
+        Command::AddWarpDeformer { .. } => "add_warp_deformer",
+        Command::AddRotationDeformer { .. } => "add_rotation_deformer",
+        Command::RemoveDeformer { .. } => "remove_deformer",
+        Command::SetDeformerParent { .. } => "set_deformer_parent",
+        Command::SetMeshParent { .. } => "set_mesh_parent",
+        Command::SetWarpBasePoints { .. } => "set_warp_base_points",
+        Command::SetRotationBase { .. } => "set_rotation_base",
         Command::SetMeshTexture { .. } => "set_mesh_texture",
         Command::SetMeshBlendMode { .. } => "set_mesh_blend_mode",
         Command::SetMeshOpacity { .. } => "set_mesh_opacity",

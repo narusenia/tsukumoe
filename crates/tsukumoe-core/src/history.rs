@@ -7,7 +7,7 @@ use crate::arena::Id;
 use crate::command::Command;
 use crate::elements::{Parameter, Part};
 use crate::model::Model;
-use crate::rig::ArtMesh;
+use crate::rig::{ArtMesh, RotationDeformer, WarpDeformer};
 use crate::table::Table;
 
 /// One element's state before and after a command. `before` empty is an
@@ -37,6 +37,8 @@ pub(crate) enum Change {
     Part(Edit<Part>),
     // Boxed: a mesh edit holds two copies of the mesh, far larger than the others.
     Mesh(Box<Edit<ArtMesh>>),
+    Warp(Box<Edit<WarpDeformer>>),
+    Rotation(Edit<RotationDeformer>),
 }
 
 impl Change {
@@ -45,6 +47,8 @@ impl Change {
             Change::Parameter(e) => e.set(&mut model.parameters, &e.before),
             Change::Part(e) => e.set(&mut model.parts, &e.before),
             Change::Mesh(e) => e.set(&mut model.meshes, &e.before),
+            Change::Warp(e) => e.set(&mut model.warps, &e.before),
+            Change::Rotation(e) => e.set(&mut model.rotations, &e.before),
         }
     }
 
@@ -53,6 +57,8 @@ impl Change {
             Change::Parameter(e) => e.set(&mut model.parameters, &e.after),
             Change::Part(e) => e.set(&mut model.parts, &e.after),
             Change::Mesh(e) => e.set(&mut model.meshes, &e.after),
+            Change::Warp(e) => e.set(&mut model.warps, &e.after),
+            Change::Rotation(e) => e.set(&mut model.rotations, &e.after),
         }
     }
 }
@@ -102,6 +108,32 @@ impl Editable for ArtMesh {
     }
     fn change(edit: Edit<Self>) -> Change {
         Change::Mesh(Box::new(edit))
+    }
+}
+
+impl Editable for WarpDeformer {
+    const KIND: &'static str = "warp deformer";
+    fn table(model: &Model) -> &Table<Self> {
+        &model.warps
+    }
+    fn table_mut(model: &mut Model) -> &mut Table<Self> {
+        &mut model.warps
+    }
+    fn change(edit: Edit<Self>) -> Change {
+        Change::Warp(Box::new(edit))
+    }
+}
+
+impl Editable for RotationDeformer {
+    const KIND: &'static str = "rotation deformer";
+    fn table(model: &Model) -> &Table<Self> {
+        &model.rotations
+    }
+    fn table_mut(model: &mut Model) -> &mut Table<Self> {
+        &mut model.rotations
+    }
+    fn change(edit: Edit<Self>) -> Change {
+        Change::Rotation(edit)
     }
 }
 
