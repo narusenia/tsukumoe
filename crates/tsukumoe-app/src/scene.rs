@@ -222,6 +222,34 @@ impl Scene {
         Some(list.drawable(mesh).positions.as_chunks::<2>().0.to_vec())
     }
 
+    /// `[x0, y0, x1, y1]` around the vertices as drawn now of the meshes named,
+    /// leaving out the ones not drawn (hidden, or under a hidden part). `None`
+    /// if nothing is left.
+    pub fn drawn_bounds<'n>(&self, names: impl IntoIterator<Item = &'n str>) -> Option<[f32; 4]> {
+        let list = self.frame.draw_list(&self.model);
+        let shown = list.order();
+        let mut b: Option<[f32; 4]> = None;
+        for name in names {
+            let Some(i) = self.model.mesh_index(name) else {
+                continue;
+            };
+            if !shown.contains(&(i as u32)) {
+                continue;
+            }
+            for p in list.drawable(i).positions.as_chunks::<2>().0 {
+                b = Some(b.map_or([p[0], p[1], p[0], p[1]], |b| {
+                    [
+                        b[0].min(p[0]),
+                        b[1].min(p[1]),
+                        b[2].max(p[0]),
+                        b[3].max(p[1]),
+                    ]
+                }));
+            }
+        }
+        b
+    }
+
     pub fn advance(&mut self, dt: f32) {
         self.frame.advance(&self.model, dt);
     }

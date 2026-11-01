@@ -394,3 +394,55 @@ fn tree_with_deformers_in_the_dark_theme() {
 fn tree_with_deformers_in_the_light_theme() {
     tree_snapshot(Mode::Light, "tree_light");
 }
+
+/// The box around the selection over a stand-in picture of two meshes.
+fn bounds_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::mesh_tool::Mapper;
+    use tsukumoe_app::panels::selection_overlay;
+    use tsukumoe_ui::Theme;
+
+    let size = egui::vec2(300.0, 200.0);
+    let mapper = Mapper {
+        origin: [0.0, 0.0],
+        size: [size.x, size.y],
+        view: [0.0, 0.0, 6.0, 4.0],
+    };
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .wgpu()
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let theme = Theme::get(&ctx);
+            let rect = ui.max_rect();
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
+            // Two meshes, as flat blocks; the box goes around the pair.
+            for block in [[0.8, 0.9, 2.4, 2.8], [3.1, 1.2, 4.9, 3.0]] {
+                let (a, b) = (
+                    mapper.to_screen([block[0], block[1]]),
+                    mapper.to_screen([block[2], block[3]]),
+                );
+                painter.rect_filled(
+                    egui::Rect::from_two_pos(egui::pos2(a[0], a[1]), egui::pos2(b[0], b[1])),
+                    2.0,
+                    theme.colors.control_active,
+                );
+            }
+            selection_overlay::paint(&painter, &theme, &mapper, [0.8, 0.9, 4.9, 3.0]);
+        });
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn selection_box_in_the_dark_theme() {
+    bounds_snapshot(Mode::Dark, "selection_box_dark");
+}
+
+#[test]
+fn selection_box_in_the_light_theme() {
+    bounds_snapshot(Mode::Light, "selection_box_light");
+}

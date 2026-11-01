@@ -249,31 +249,12 @@ impl Editor {
                 .map(Target::Mesh)
                 .collect(),
             Some(Selection::Warp(n) | Selection::Rotation(n)) => vec![Target::Deformer(n.clone())],
-            Some(Selection::Part(name)) => {
-                let Some(part) = model.parts().find(name) else {
-                    return Vec::new();
-                };
-                // The part and the parts below it.
-                let mut parts = vec![part];
-                let mut i = 0;
-                while i < parts.len() {
-                    let at = parts[i];
-                    let below: Vec<_> = model
-                        .parts()
-                        .iter()
-                        .filter(|(id, _, p)| p.parent == Some(at) && !parts.contains(id))
-                        .map(|(id, _, _)| id)
-                        .collect();
-                    parts.extend(below);
-                    i += 1;
-                }
-                model
-                    .meshes()
-                    .iter()
-                    .filter(|(_, _, m)| parts.contains(&m.part))
-                    .map(|(_, n, _)| Target::Mesh(n.to_owned()))
-                    .collect()
-            }
+            Some(Selection::Part(_)) => self
+                .view
+                .meshes_of(model)
+                .into_iter()
+                .map(Target::Mesh)
+                .collect(),
             _ => Vec::new(),
         }
     }

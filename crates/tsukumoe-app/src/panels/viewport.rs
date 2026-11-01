@@ -19,7 +19,7 @@ use crate::actions::Tool;
 use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
-use crate::panels::{deformer_overlay, mesh_overlay};
+use crate::panels::{deformer_overlay, mesh_overlay, selection_overlay};
 use crate::project::Document;
 use crate::scene::{Preview, Scene, fit_view};
 use crate::view::{Selection, ViewState};
@@ -293,6 +293,19 @@ impl Viewport {
                 (Vec::new(), Vec::new())
             }
         };
+        // The box around the selection, where no vertex-level overlay is open.
+        if selection_overlay::shown_with(view.tool)
+            && let Some(scene) = &self.scene
+            && let Some(bounds) =
+                selection_overlay::selection_bounds(scene, doc.dispatcher.model(), view)
+        {
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            selection_overlay::paint(&ui.painter_at(rect), &Theme::get(ui.ctx()), &mapper, bounds);
+        }
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }

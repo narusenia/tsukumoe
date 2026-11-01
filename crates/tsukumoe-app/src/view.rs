@@ -155,6 +155,74 @@ impl ViewState {
         self.select_meshes(names);
     }
 
+    /// The meshes a selection stands for: the selected meshes, or every mesh
+    /// under a part, or those hanging from a deformer (down the whole tree).
+    pub fn meshes_of(&self, model: &tsukumoe_core::model::Model) -> Vec<String> {
+        use tsukumoe_core::rig::DeformerRef;
+        match &self.selection {
+            Some(Selection::Mesh(_)) => self.selected_meshes(),
+            Some(Selection::Part(name)) => {
+                let Some(part) = model.parts().find(name) else {
+                    return Vec::new();
+                };
+                let mut parts = vec![part];
+                let mut i = 0;
+                while i < parts.len() {
+                    let at = parts[i];
+                    let below: Vec<_> = model
+                        .parts()
+                        .iter()
+                        .filter(|(id, _, p)| p.parent == Some(at) && !parts.contains(id))
+                        .map(|(id, _, _)| id)
+                        .collect();
+                    parts.extend(below);
+                    i += 1;
+                }
+                model
+                    .meshes()
+                    .iter()
+                    .filter(|(_, _, m)| parts.contains(&m.part))
+                    .map(|(_, n, _)| n.to_owned())
+                    .collect()
+            }
+            Some(Selection::Warp(name) | Selection::Rotation(name)) => {
+                let root = model
+                    .warps()
+                    .find(name)
+                    .map(DeformerRef::Warp)
+                    .or_else(|| model.rotations().find(name).map(DeformerRef::Rotation));
+                let Some(root) = root else {
+                    return Vec::new();
+                };
+                let mut tree = vec![root];
+                let mut i = 0;
+                while i < tree.len() {
+                    let at = tree[i];
+                    let warps = model
+                        .warps()
+                        .iter()
+                        .filter(|(_, _, d)| d.parent == Some(at))
+                        .map(|(id, _, _)| DeformerRef::Warp(id));
+                    let rots = model
+                        .rotations()
+                        .iter()
+                        .filter(|(_, _, d)| d.parent == Some(at))
+                        .map(|(id, _, _)| DeformerRef::Rotation(id));
+                    let below: Vec<_> = warps.chain(rots).filter(|d| !tree.contains(d)).collect();
+                    tree.extend(below);
+                    i += 1;
+                }
+                model
+                    .meshes()
+                    .iter()
+                    .filter(|(_, _, m)| m.parent.is_some_and(|p| tree.contains(&p)))
+                    .map(|(_, n, _)| n.to_owned())
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn revision(&self) -> u64 {
         self.revision
     }
