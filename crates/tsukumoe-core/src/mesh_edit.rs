@@ -196,7 +196,17 @@ pub fn flip_edge(g: &Geometry, u: u32, v: u32) -> Result<Geometry, EditError> {
 
 /// Flips in place; returns the new diagonal.
 fn flip(g: &mut Geometry, u: u32, v: u32) -> Result<(u32, u32), EditError> {
-    let map = edge_map(g);
+    let mut map = edge_map(g);
+    flip_mapped(g, &mut map, u, v)
+}
+
+/// [`flip`] with an edge map the caller keeps up to date.
+fn flip_mapped(
+    g: &mut Geometry,
+    map: &mut HashMap<(u32, u32), usize>,
+    u: u32,
+    v: u32,
+) -> Result<(u32, u32), EditError> {
     let (u, v) = if map.contains_key(&(u, v)) {
         (u, v)
     } else if map.contains_key(&(v, u)) {
@@ -216,6 +226,19 @@ fn flip(g: &mut Geometry, u: u32, v: u32) -> Result<(u32, u32), EditError> {
     }
     set_tri(g, t1, [u, d, c]);
     set_tri(g, t2, [d, v, c]);
+    for key in [(u, v), (v, c), (c, u), (v, u), (u, d), (d, v)] {
+        map.remove(&key);
+    }
+    for (key, t) in [
+        ((u, d), t1),
+        ((d, c), t1),
+        ((c, u), t1),
+        ((d, v), t2),
+        ((v, c), t2),
+        ((c, d), t2),
+    ] {
+        map.insert(key, t);
+    }
     Ok((c, d))
 }
 
@@ -250,40 +273,44 @@ pub fn retriangulate(g: &Geometry, keep: &[(u32, u32)]) -> Result<Geometry, Edit
     let keep: std::collections::HashSet<(u32, u32)> =
         keep.iter().map(|&(a, b)| (a.min(b), a.max(b))).collect();
     let mut out = g.clone();
-    let mut flips = 0;
-    let limit = 64 + 32 * (g.indices.len() / 3);
-    while flips < limit {
-        let map = edge_map(&out);
-        let mut edges: Vec<(u32, u32)> = map
+    let mut map = edge_map(&out);
+    let mut queue: VecDeque<(u32, u32)> = {
+        let mut edges: Vec<_> = map
             .keys()
             .filter(|&&(u, v)| u < v && map.contains_key(&(v, u)) && !keep.contains(&(u, v)))
             .copied()
             .collect();
         edges.sort_unstable();
-        let violates = |&(u, v): &(u32, u32)| {
-            let c = apex(tri(&out, map[&(u, v)]), u, v).expect("edge map entry has the edge");
-            let d = apex(tri(&out, map[&(v, u)]), v, u).expect("edge map entry has the edge");
-            let (pu, pv, pc, pd) = (p64(&out, u), p64(&out, v), p64(&out, c), p64(&out, d));
-            // Triangle `u v c` is counter-clockwise or clockwise as drawn.
-            let (det, size) = if cross(pu, pv, pc) > 0.0 {
-                in_circle(pu, pv, pc, pd)
-            } else {
-                in_circle(pv, pu, pc, pd)
-            };
-            det > 1e-10 * size
+        edges.into()
+    };
+    let (mut flips, limit) = (0, 64 + 32 * (g.indices.len() / 3));
+    while let Some((u, v)) = queue.pop_front() {
+        let (Some(&t1), Some(&t2)) = (map.get(&(u, v)), map.get(&(v, u))) else {
+            continue;
         };
-        let mut flipped = false;
-        let bad: Vec<(u32, u32)> = edges.into_iter().filter(|e| violates(e)).collect();
-        for edge in bad {
-            if flip(&mut out, edge.0, edge.1).is_ok() {
-                flipped = true;
-                break;
-            }
-        }
-        if !flipped {
-            break;
+        let c = apex(tri(&out, t1), u, v).expect("edge map entry has the edge");
+        let d = apex(tri(&out, t2), v, u).expect("edge map entry has the edge");
+        let (pu, pv, pc, pd) = (p64(&out, u), p64(&out, v), p64(&out, c), p64(&out, d));
+        // Triangle `u v c` is counter-clockwise or clockwise as drawn.
+        let (det, size) = if cross(pu, pv, pc) > 0.0 {
+            in_circle(pu, pv, pc, pd)
+        } else {
+            in_circle(pv, pu, pc, pd)
+        };
+        if det <= 1e-10 * size || flip_mapped(&mut out, &mut map, u, v).is_err() {
+            continue;
         }
         flips += 1;
+        if flips >= limit {
+            break;
+        }
+        // The four edges around the quadrilateral may now violate.
+        for (x, y) in [(c, u), (u, d), (d, v), (v, c)] {
+            let edge = (x.min(y), x.max(y));
+            if !keep.contains(&edge) {
+                queue.push_back(edge);
+            }
+        }
     }
     Ok(out)
 }

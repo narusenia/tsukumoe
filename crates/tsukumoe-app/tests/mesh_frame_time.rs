@@ -6,7 +6,7 @@
 //! change during a drag, so a frame is the tool's preview plus the overlay:
 //! building it and tessellating it, which is what egui does before the GPU
 //! gets it. The one frame that applies the command on release (the dispatcher
-//! and the evaluated scene) is measured too. No GPU is needed; run it in
+//! and the evaluated scene) and the Delaunay re-triangulation are measured too. No GPU is needed; run it in
 //! release:
 //!
 //! `cargo test --release -p tsukumoe-app --test mesh_frame_time -- --nocapture`
@@ -109,6 +109,35 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     let release = t0.elapsed();
     std::hint::black_box(&rebuilt);
 
+    // Delaunay re-triangulation of the whole mesh, one press of the key.
+    let geometry = tsukumoe_core::mesh_edit::Geometry {
+        positions: mesh.positions.clone(),
+        uvs: mesh.uvs.clone(),
+        indices: mesh.indices.clone(),
+    };
+    // Scramble it first so that there is real work: many random flips.
+    let mut geometry = geometry;
+    let mut state = 12345u64;
+    for _ in 0..2000 {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let t = (state >> 33) as usize % (geometry.indices.len() / 3);
+        let k = (state >> 20) as usize % 3;
+        let v = &geometry.indices[t * 3..t * 3 + 3];
+        if let Ok(g) = tsukumoe_core::mesh_edit::flip_edge(&geometry, v[k], v[(k + 1) % 3]) {
+            geometry = g;
+        }
+    }
+    let t0 = Instant::now();
+    let retriangulated = tsukumoe_core::mesh_edit::retriangulate(&geometry, &[]).unwrap();
+    let delaunay = t0.elapsed();
+    std::hint::black_box(&retriangulated);
+    eprintln!(
+        "mesh_frame_time: retriangulate {:.2} ms",
+        delaunay.as_secs_f64() * 1e3
+    );
+
     eprintln!(
         "mesh_frame_time: '{name}' has {} vertices, {} triangles; drag frame median {:.2} ms, p99 {:.2} ms, max {:.2} ms; release frame {:.2} ms (budget {} ms)",
         mesh.positions.len(),
@@ -122,6 +151,10 @@ fn dragging_a_vertex_of_the_largest_reference_mesh_fits_the_frame_budget() {
     // Debug builds are several times slower: they report but do not judge.
     if !cfg!(debug_assertions) {
         assert!(p(0.99) <= BUDGET, "p99 {:?} is over the budget", p(0.99));
+        assert!(
+            delaunay <= BUDGET,
+            "retriangulate {delaunay:?} is over the budget"
+        );
         assert!(
             release <= BUDGET,
             "release frame {release:?} is over the budget"
