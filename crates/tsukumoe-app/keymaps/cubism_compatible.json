@@ -7,8 +7,12 @@
     { "action": "view.palette", "keys": "Mod+Shift+P" },
     { "action": "view.pie-menu", "keys": "Q" },
     { "action": "tool.select", "keys": "V" },
-    { "action": "tool.mesh", "keys": "M" },
+    { "action": "tool.mesh-edit", "keys": "M" },
     { "action": "tool.deformer", "keys": "D" },
+    { "action": "mesh.delete-vertices", "context": "viewport", "keys": "Delete" },
+    { "action": "mesh.delete-vertices", "context": "viewport", "keys": "Backspace" },
+    { "action": "mesh.connect", "context": "viewport", "keys": "E" },
+    { "action": "mesh.flip-edge", "context": "viewport", "keys": "F" },
     { "action": "viewport.zoom-in", "context": "viewport", "keys": "Equals" },
     { "action": "viewport.zoom-out", "context": "viewport", "keys": "Minus" },
     { "action": "viewport.reset-camera", "context": "viewport", "keys": "0" }

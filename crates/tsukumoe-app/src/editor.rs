@@ -191,10 +191,20 @@ impl Editor {
     /// The single entry for UI edits: sends `command` to the dispatcher and
     /// shows a failure as an error toast (the model stays as it was).
     pub fn submit(&mut self, ctx: &Context, command: tsukumoe_core::command::Command) -> bool {
+        self.submit_labeled(ctx, command, None)
+    }
+
+    /// [`Self::submit`] with a history name for the command.
+    pub fn submit_labeled(
+        &mut self,
+        ctx: &Context,
+        command: tsukumoe_core::command::Command,
+        label: Option<String>,
+    ) -> bool {
         let Some(doc) = self.doc.as_mut() else {
             return false;
         };
-        match doc.dispatcher.submit(command) {
+        match doc.dispatcher.submit_labeled(command, label) {
             Ok(()) => true,
             Err(e) => {
                 self.toasts.push(ctx, Tone::Error, e);
@@ -1472,7 +1482,7 @@ mod tests {
         let ctx = Context::default();
         let mut editor = Editor::new(None);
         editor.pie_config = PieConfig::from_json(
-            r#"{"items":[{"action":"tool.mesh"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
+            r#"{"items":[{"action":"tool.mesh-edit"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
         );
         let at = egui::pos2(400.0, 400.0);
         frame(&ctx, vec![egui::Event::PointerMoved(at)], |ctx| {
@@ -1516,7 +1526,7 @@ mod tests {
         let ctx = Context::default();
         let mut editor = Editor::new(None);
         editor.pie_config = PieConfig::from_json(
-            r#"{"items":[{"action":"tool.mesh"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
+            r#"{"items":[{"action":"tool.mesh-edit"},{"action":"tool.deformer"},{"action":"tool.select"},{"action":"edit.redo"}]}"#,
         );
         let at = egui::pos2(400.0, 400.0);
         frame(&ctx, vec![egui::Event::PointerMoved(at)], |ctx| {

@@ -43,7 +43,7 @@ impl Default for PieConfig {
             items: vec![
                 action("tool.select"),
                 action("edit.undo"),
-                action("tool.mesh"),
+                action("tool.mesh-edit"),
                 action("view.palette"),
                 action("tool.deformer"),
                 action("edit.redo"),
@@ -128,10 +128,10 @@ mod tests {
         let json = r#"{"items":[
             {"action":"edit.undo"},{"action":"bogus"},
             {"label":"g","items":[{"action":"bogus"}]},
-            {"label":"h","items":[{"action":"tool.mesh"},{"label":"deep","items":[{"action":"edit.redo"}]}]}]}"#;
+            {"label":"h","items":[{"action":"tool.mesh-edit"},{"label":"deep","items":[{"action":"edit.redo"}]}]}]}"#;
         let items = PieConfig::from_json(json).build_items(&|k| k.to_owned());
         assert_eq!(ids(&items), ["edit.undo", "h"]);
-        assert_eq!(ids(&items[1].children), ["tool.mesh"]);
+        assert_eq!(ids(&items[1].children), ["tool.mesh-edit"]);
     }
 
     #[test]

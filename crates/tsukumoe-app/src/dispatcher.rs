@@ -14,6 +14,8 @@ pub struct Dispatcher {
     model: Model,
     /// Every command that is applied or undone-but-redoable, oldest first.
     log: Vec<Command>,
+    /// A name for each entry of `log` that says more than its command does.
+    labels: Vec<Option<String>>,
     /// `log[..cursor]` is applied.
     cursor: usize,
     /// The cursor when the document was last saved; `None` once that state is
@@ -28,6 +30,7 @@ impl Dispatcher {
         Self {
             model,
             log: Vec::new(),
+            labels: Vec::new(),
             cursor: 0,
             saved: Some(0),
             error: None,
@@ -47,14 +50,26 @@ impl Dispatcher {
     /// Applies `command` as one undo step, dropping any redo steps. On failure
     /// the model is unchanged and the message is kept in [`Self::error`].
     pub fn submit(&mut self, command: Command) -> Result<(), String> {
+        self.submit_labeled(command, None)
+    }
+
+    /// Like [`Self::submit`], with a name for the history list (a command such
+    /// as `set_mesh_geometry` covers several operations).
+    pub fn submit_labeled(
+        &mut self,
+        command: Command,
+        label: Option<String>,
+    ) -> Result<(), String> {
         match self.model.apply(command.clone()) {
             Ok(()) => {
                 self.error = None;
                 self.log.truncate(self.cursor);
+                self.labels.truncate(self.cursor);
                 if self.saved.is_some_and(|s| s > self.cursor) {
                     self.saved = None;
                 }
                 self.log.push(command);
+                self.labels.push(label);
                 self.cursor += 1;
                 self.revision += 1;
                 Ok(())
@@ -94,6 +109,15 @@ impl Dispatcher {
 
     pub fn log(&self) -> &[Command] {
         &self.log
+    }
+
+    /// The history name of the `index`-th command: its label, else its description.
+    pub fn name_of(&self, index: usize) -> Option<String> {
+        let command = self.log.get(index)?;
+        Some(match self.labels.get(index) {
+            Some(Some(label)) => label.clone(),
+            _ => describe(command),
+        })
     }
 
     pub fn cursor(&self) -> usize {
