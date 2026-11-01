@@ -256,6 +256,31 @@ pub fn target_of(row: &Row) -> Option<Target> {
     }
 }
 
+/// The meshes from `anchor` to `target` among the rows shown (a Shift click),
+/// ending with `target`. Without an anchor in the rows, just `target`. Rows
+/// that a filter hides are not in `rows`, so they are not in the range.
+pub fn range_names(rows: &[Row], anchor: Option<&str>, target: &str) -> Vec<String> {
+    let meshes: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.kind == Kind::Mesh)
+        .map(|r| r.name.as_str())
+        .collect();
+    let (Some(a), Some(t)) = (
+        anchor.and_then(|a| meshes.iter().position(|&n| n == a)),
+        meshes.iter().position(|&n| n == target),
+    ) else {
+        return vec![target.to_owned()];
+    };
+    let mut range: Vec<String> = meshes[a.min(t)..=a.max(t)]
+        .iter()
+        .map(|&n| n.to_owned())
+        .collect();
+    if t < a {
+        range.reverse();
+    }
+    range
+}
+
 /// Draws the tree. Only the rows in view are built (`show_rows`), so a model
 /// with hundreds of meshes scrolls cheaply. Returns what the user asked for,
 /// to be sent through the editor's dispatcher. Meshes and deformers can be
@@ -266,6 +291,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let name = tr(&ctx, "filter-name");
     text_input(ui, &mut view.tree_filter, &name, &name);
     let rows = rows(model, &view.tree_filter);
+    let all = rows.clone();
     let control = Theme::get(&ctx).metrics.control;
     let row_height = control + ui.spacing().item_spacing.y;
     let mut outs = Vec::new();
@@ -302,11 +328,22 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                             outs.extend(toggle_command(row).map(Out::Command));
                         }
                     }
-                    let selected = view.selection.as_ref() == Some(&selection);
+                    let selected = view.is_selected(&selection);
                     let response = selectable_row(ui, selected, Some(icon), &row.name);
                     if response.clicked() {
-                        view.selection = Some(selection);
-                        view.touch();
+                        let modifiers = ui.input(|i| i.modifiers);
+                        match &selection {
+                            Selection::Mesh(n) if modifiers.command => view.toggle_mesh(n),
+                            Selection::Mesh(n) if modifiers.shift => {
+                                let from = view
+                                    .anchor
+                                    .clone()
+                                    .or_else(|| view.selected_meshes().last().cloned());
+                                let names = range_names(&all, from.as_deref(), n);
+                                view.select_meshes(names);
+                            }
+                            _ => view.select_only(selection),
+                        }
                     }
                     let Some(target) = target_of(row) else {
                         return;
@@ -692,5 +729,71 @@ mod tests {
             harness.state().2,
             [Out::Reparent(Target::Mesh("M2".into()), Some("W".into()))]
         );
+    }
+
+    fn many_meshes() -> Model {
+        let mut m = model();
+        for n in ["a1", "a2", "b1", "a3", "b2"] {
+            m.apply(Command::AddMesh {
+                name: n.into(),
+                part: "Arm".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2],
+            })
+            .unwrap();
+        }
+        m
+    }
+
+    #[test]
+    fn a_range_runs_between_the_anchor_and_the_target_over_the_rows_shown() {
+        let m = many_meshes();
+        let all = rows(&m, "");
+        assert_eq!(range_names(&all, Some("a1"), "b1"), ["a1", "a2", "b1"]);
+        // Upwards: the target is still last.
+        assert_eq!(
+            range_names(&all, Some("b2"), "a2"),
+            ["b2", "a3", "b1", "a2"]
+        );
+        // No anchor, or one that is not shown: just the target.
+        assert_eq!(range_names(&all, None, "a3"), ["a3"]);
+        assert_eq!(range_names(&all, Some("gone"), "a3"), ["a3"]);
+        // A filter hides rows, and they are not in the range.
+        let shown = rows(&m, "a");
+        assert_eq!(range_names(&shown, Some("a1"), "a3"), ["a1", "a2", "a3"]);
+        assert_eq!(range_names(&shown, Some("a1"), "b1"), ["b1"]);
+    }
+
+    #[test]
+    fn ctrl_and_shift_clicks_select_several_meshes_in_the_drawn_tree() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(320.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, ViewState)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    show(ui, &state.0, &mut state.1);
+                },
+                (many_meshes(), ViewState::default()),
+            );
+        harness.run();
+        harness.get_by_label("a1").click();
+        harness.run();
+        harness
+            .get_by_label("b1")
+            .click_modifiers(egui::Modifiers::COMMAND);
+        harness.run();
+        assert_eq!(harness.state().1.selected_meshes(), ["a1", "b1"]);
+        harness
+            .get_by_label("a3")
+            .click_modifiers(egui::Modifiers::SHIFT);
+        harness.run();
+        // The anchor is a1 (the last plain or Ctrl click was on b1, so b1).
+        assert_eq!(harness.state().1.selected_meshes(), ["b1", "a3"]);
+        harness.get_by_label("a2").click();
+        harness.run();
+        assert_eq!(harness.state().1.selected_meshes(), ["a2"]);
     }
 }

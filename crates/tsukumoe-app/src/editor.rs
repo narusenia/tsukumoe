@@ -242,7 +242,12 @@ impl Editor {
         };
         let model = doc.dispatcher.model();
         match &self.view.selection {
-            Some(Selection::Mesh(n)) => vec![Target::Mesh(n.clone())],
+            Some(Selection::Mesh(_)) => self
+                .view
+                .selected_meshes()
+                .into_iter()
+                .map(Target::Mesh)
+                .collect(),
             Some(Selection::Warp(n) | Selection::Rotation(n)) => vec![Target::Deformer(n.clone())],
             Some(Selection::Part(name)) => {
                 let Some(part) = model.parts().find(name) else {
@@ -291,7 +296,7 @@ impl Editor {
             Ok((command, label)) => {
                 let name = label.rsplit(": ").next().unwrap_or_default().to_owned();
                 if self.submit_labeled(ctx, command, Some(label)) {
-                    self.view.selection = Some(if warp {
+                    self.view.select_only(if warp {
                         Selection::Warp(name)
                     } else {
                         Selection::Rotation(name)
@@ -1783,6 +1788,37 @@ mod tests {
         assert_eq!(d.model().warps().get(warp).unwrap().base_points.len(), 12);
         assert!(d.undo());
         assert!(d.model().warps().find("Warp").is_none());
+        // Several meshes selected: one warp around all of them, one undo step.
+        assert!(editor.submit(
+            &ctx,
+            Command::AddMesh {
+                name: "DefMesh2".into(),
+                part: "DefPart".into(),
+                positions: vec![[8.0, 0.0], [10.0, 0.0], [10.0, 3.0]],
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            }
+        ));
+        editor
+            .view
+            .select_meshes(vec!["DefMesh".into(), "DefMesh2".into()]);
+        let before = steps(&editor);
+        assert!(editor.run_action(&ctx, "deformer.create-warp"));
+        assert_eq!(steps(&editor), before + 1);
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        let warp = d.model().warps().find("Warp").unwrap();
+        let mesh_parent = |d: &crate::dispatcher::Dispatcher, n: &str| {
+            let id = d.model().meshes().find(n).unwrap();
+            d.model().meshes().get(id).unwrap().parent
+        };
+        use tsukumoe_core::rig::DeformerRef;
+        assert_eq!(mesh_parent(d, "DefMesh"), Some(DeformerRef::Warp(warp)));
+        assert_eq!(mesh_parent(d, "DefMesh2"), Some(DeformerRef::Warp(warp)));
+        let grid = &d.model().warps().get(warp).unwrap().base_points;
+        assert!(grid[0][0] < 0.0 && grid.last().unwrap()[0] > 10.0);
+        assert!(d.undo());
+        assert_eq!(mesh_parent(d, "DefMesh"), None);
+        assert_eq!(mesh_parent(d, "DefMesh2"), None);
         // A part selected: the rotation deformer wraps the meshes under it.
         editor.view.selection = Some(Selection::Part("DefPart".into()));
         assert!(editor.run_action(&ctx, "deformer.create-rotation"));

@@ -281,12 +281,57 @@ impl Viewport {
             }
             Tool::Deformer => self
                 .deformer_tool_frame(ui, &response, rect, doc, view, drag, deformer, size, keymap),
-            Tool::Select => (Vec::new(), Vec::new()),
+            Tool::Select => {
+                self.select_tool_frame(ui, &response, rect, view, drag, size);
+                (Vec::new(), Vec::new())
+            }
         };
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }
         (response, ops, actions)
+    }
+
+    /// The select tool: a click picks the front mesh under the pointer, Shift
+    /// adds it to (or takes it out of) the selection, and empty space clears it.
+    #[allow(clippy::too_many_arguments)]
+    fn select_tool_frame(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        size: (u32, u32),
+    ) {
+        let (Some(scene), true) = (&self.scene, response.clicked_by(PointerButton::Primary)) else {
+            return;
+        };
+        let modifiers = ui.input(|i| i.modifiers);
+        let Some(p) = response.interact_pointer_pos() else {
+            return;
+        };
+        if drag.modifier_down(modifiers) {
+            return;
+        }
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        let picked = mesh_tool::pick_drawn(
+            &scene.frame.draw_list(&scene.model),
+            mapper.to_model([p.x, p.y]),
+        );
+        match picked {
+            Some(name) if modifiers.shift => view.toggle_mesh(&name),
+            Some(name) => view.select_only(Selection::Mesh(name)),
+            None if !modifiers.shift => {
+                view.selection = None;
+                view.touch();
+            }
+            None => {}
+        }
     }
 
     /// The deformer tool for one frame: pointer input, then the overlay.
@@ -361,12 +406,11 @@ impl Viewport {
                 (Some(shape), true) => tool.click(shape, &mapper, at, modifiers.shift),
                 _ => match deformer_tool::pick_deformer(model, &mapper, at, radius) {
                     Some(picked) if !modifiers.shift => {
-                        view.selection = Some(if model.warps().find(&picked).is_some() {
+                        view.select_only(if model.warps().find(&picked).is_some() {
                             Selection::Warp(picked)
                         } else {
                             Selection::Rotation(picked)
                         });
-                        view.touch();
                     }
                     _ => {
                         if let Some(shape) = &shape {
@@ -501,12 +545,10 @@ impl Viewport {
                 .flatten();
             match (&mesh, picked) {
                 (Some((name, _)), Some(p)) if &p != name => {
-                    view.selection = Some(Selection::Mesh(p));
-                    view.touch();
+                    view.select_only(Selection::Mesh(p));
                 }
                 (None, Some(p)) => {
-                    view.selection = Some(Selection::Mesh(p));
-                    view.touch();
+                    view.select_only(Selection::Mesh(p));
                 }
                 (Some((name, _)), _) if modifiers.command => {
                     if let Some(g) = mesh_tool::geometry_of(model, name) {
