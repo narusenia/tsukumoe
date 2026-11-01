@@ -20,6 +20,7 @@ tsukumoe-core = { workspace = true, features = ["schema"] }
 tsukumoe-format.workspace = true
 tsukumoe-gpu.workspace = true
 tsukumoe-ui.workspace = true
+egui.workspace = true
 eframe.workspace = true
 schemars.workspace = true
 serde.workspace = true

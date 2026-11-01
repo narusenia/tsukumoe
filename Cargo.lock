@@ -3827,6 +3827,7 @@ name = "tsukumoe-app"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "egui",
  "egui_kittest",
  "pollster 0.4.0",
  "schemars",

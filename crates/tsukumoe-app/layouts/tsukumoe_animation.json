@@ -1,0 +1,61 @@
+{
+  "root": {
+    "type": "split",
+    "axis": "horizontal",
+    "ratio": 0.2,
+    "a": {
+      "type": "tabs",
+      "tabs": [
+        "tree"
+      ],
+      "active": 0
+    },
+    "b": {
+      "type": "split",
+      "axis": "horizontal",
+      "ratio": 0.78,
+      "a": {
+        "type": "split",
+        "axis": "vertical",
+        "ratio": 0.6,
+        "a": {
+          "type": "tabs",
+          "tabs": [
+            "viewport"
+          ],
+          "active": 0
+        },
+        "b": {
+          "type": "tabs",
+          "tabs": [
+            "parameters",
+            "history"
+          ],
+          "active": 0
+        }
+      },
+      "b": {
+        "type": "tabs",
+        "tabs": [
+          "inspector"
+        ],
+        "active": 0
+      }
+    }
+  },
+  "left": {
+    "panels": [],
+    "open": null,
+    "pinned": false,
+    "width": 300.0
+  },
+  "right": {
+    "panels": [
+      "palette",
+      "ai_diff"
+    ],
+    "open": null,
+    "pinned": false,
+    "width": 300.0
+  }
+}
