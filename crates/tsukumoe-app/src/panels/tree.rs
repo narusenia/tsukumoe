@@ -157,6 +157,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
         .map(|i| held[i].clone())
         .unwrap_or_default();
 
+    let linked = tree_model::linked_keys(model, &view.selected(), panel);
     let lists = Lists {
         parts: model.parts().iter().map(|(_, n, _)| n.to_owned()).collect(),
         deformers: model
@@ -236,6 +237,16 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                     vec2(if primary { 3.0 } else { 2.0 }, rect.height()),
                 );
                 painter.rect_filled(bar, 0.0, theme.colors.accent);
+            } else if linked.contains(&row.key()) {
+                // Lit by what is selected elsewhere (the meshes of a selected deformer,
+                // the deformers above a selected mesh): fainter than a selection.
+                let [r, g, b, _] = theme.colors.accent.to_array();
+                let alpha = if theme.dark { 38 } else { 30 };
+                painter.rect_filled(
+                    rect,
+                    theme.metrics.radius,
+                    Color32::from_rgba_unmultiplied(r, g, b, alpha),
+                );
             } else if response.hovered() {
                 painter.rect_filled(rect, theme.metrics.radius, theme.colors.control_hover);
             }
@@ -314,8 +325,64 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
             } else {
                 rect.right() - 4.0
             };
-            let name_clip =
-                Rect::from_min_max(pos2(cols.name_x, rect.top()), pos2(right, rect.bottom()));
+            // The parent deformer of a mesh in the parts panel: a gear and its name,
+            // left of the "..." button, never taking the whole row.
+            let mut name_right = right;
+            if panel == Panel::Parts
+                && row.kind == Kind::Mesh
+                && let Some(parent) = &row.parent
+                && !row.chain.is_empty()
+            {
+                let font = FontId::proportional(theme.metrics.text - 1.0);
+                let color = theme.colors.text_muted.gamma_multiply(0.8);
+                let galley = ui
+                    .painter()
+                    .layout_no_wrap(parent.clone(), font.clone(), color);
+                let room = (more_rect.left() - 2.0) - (cols.name_x + 48.0);
+                let width = (icon_size + 6.0 + galley.size().x + 6.0).min(room);
+                if width > icon_size + 14.0 {
+                    let badge = Rect::from_min_max(
+                        pos2(more_rect.left() - 2.0 - width, rect.top() + 3.0),
+                        pos2(more_rect.left() - 2.0, rect.bottom() - 3.0),
+                    );
+                    let click = ui.interact(badge, response.id.with("badge"), Sense::click());
+                    let tip = row.chain.join(" \u{203a} ");
+                    click.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, tip.clone())
+                    });
+                    if click.hovered() {
+                        ui.painter()
+                            .rect_filled(badge, 3.0, theme.colors.control_hover);
+                    }
+                    let gear = Rect::from_center_size(
+                        pos2(badge.left() + 3.0 + icon_size / 2.0, badge.center().y),
+                        vec2(icon_size - 2.0, icon_size - 2.0),
+                    );
+                    Icon::Settings
+                        .image(color, icon_size - 2.0)
+                        .paint_at(ui, gear);
+                    ui.painter_at(badge.shrink2(vec2(2.0, 0.0))).galley(
+                        pos2(gear.right() + 3.0, badge.center().y - galley.size().y / 2.0),
+                        galley,
+                        color,
+                    );
+                    name_right = badge.left() - 4.0;
+                    let click = click.on_hover_text(tip);
+                    if click.clicked() {
+                        let target = if model.warps().find(parent).is_some() {
+                            Selection::Warp(parent.clone())
+                        } else {
+                            Selection::Rotation(parent.clone())
+                        };
+                        ui.memory_mut(|m| m.request_focus(panel_id));
+                        view.select_only(target);
+                    }
+                }
+            }
+            let name_clip = Rect::from_min_max(
+                pos2(cols.name_x, rect.top()),
+                pos2(name_right, rect.bottom()),
+            );
             let renaming_here = view
                 .tree(panel)
                 .renaming
@@ -1223,5 +1290,83 @@ mod tests {
             h.state().2,
             [Out::Delete(vec![Selection::Mesh("a2".into())])]
         );
+    }
+
+    fn with_deformers() -> Model {
+        let mut m = many();
+        let grid = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+        for c in [
+            Command::AddWarpDeformer {
+                name: "Outer".into(),
+                part: "Arm".into(),
+                parent: None,
+                rows: 1,
+                columns: 1,
+                base_points: grid.clone(),
+            },
+            Command::AddWarpDeformer {
+                name: "Inner".into(),
+                part: "Arm".into(),
+                parent: Some("Outer".into()),
+                rows: 1,
+                columns: 1,
+                base_points: grid,
+            },
+            Command::SetMeshParent {
+                name: "a1".into(),
+                parent: Some("Inner".into()),
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        m
+    }
+
+    #[test]
+    fn a_mesh_row_names_its_parent_deformer_and_the_badge_selects_it() {
+        let mut h = harness(with_deformers(), Panel::Parts);
+        h.run();
+        // The tooltip text (also the accessible name) is the chain, outermost first.
+        let chain = "Outer \u{203a} Inner";
+        h.get_by_label(chain);
+        // A mesh with no deformer has no badge; there is one badge only.
+        assert_eq!(h.query_all_by_label_contains("\u{203a}").count(), 1);
+        h.get_by_label(chain).click();
+        h.run();
+        assert_eq!(h.state().1.selection, Some(Selection::Warp("Inner".into())));
+        // The deformers panel lists deformers, and puts no badge on its rows.
+        let mut d = harness(with_deformers(), Panel::Deformers);
+        d.run();
+        assert!(d.query_by_label(chain).is_none());
+    }
+
+    #[test]
+    fn a_long_parent_name_is_cut_short_so_the_row_keeps_its_name() {
+        let mut m = many();
+        let name = "A_very_long_deformer_name_that_would_take_the_whole_row_if_it_could";
+        for c in [
+            Command::AddWarpDeformer {
+                name: name.into(),
+                part: "Arm".into(),
+                parent: None,
+                rows: 1,
+                columns: 1,
+                base_points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            },
+            Command::SetMeshParent {
+                name: "a1".into(),
+                parent: Some(name.into()),
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let mut h = harness(m, Panel::Parts);
+        h.run();
+        let badge = h.get_by_label(name).rect();
+        let row = h.get_by_label("a1").rect();
+        // The badge stays inside the row, left of the "..." column, and leaves room for the name.
+        assert!(badge.right() <= row.right() - 20.0, "{badge:?} {row:?}");
+        assert!(badge.left() > row.left() + 80.0, "{badge:?} {row:?}");
+        assert!(badge.width() < row.width() * 0.6);
     }
 }

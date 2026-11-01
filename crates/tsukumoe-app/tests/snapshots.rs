@@ -309,7 +309,8 @@ fn deformer_overlay_in_the_light_theme() {
 
 /// The parts panel or the deformers panel over a model with nested parts and
 /// deformers: eye column, indent, guide lines (the selected row's ancestors
-/// stronger), a closed folder, a hidden mesh, a selected mesh and a second selected one.
+/// stronger), a closed folder, a hidden mesh, selected meshes and a selected warp, the parent
+/// badges on mesh rows in the parts panel and the linked rows lit in each panel.
 fn tree_snapshot(mode: Mode, panel: tsukumoe_app::tree_model::Panel, name: &str) {
     use tsukumoe_app::panels::tree;
     use tsukumoe_app::view::{Selection, ViewState};
@@ -393,7 +394,11 @@ fn tree_snapshot(mode: Mode, panel: tsukumoe_app::tree_model::Panel, name: &str)
     }
     let mut view = ViewState::default();
     let pick = |n: &str| Selection::Mesh(n.into());
-    view.select_all(vec![pick("Eye"), pick("HairFront")]);
+    view.select_all(vec![
+        Selection::Warp("FaceWarp".into()),
+        pick("Eye"),
+        pick("HairFront"),
+    ]);
     view.parts.set_open("p:Arm", false);
     view.tree_mut(panel).seen = view.selection.clone();
     let mut harness = Harness::builder()

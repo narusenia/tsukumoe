@@ -64,6 +64,9 @@ pub struct Row {
     pub dimmed: bool,
     /// The deformer this mesh or deformer hangs from.
     pub parent: Option<String>,
+    /// The deformers above a mesh or deformer, outermost first, ending with
+    /// `parent` (empty when it has none).
+    pub chain: Vec<String>,
     /// The part the element belongs to (shown beside deformer rows).
     pub part: Option<String>,
     /// Has something below it that a folder arrow can open.
@@ -424,6 +427,7 @@ impl Builder<'_> {
             parent: m
                 .parent
                 .and_then(|r| crate::deformer_tool::name_of(self.model, r)),
+            chain: deformer_chain(self.model, m.parent),
             part: with_part.then(|| self.part_name(m.part)).flatten(),
             expandable: false,
             open: false,
@@ -471,6 +475,7 @@ impl Builder<'_> {
             visible: Some(own_visible),
             dimmed: hidden,
             parent: None,
+            chain: Vec::new(),
             part: None,
             expandable: false,
             open: false,
@@ -547,6 +552,7 @@ impl Builder<'_> {
             visible: None,
             dimmed: hidden,
             parent: parent.and_then(|p| crate::deformer_tool::name_of(self.model, p)),
+            chain: deformer_chain(self.model, parent),
             part: self.part_name(part),
             expandable: false,
             open: false,
@@ -554,6 +560,93 @@ impl Builder<'_> {
         let own = self.wanted(kind, &name, hidden);
         self.folder(row, own, children, has_children, out)
     }
+}
+
+/// The deformers from the outermost down to `parent`, by name.
+pub fn deformer_chain(model: &Model, parent: Option<DeformerRef>) -> Vec<String> {
+    let up = |r: DeformerRef| match r {
+        DeformerRef::Warp(id) => model.warps().get(id).and_then(|d| d.parent),
+        DeformerRef::Rotation(id) => model.rotations().get(id).and_then(|d| d.parent),
+    };
+    let mut out = Vec::new();
+    let mut at = parent;
+    for _ in 0..64 {
+        let Some(r) = at else { break };
+        out.extend(crate::deformer_tool::name_of(model, r));
+        at = up(r);
+    }
+    out.reverse();
+    out
+}
+
+/// The meshes hanging from the deformer `name`, directly or through the
+/// deformers below it.
+pub fn meshes_under_deformer(model: &Model, name: &str) -> Vec<String> {
+    let root = model
+        .warps()
+        .find(name)
+        .map(DeformerRef::Warp)
+        .or_else(|| model.rotations().find(name).map(DeformerRef::Rotation));
+    let Some(root) = root else {
+        return Vec::new();
+    };
+    let mut tree = vec![root];
+    let mut i = 0;
+    while i < tree.len() {
+        let at = tree[i];
+        let warps = model
+            .warps()
+            .iter()
+            .filter(|(_, _, d)| d.parent == Some(at))
+            .map(|(id, _, _)| DeformerRef::Warp(id));
+        let rots = model
+            .rotations()
+            .iter()
+            .filter(|(_, _, d)| d.parent == Some(at))
+            .map(|(id, _, _)| DeformerRef::Rotation(id));
+        let below: Vec<_> = warps.chain(rots).filter(|d| !tree.contains(d)).collect();
+        tree.extend(below);
+        i += 1;
+    }
+    model
+        .meshes()
+        .iter()
+        .filter(|(_, _, m)| m.parent.is_some_and(|p| tree.contains(&p)))
+        .map(|(_, n, _)| n.to_owned())
+        .collect()
+}
+
+/// The rows a selection lights up in `panel`, by [`Row::key`]: in the parts
+/// panel the meshes under a selected deformer; in the deformers panel the
+/// deformers above a selected mesh. Only what the selection stands for; a
+/// row that is not shown (filtered, or in a closed folder) is simply not drawn.
+pub fn linked_keys(model: &Model, selected: &[Selection], panel: Panel) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for item in selected {
+        match (panel, item) {
+            (Panel::Parts, Selection::Warp(n) | Selection::Rotation(n)) => {
+                out.extend(
+                    meshes_under_deformer(model, n)
+                        .iter()
+                        .map(|m| key_of(Kind::Mesh, m)),
+                );
+            }
+            (Panel::Deformers, Selection::Mesh(n)) => {
+                let parent = model
+                    .meshes()
+                    .find(n)
+                    .and_then(|id| model.meshes().get(id))
+                    .and_then(|m| m.parent);
+                out.extend(
+                    deformer_chain(model, parent)
+                        .iter()
+                        .map(|d| key_of(Kind::Warp, d)),
+                );
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The meshes under a part, with the parts below it.
@@ -1201,5 +1294,77 @@ mod tests {
             rows(&m, &stale, Panel::Parts).len(),
             rows(&m, &TreeView::default(), Panel::Parts).len()
         );
+    }
+
+    #[test]
+    fn rows_know_the_chain_of_deformers_above_them() {
+        let m = model();
+        let parts = rows(&m, &TreeView::default(), Panel::Parts);
+        let get = |r: &'_ [Row], n: &str| r.iter().find(|x| x.name == n).unwrap().clone();
+        // Eye hangs from R, which hangs from W: outermost first.
+        assert_eq!(get(&parts, "Eye").chain, ["W", "R"]);
+        assert_eq!(get(&parts, "Eye").parent.as_deref(), Some("R"));
+        assert_eq!(get(&parts, "Mouth").chain, ["W"]);
+        assert!(get(&parts, "Skin").chain.is_empty() && get(&parts, "Skin").parent.is_none());
+        assert!(get(&parts, "Body").chain.is_empty());
+        let deformers = rows(&m, &TreeView::default(), Panel::Deformers);
+        assert_eq!(get(&deformers, "R").chain, ["W"]);
+        assert!(get(&deformers, "W").chain.is_empty());
+        assert_eq!(deformer_chain(&m, None), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_selection_lights_the_rows_it_stands_for_in_the_other_panel() {
+        let m = model();
+        let key = |k: Kind, n: &str| key_of(k, n);
+        let set = |items: &[&str]| {
+            items
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        // A deformer lights the meshes under it (through the deformers below it too).
+        let w = [Selection::Warp("W".into())];
+        assert_eq!(
+            linked_keys(&m, &w, Panel::Parts),
+            set(&[&key(Kind::Mesh, "Eye"), &key(Kind::Mesh, "Mouth")])
+        );
+        let r = [Selection::Rotation("R".into())];
+        assert_eq!(linked_keys(&m, &r, Panel::Parts), set(&["m:Eye"]));
+        // A mesh lights the deformers above it, in the deformers panel.
+        let eye = [Selection::Mesh("Eye".into())];
+        assert_eq!(
+            linked_keys(&m, &eye, Panel::Deformers),
+            set(&["d:W", "d:R"])
+        );
+        // Several selected: the union.
+        let both = [
+            Selection::Mesh("Eye".into()),
+            Selection::Mesh("Mouth".into()),
+        ];
+        assert_eq!(
+            linked_keys(&m, &both, Panel::Deformers),
+            set(&["d:W", "d:R"])
+        );
+        let mixed = [Selection::Warp("W".into()), Selection::Rotation("R".into())];
+        assert_eq!(
+            linked_keys(&m, &mixed, Panel::Parts),
+            set(&["m:Eye", "m:Mouth"])
+        );
+        // Nothing lights in the panel the selection came from, nor for a mesh with no
+        // deformer, a part, or nothing.
+        assert!(linked_keys(&m, &eye, Panel::Parts).is_empty());
+        assert!(linked_keys(&m, &w, Panel::Deformers).is_empty());
+        assert!(linked_keys(&m, &[Selection::Mesh("Skin".into())], Panel::Deformers).is_empty());
+        assert!(linked_keys(&m, &[Selection::Part("Face".into())], Panel::Parts).is_empty());
+        assert!(linked_keys(&m, &[], Panel::Parts).is_empty());
+        // A row that is closed or filtered out is just not in the rows: nothing to draw, nothing changes.
+        let hidden = TreeView {
+            filter: "skin".into(),
+            ..TreeView::default()
+        };
+        let shown = rows(&m, &hidden, Panel::Parts);
+        let lit = linked_keys(&m, &w, Panel::Parts);
+        assert!(shown.iter().all(|r| !lit.contains(&r.key())));
     }
 }

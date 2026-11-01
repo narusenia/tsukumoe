@@ -215,7 +215,6 @@ impl ViewState {
     /// under a selected part, and those hanging from a selected deformer
     /// (down the whole tree); each once.
     pub fn meshes_of(&self, model: &tsukumoe_core::model::Model) -> Vec<String> {
-        use tsukumoe_core::rig::DeformerRef;
         let mut out: Vec<String> = Vec::new();
         let mut add = |names: Vec<String>| {
             for n in names {
@@ -229,37 +228,7 @@ impl ViewState {
                 Selection::Mesh(n) => add(vec![n]),
                 Selection::Part(name) => add(crate::tree_model::meshes_under_part(model, &name)),
                 Selection::Warp(name) | Selection::Rotation(name) => {
-                    let root = model
-                        .warps()
-                        .find(&name)
-                        .map(DeformerRef::Warp)
-                        .or_else(|| model.rotations().find(&name).map(DeformerRef::Rotation));
-                    let Some(root) = root else { continue };
-                    let mut tree = vec![root];
-                    let mut i = 0;
-                    while i < tree.len() {
-                        let at = tree[i];
-                        let warps = model
-                            .warps()
-                            .iter()
-                            .filter(|(_, _, d)| d.parent == Some(at))
-                            .map(|(id, _, _)| DeformerRef::Warp(id));
-                        let rots = model
-                            .rotations()
-                            .iter()
-                            .filter(|(_, _, d)| d.parent == Some(at))
-                            .map(|(id, _, _)| DeformerRef::Rotation(id));
-                        let below: Vec<_> =
-                            warps.chain(rots).filter(|d| !tree.contains(d)).collect();
-                        tree.extend(below);
-                        i += 1;
-                    }
-                    add(model
-                        .meshes()
-                        .iter()
-                        .filter(|(_, _, m)| m.parent.is_some_and(|p| tree.contains(&p)))
-                        .map(|(_, n, _)| n.to_owned())
-                        .collect());
+                    add(crate::tree_model::meshes_under_deformer(model, &name));
                 }
                 Selection::Parameter(_) => {}
             }
