@@ -14,6 +14,9 @@ use std::fmt;
 
 use crate::elements::Point;
 
+/// The most columns or rows [`fill_grid`] takes.
+pub const MAX_GRID: u32 = 64;
+
 /// Barycentric weights at or below this count as "on the edge".
 const ON_EDGE: f64 = 1e-6;
 
@@ -43,6 +46,10 @@ pub enum EditError {
     CannotRemove,
     /// The edge cannot be drawn by flipping the edges in its way.
     CannotConnect,
+    /// Columns or rows outside 1 to [`MAX_GRID`].
+    BadGrid,
+    /// No grid point fits inside the outline away from the vertices.
+    NothingToAdd,
 }
 
 impl fmt::Display for EditError {
@@ -56,6 +63,8 @@ impl fmt::Display for EditError {
             Self::NotConvex => "the two triangles are not a convex quadrilateral",
             Self::CannotRemove => "the polygon around the vertex cannot be re-triangulated",
             Self::CannotConnect => "the edge cannot be drawn",
+            Self::BadGrid => "columns and rows must be between 1 and 64",
+            Self::NothingToAdd => "no grid point fits inside the mesh",
         })
     }
 }
@@ -240,6 +249,87 @@ fn flip_mapped(
         map.insert(key, t);
     }
     Ok((c, d))
+}
+
+/// Distance from `p` to the segment `a`-`b`.
+fn segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 > 0.0 {
+        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
+}
+
+/// Lays a `cols` x `rows` grid over the bounding box of the mesh and adds the
+/// grid points that are inside the outline, then re-triangulates the whole
+/// mesh as a Delaunay triangulation (only the outline is kept, so drawn edges
+/// are not). A point closer than a quarter of the grid spacing to a vertex or
+/// the outline is left out. UVs are interpolated from the triangle holding the
+/// point. Fails with `NothingToAdd` when no point qualifies.
+pub fn fill_grid(g: &Geometry, cols: u32, rows: u32) -> Result<Geometry, EditError> {
+    if !(1..=MAX_GRID).contains(&cols) || !(1..=MAX_GRID).contains(&rows) {
+        return Err(EditError::BadGrid);
+    }
+    let used: Vec<u32> = {
+        let mut v = g.indices.clone();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for &i in &used {
+        let p = p64(g, i);
+        for k in 0..2 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    let step = [
+        (hi[0] - lo[0]) / f64::from(cols),
+        (hi[1] - lo[1]) / f64::from(rows),
+    ];
+    let near = step[0].min(step[1]) / 4.0;
+    if used.is_empty() || near <= 0.0 {
+        return Err(EditError::NothingToAdd);
+    }
+    let map = edge_map(g);
+    let outline: Vec<(u32, u32)> = map
+        .keys()
+        .filter(|&&(a, b)| !map.contains_key(&(b, a)))
+        .copied()
+        .collect();
+    let mut out = g.clone();
+    let mut added = 0;
+    for j in 0..=rows {
+        for i in 0..=cols {
+            let p = [
+                lo[0] + step[0] * f64::from(i),
+                lo[1] + step[1] * f64::from(j),
+            ];
+            let close = |q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) < near;
+            if used.iter().any(|&v| close(p64(&out, v)))
+                || out.positions[g.positions.len()..]
+                    .iter()
+                    .any(|q| close([f64::from(q[0]), f64::from(q[1])]))
+                || outline
+                    .iter()
+                    .any(|&(a, b)| segment_distance(p, p64(g, a), p64(g, b)) < near)
+            {
+                continue;
+            }
+            if let Ok(next) = add_vertex(&out, [p[0] as f32, p[1] as f32]) {
+                out = next;
+                added += 1;
+            }
+        }
+    }
+    if added == 0 {
+        return Err(EditError::NothingToAdd);
+    }
+    retriangulate(&out, &[])
 }
 
 /// Positive when `d` is inside the circle through `a b c` (given counter-clockwise),
@@ -910,6 +1000,62 @@ mod tests {
         assert!((area(&out) - area(&g)).abs() < 1e-9);
         assert_eq!(outline(&out).1, outline(&g).1);
         assert_eq!(retriangulate(&g, &[(0, 99)]), Err(EditError::BadVertex));
+    }
+
+    #[test]
+    fn fill_grid_adds_the_inner_points_and_keeps_the_shape() {
+        for flipped in [false, true] {
+            let g = Geometry {
+                positions: vec![[0.0, 0.0], [8.0, 0.0], [8.0, 8.0], [0.0, 8.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                indices: if flipped {
+                    vec![0, 2, 1, 0, 3, 2]
+                } else {
+                    vec![0, 1, 2, 0, 2, 3]
+                },
+            };
+            let out = fill_grid(&g, 4, 4).unwrap();
+            // The 3 x 3 inner points; the ones on the outline are left out.
+            assert_eq!(out.positions.len(), 4 + 9);
+            assert_sound(&out, sign_of(&g));
+            assert!((area(&out) - area(&g)).abs() < 1e-4);
+            assert_eq!(outline(&out).1, outline(&g).1);
+            assert_empty_circles(&out);
+            // UVs follow the square's own mapping.
+            for (p, uv) in out.positions.iter().zip(&out.uvs) {
+                assert!((uv[0] - p[0] / 8.0).abs() < 1e-5 && (uv[1] - p[1] / 8.0).abs() < 1e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn fill_grid_stays_inside_a_concave_outline_and_checks_its_input() {
+        let g = Geometry {
+            positions: vec![
+                [0.0, 0.0],
+                [8.0, 0.0],
+                [8.0, 2.0],
+                [2.0, 2.0],
+                [2.0, 8.0],
+                [0.0, 8.0],
+                [0.0, 2.0],
+            ],
+            uvs: vec![[0.0, 0.0]; 7],
+            indices: vec![0, 1, 3, 1, 2, 3, 0, 3, 6, 6, 3, 4, 6, 4, 5],
+        };
+        let out = fill_grid(&g, 8, 8).unwrap();
+        assert!(out.positions.len() > g.positions.len());
+        assert_sound(&out, 1.0);
+        assert!((area(&out) - area(&g)).abs() < 1e-4);
+        assert_eq!(outline(&out).1, outline(&g).1);
+        for p in &out.positions[g.positions.len()..] {
+            // Inside the L: left strip or bottom strip, never the notch.
+            assert!(p[0] < 2.0 || p[1] < 2.0, "{p:?} is outside");
+        }
+        assert_eq!(fill_grid(&g, 0, 4), Err(EditError::BadGrid));
+        assert_eq!(fill_grid(&g, 4, 65), Err(EditError::BadGrid));
+        // 1 x 1 puts every grid point on a corner: nothing to add.
+        assert_eq!(fill_grid(&g, 1, 1), Err(EditError::NothingToAdd));
     }
 
     #[test]
