@@ -10,6 +10,7 @@ pub mod affine;
 pub mod arena;
 pub mod command;
 pub mod compiled;
+pub mod contour;
 pub mod draw;
 pub mod driver;
 pub mod elements;

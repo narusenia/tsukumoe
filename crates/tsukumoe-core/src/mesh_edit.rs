@@ -334,7 +334,7 @@ pub fn fill_grid(g: &Geometry, cols: u32, rows: u32) -> Result<Geometry, EditErr
 
 /// Positive when `d` is inside the circle through `a b c` (given counter-clockwise),
 /// with the size of the terms to judge "zero" against.
-fn in_circle(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> (f64, f64) {
+pub(crate) fn in_circle(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> (f64, f64) {
     let (ax, ay, bx, by, cx, cy) = (
         a[0] - d[0],
         a[1] - d[1],
