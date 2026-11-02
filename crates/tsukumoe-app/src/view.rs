@@ -99,6 +99,9 @@ pub struct ViewState {
     pub param_focus: Option<String>,
     /// The parameter whose settings window is open. Not saved.
     pub param_dialog: Option<String>,
+    /// Pairs of parameters the panel shows as one pad (first = horizontal,
+    /// second = vertical). Kept with the project, see `Document::param_links`.
+    pub param_links: Vec<(String, String)>,
     /// The keyform a mirror copy takes its shape from: the element and its key
     /// (one index per axis). Not saved.
     pub mirror_source: Option<(tsukumoe_core::command::ElementRef, Vec<usize>)>,
@@ -281,6 +284,13 @@ impl ViewState {
         if let Some(v) = self.params.remove(from) {
             self.params.insert(to.to_owned(), v);
         }
+        for (a, b) in &mut self.param_links {
+            for n in [a, b] {
+                if n == from {
+                    to.clone_into(n);
+                }
+            }
+        }
         if self.param_dialog.as_deref() == Some(from) {
             self.param_dialog = Some(to.to_owned());
         }
@@ -296,6 +306,7 @@ impl ViewState {
     /// Drops the value, the focus and the selection of a deleted parameter.
     pub fn forget_param(&mut self, name: &str) {
         self.params.remove(name);
+        self.param_links.retain(|(a, b)| a != name && b != name);
         if self.param_dialog.as_deref() == Some(name) {
             self.param_dialog = None;
         }

@@ -288,9 +288,11 @@ impl Editor {
     pub fn open(&mut self, path: &Path) -> Result<(), String> {
         match Document::open(path) {
             Ok(doc) => {
+                let links = doc.param_links();
                 self.doc = Some(doc);
                 self.store_tree_views();
                 self.view = ViewState::default();
+                self.view.param_links = links;
                 self.load_tree_views();
                 self.mesh_tool = MeshTool::default();
                 self.deformer_tool = DeformerTool::default();
@@ -302,6 +304,13 @@ impl Editor {
                 let _ = self.persist_state();
                 Err(e)
             }
+        }
+    }
+
+    /// Writes the parameter links of the view into the project's files.
+    fn save_links(&mut self) {
+        if let Some(doc) = self.doc.as_mut() {
+            doc.set_param_links(&self.view.param_links);
         }
     }
 
@@ -472,6 +481,7 @@ impl Editor {
                     && let Some(name) = deleted
                 {
                     self.view.forget_param(&name);
+                    self.save_links();
                 }
             }
             parameters::Out::Confirm(kind, name, op) => {
@@ -485,10 +495,15 @@ impl Editor {
                 if self.submit_labeled(ctx, command, Some(format!("param_rename: {from} -> {to}")))
                 {
                     self.view.rename_param(&from, &to);
+                    self.save_links();
                     // Drivers' expressions were rewritten; anything outside the editor was not.
                     let text = tr(ctx, "tree-rename-external");
                     self.toasts.push(ctx, Tone::Neutral, text);
                 }
+            }
+            parameters::Out::Links(links) => {
+                self.view.param_links = links;
+                self.save_links();
             }
             parameters::Out::Error(key) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
         }

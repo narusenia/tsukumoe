@@ -15,7 +15,7 @@ use crate::confirm::Kind;
 use crate::mesh_tool::Op;
 use crate::param_ops;
 use crate::tree_model::matches;
-use crate::view::ViewState;
+use crate::view::{Selection, ViewState};
 
 /// Names of the parameters matching the filter (name or display name).
 pub fn names(model: &Model, filter: &str) -> Vec<String> {
@@ -40,6 +40,8 @@ pub enum Out {
     Op(Op),
     /// A deletion the editor may ask about first: its kind, the parameter it is about, the op.
     Confirm(Kind, String, Op),
+    /// The new list of linked parameter pairs (kept with the project).
+    Links(Vec<(String, String)>),
     /// A parameter rename; the editor moves the view state along with it.
     Rename { from: String, to: String },
     /// Something that cannot be done, as a translation key for a toast.
@@ -90,7 +92,22 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
+            let links: Vec<&(String, String)> = view
+                .param_links
+                .iter()
+                .filter(|(a, b)| {
+                    model.parameters().find(a).is_some() && model.parameters().find(b).is_some()
+                })
+                .collect();
+            let links: Vec<(String, String)> = links.into_iter().cloned().collect();
             for name in shown {
+                if links.iter().any(|(_, b)| *b == name) {
+                    continue;
+                }
+                if let Some((_, b)) = links.iter().find(|(a, _)| *a == name) {
+                    link_row(ui, model, view, &name, b, &selection, &mut outs);
+                    continue;
+                }
                 let Some(id) = model.parameters().find(&name) else {
                     continue;
                 };
@@ -105,29 +122,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                         Vec2::new(LABEL_WIDTH, m.control),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
-                            let focused = view.param_focus.as_deref() == Some(&name);
-                            let text = if focused {
-                                egui::RichText::new(&name).strong()
-                            } else {
-                                egui::RichText::new(&name)
-                            };
-                            let r = ui.add(
-                                egui::Label::new(text)
-                                    .truncate()
-                                    .sense(egui::Sense::click()),
-                            );
-                            if r.clicked() {
-                                view.param_focus = Some(name.clone());
-                            }
-                            if r.double_clicked() {
-                                view.param_dialog = Some(name.clone());
-                            }
-                            r.context_menu(|ui| {
-                                if ui.button(tr(&ctx, "param-settings")).clicked() {
-                                    view.param_dialog = Some(name.clone());
-                                    ui.close();
-                                }
-                            });
+                            name_label(ui, model, view, &name, &mut outs);
                         },
                     );
                     let width = (ui.available_width() - 72.0).max(40.0);
@@ -177,6 +172,179 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         }
     }
     outs
+}
+
+/// The parameter's name: a click focuses it (the keys panel works on it), a
+/// double click opens its settings; the menu also links it with another
+/// parameter or unlinks it.
+fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs: &mut Vec<Out>) {
+    let ctx = ui.ctx().clone();
+    let text = if view.param_focus.as_deref() == Some(name) {
+        egui::RichText::new(name).strong()
+    } else {
+        egui::RichText::new(name)
+    };
+    let r = ui.add(
+        egui::Label::new(text)
+            .truncate()
+            .sense(egui::Sense::click()),
+    );
+    if r.clicked() {
+        view.param_focus = Some(name.to_owned());
+    }
+    if r.double_clicked() {
+        view.param_dialog = Some(name.to_owned());
+    }
+    r.context_menu(|ui| {
+        if ui.button(tr(&ctx, "param-settings")).clicked() {
+            view.param_dialog = Some(name.to_owned());
+            ui.close();
+        }
+        let linked = view.param_links.iter().any(|(a, b)| a == name || b == name);
+        if linked {
+            if ui.button(tr(&ctx, "param-unlink")).clicked() {
+                let mut links = view.param_links.clone();
+                links.retain(|(a, b)| a != name && b != name);
+                outs.push(Out::Links(links));
+                ui.close();
+            }
+        } else {
+            ui.menu_button(tr(&ctx, "param-link"), |ui| {
+                let free: Vec<String> = model
+                    .parameters()
+                    .iter()
+                    .map(|(_, n, _)| n.to_owned())
+                    .filter(|n| {
+                        n != name && !view.param_links.iter().any(|(a, b)| a == n || b == n)
+                    })
+                    .collect();
+                for other in free {
+                    if ui.button(&other).clicked() {
+                        let mut links = view.param_links.clone();
+                        links.push((name.to_owned(), other));
+                        outs.push(Out::Links(links));
+                        ui.close();
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// Keys to draw for `name`: the selected element's, else the range ends and the default.
+fn keys_for(model: &Model, name: &str, p: &Parameter, selection: &[Selection]) -> Vec<f32> {
+    param_ops::primary(model, name, selection)
+        .map(|(_, k)| k)
+        .unwrap_or_else(|| {
+            let mut k = vec![p.min, p.default, p.max];
+            k.sort_by(f32::total_cmp);
+            k.dedup();
+            k
+        })
+}
+
+/// Two linked parameters as one pad (the way Live2D shows a pair): white
+/// circles at the key combinations of the selected element, a dot at the
+/// values, two number fields on the right. Click or drag moves both values,
+/// snapping to a circle (Shift: no snap).
+fn link_row(
+    ui: &mut Ui,
+    model: &Model,
+    view: &mut ViewState,
+    a: &str,
+    b: &str,
+    selection: &[Selection],
+    outs: &mut Vec<Out>,
+) {
+    let m = tsukumoe_ui::Theme::get(ui.ctx()).metrics;
+    let (Some(ia), Some(ib)) = (model.parameters().find(a), model.parameters().find(b)) else {
+        return;
+    };
+    let (Some(pa), Some(pb)) = (model.parameters().get(ia), model.parameters().get(ib)) else {
+        return;
+    };
+    let (xkeys, ykeys) = (
+        keys_for(model, a, pa, selection),
+        keys_for(model, b, pb, selection),
+    );
+    let (mut va, mut vb) = (view.param(a, pa), view.param(b, pb));
+    let mut changed = false;
+    let shift = ui.input(|i| i.modifiers.shift);
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(LABEL_WIDTH);
+            name_label(ui, model, view, a, outs);
+            name_label(ui, model, view, b, outs);
+        });
+        let width = (ui.available_width() - 64.0).max(60.0);
+        let (rect, response) = ui.allocate_exact_size(
+            Vec2::new(width, 4.0 * m.control),
+            egui::Sense::click_and_drag(),
+        );
+        let inner = rect.shrink(8.0);
+        let to_screen = |x: f32, y: f32| {
+            egui::pos2(
+                inner.left() + (x - pa.min) / (pa.max - pa.min).max(1e-6) * inner.width(),
+                inner.bottom() - (y - pb.min) / (pb.max - pb.min).max(1e-6) * inner.height(),
+            )
+        };
+        let spots: Vec<(egui::Pos2, f32, f32)> = ykeys
+            .iter()
+            .flat_map(|&y| xkeys.iter().map(move |&x| (x, y)))
+            .map(|(x, y)| (to_screen(x, y), x, y))
+            .collect();
+        if (response.clicked() || response.dragged())
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            va = pa.min
+                + ((pointer.x - inner.left()) / inner.width()).clamp(0.0, 1.0) * (pa.max - pa.min);
+            vb = pb.min
+                + ((inner.bottom() - pointer.y) / inner.height()).clamp(0.0, 1.0)
+                    * (pb.max - pb.min);
+            if !shift
+                && let Some(&(pos, x, y)) = spots
+                    .iter()
+                    .filter(|(pos, ..)| pos.distance(pointer) <= SNAP_POINTS * 1.5)
+                    .min_by(|s, t| s.0.distance(pointer).total_cmp(&t.0.distance(pointer)))
+            {
+                let _ = pos;
+                (va, vb) = (x, y);
+            }
+            changed = true;
+        }
+        let theme = tsukumoe_ui::Theme::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let dotted = egui::Stroke::new(1.0, theme.colors.border);
+        for &x in &xkeys {
+            let top = to_screen(x, pb.max);
+            painter.line_segment([top, to_screen(x, pb.min)], dotted);
+        }
+        for &y in &ykeys {
+            painter.line_segment([to_screen(pa.min, y), to_screen(pa.max, y)], dotted);
+        }
+        for (pos, ..) in &spots {
+            painter.circle(
+                *pos,
+                4.0,
+                theme.colors.surface_raised,
+                egui::Stroke::new(1.0, theme.colors.text_muted),
+            );
+        }
+        painter.circle_filled(
+            to_screen(va.clamp(pa.min, pa.max), vb.clamp(pb.min, pb.max)),
+            4.5,
+            theme.colors.accent,
+        );
+        ui.vertical(|ui| {
+            let speed = |p: &Parameter| (f64::from(p.max - p.min) / 200.0).max(1e-4);
+            changed |= number(ui, &mut va, pa.min..=pa.max, speed(pa), a).changed();
+            changed |= number(ui, &mut vb, pb.min..=pb.max, speed(pb), b).changed();
+        });
+    });
+    if changed {
+        view.set_param(a, pa, va);
+        view.set_param(b, pb, vb);
+    }
 }
 
 /// The settings of one parameter: its name and range, repeat and delete.
@@ -265,7 +433,6 @@ fn settings_section(ui: &mut Ui, model: &Model, name: &str, p: &Parameter, outs:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::Selection;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use tsukumoe_core::command::Command;

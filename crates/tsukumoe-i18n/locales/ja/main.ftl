@@ -343,3 +343,5 @@ inspector-draw-order = 描画順
 param-axes-swap = 2 つの軸を入れ替え（格子の並びが変わります）
 keys-pick = パラメータ名をクリックすると、そのキーを編集できます。
 param-settings = パラメータの設定
+param-link = リンクする相手
+param-unlink = リンクを解除

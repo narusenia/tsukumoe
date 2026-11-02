@@ -776,6 +776,8 @@ fn parameters_snapshot(mode: Mode, name: &str) {
         model.apply(command).unwrap();
     }
     let mut view = ViewState::default();
+    // Linked: shown as one pad with a number field for each.
+    view.param_links = vec![("ParamAngleX".into(), "ParamEyeOpen".into())];
     view.select_only(Selection::Mesh("Skin".into()));
     view.param_focus = Some("ParamAngleX".into());
     let id = model.parameters().find("ParamAngleX").unwrap();

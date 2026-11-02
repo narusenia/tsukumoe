@@ -347,3 +347,5 @@ inspector-draw-order = Draw order
 param-axes-swap = Swap the two axes (changes the grid order)
 keys-pick = Click a parameter name to edit its keys.
 param-settings = Parameter settings
+param-link = Link with
+param-unlink = Unlink
