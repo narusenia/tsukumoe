@@ -21,6 +21,11 @@ pub const PANELS: [&str; 9] = [
     "ai_diff",
 ];
 
+/// Panels a layout may leave out until their contents exist: the presets do not
+/// place them, and a layout without one is not given it back. The panel menu
+/// (`panel.show.*`) still brings one in, to the right strip.
+pub const OPTIONAL_PANELS: [&str; 1] = ["ai_diff"];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Workspace {
@@ -108,9 +113,12 @@ impl Default for Layouts {
 }
 
 /// A layout that lacks a standard panel gets it back in the right strip, so a
-/// panel can never be lost.
+/// panel can never be lost. [`OPTIONAL_PANELS`] are left as they are.
 fn with_all_panels(mut layout: Layout) -> Layout {
-    let missing: Vec<&str> = PANELS.into_iter().filter(|p| !layout.contains(p)).collect();
+    let missing: Vec<&str> = PANELS
+        .into_iter()
+        .filter(|p| !OPTIONAL_PANELS.contains(p) && !layout.contains(p))
+        .collect();
     layout
         .right
         .panels
@@ -215,13 +223,16 @@ mod tests {
     use tsukumoe_ui::dock::{Side, Target};
 
     #[test]
-    fn every_preset_loads_and_has_every_standard_panel_once() {
+    fn every_preset_loads_and_has_every_required_panel_once() {
         for preset in Preset::ALL {
             for w in Workspace::ALL {
                 let layout = builtin_layout(preset, w);
                 let mut panels = layout.panels();
                 panels.sort_unstable();
-                let mut all = PANELS.to_vec();
+                let mut all: Vec<&str> = PANELS
+                    .into_iter()
+                    .filter(|p| !OPTIONAL_PANELS.contains(p))
+                    .collect();
                 all.sort_unstable();
                 assert_eq!(panels, all, "{} {}", preset.key(), w.key());
             }
@@ -290,8 +301,21 @@ mod tests {
         let json = r#"{"current":{"modeling":{"root":{"type":"tabs","tabs":["viewport"]}}}}"#;
         let l = Layouts::from_json(json);
         let layout = l.current(Workspace::Modeling);
-        assert_eq!(layout.panels().len(), PANELS.len());
+        assert_eq!(layout.panels().len(), PANELS.len() - OPTIONAL_PANELS.len());
         assert!(layout.right.panels.contains(&"tree".to_owned()));
+    }
+
+    #[test]
+    fn a_layout_may_leave_out_an_optional_panel_and_the_panel_menu_brings_it_back() {
+        let layout = builtin_layout(Preset::Tsukumoe, Workspace::Modeling);
+        for id in OPTIONAL_PANELS {
+            assert!(!layout.contains(id), "{id}");
+        }
+        let layout = with_all_panels(layout.clone());
+        assert!(!layout.contains("ai_diff"));
+        let mut layout = layout;
+        layout.show_panel("ai_diff");
+        assert!(layout.right.panels.contains(&"ai_diff".to_owned()));
     }
 
     #[test]
@@ -300,7 +324,7 @@ mod tests {
             for workspace in Workspace::ALL {
                 let layout = builtin_layout(preset, workspace);
                 assert!(layout.contains("deformers"), "{preset:?} {workspace:?}");
-                assert_eq!(layout.panels().len(), PANELS.len());
+                assert_eq!(layout.panels().len(), PANELS.len() - OPTIONAL_PANELS.len());
             }
         }
     }

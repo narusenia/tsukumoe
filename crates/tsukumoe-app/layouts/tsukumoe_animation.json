@@ -53,8 +53,7 @@
   },
   "right": {
     "panels": [
-      "palette",
-      "ai_diff"
+      "palette"
     ],
     "open": null,
     "pinned": false,
