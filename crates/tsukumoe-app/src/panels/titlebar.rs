@@ -55,7 +55,7 @@ pub const CHROME: Chrome = if cfg!(target_os = "macos") {
 /// Room kept free on the left for the macOS traffic lights, in points.
 const TRAFFIC_LIGHTS: f32 = 76.0;
 /// Height of the bar with the native frame: the traffic lights' centre line.
-const NATIVE_HEIGHT: f32 = 33.0;
+const NATIVE_HEIGHT: f32 = 24.0;
 
 /// The window's maximized or full-screen state, as the platform reports it.
 pub fn is_maximized(ctx: &Context) -> bool {
@@ -189,10 +189,7 @@ pub fn show(
     // Under everything: widgets added later take the click first.
     let bar = ui.interact(rect, ui.scope_id().with("bar"), Sense::click_and_drag());
     let mut op = drag_op(&bar);
-    if chrome == Chrome::Native {
-        ui.set_min_height(NATIVE_HEIGHT);
-    }
-    ui.horizontal(|ui| {
+    let row = |ui: &mut Ui| {
         if chrome == Chrome::Native {
             ui.add_space(TRAFFIC_LIGHTS);
         }
@@ -206,7 +203,14 @@ pub fn show(
                 op = inner.or(op);
             });
         }
-    });
+    };
+    if chrome == Chrome::Native {
+        // A fixed row height, centred: the items sit on the traffic lights' line.
+        let size = vec2(ui.available_width(), NATIVE_HEIGHT);
+        ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), row);
+    } else {
+        ui.horizontal(row);
+    }
     op
 }
 

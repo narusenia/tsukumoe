@@ -102,7 +102,7 @@
 - macOS の `ViewportBuilder`: `with_fullsize_content_view(true)`、`with_titlebar_shown(false)`、`with_title_shown(false)`。`with_decorations(false)` は使わない。信号機ボタンは既定のまま出す（`with_titlebar_buttons_shown` は触っていない）。Windows / Linux は `with_decorations(false)` のまま。`cfg(target_os = "macos")` で分けた
 - 理由: 自前では角丸・影・信号機の挙動（全画面、Option での最大化、Mission Control）を揃えきれない。macOS は OS の枠のほうが利用者の期待に合う
 - macOS では自前のウィンドウボタンとリサイズ辺、外枠の線を出さない。`titlebar::Chrome`（`Native` / `Custom`）で分け、`show` と `frame` が引数で受けるので、どちらもテストできる（`Native` は信号機の分 76 pt を左に空け、ボタンと辺が出ないこと）。実行時の選択は `titlebar::CHROME`（OS で決まる定数）
-- タイトルバーの高さは macOS で 33 pt（実機で信号機の中心に合わせた）に揃えた
+- タイトルバーの高さは macOS で 24 pt の行を縦中央に置いて信号機の中心に合わせたに揃えた
 - 空き部分のドラッグ移動（`StartDrag`）とダブルクリックの最大化（ズーム）は、自前の `interact` が両方の枠で効くようにしてある。装飾を消した macOS ウィンドウで `StartDrag` とズームが実際に効くかは未確認
 - 画像比較は実行した OS の枠で撮る（macOS では信号機の場所を空けた形。信号機そのものは OS が描くので画像には写らない）。Windows / Linux の自前の枠は画像比較に入らず、ボタンの動作と命令の対応のテストだけが見る
-- 未確認（実機）: 信号機の位置と高さが 33 pt の行に合うか、信号機と重なる部分がないか、ドラッグとダブルクリック、全画面、角丸と影
+- 未確認（実機）: 信号機の位置と高さが 24 pt の行に合うか、信号機と重なる部分がないか、ドラッグとダブルクリック、全画面、角丸と影
