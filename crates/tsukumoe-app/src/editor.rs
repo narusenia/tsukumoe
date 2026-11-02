@@ -398,7 +398,7 @@ impl Editor {
                     .into_iter()
                     .map(Target::Mesh)
                     .collect(),
-                Selection::Parameter(_) => Vec::new(),
+                Selection::Parameter(_) | Selection::Glue(_) => Vec::new(),
             };
             for t in found {
                 if !out.contains(&t) {
@@ -692,6 +692,9 @@ impl Editor {
         let Some(name) = self.mesh_tool.mesh().map(str::to_owned) else {
             return;
         };
+        if action == "mesh.glue-source" || action == "mesh.glue" {
+            return self.run_glue_action(ctx, action, &name);
+        }
         let Some(g) = self
             .doc
             .as_ref()
@@ -737,6 +740,36 @@ impl Editor {
             _ => self.mesh_tool.flip_selected(&name, &g),
         };
         self.apply_mesh_op(ctx, op);
+    }
+
+    /// `mesh.glue-source` marks the selected vertices of the mesh being edited;
+    /// `mesh.glue` glues them to the selected vertices of another mesh.
+    fn run_glue_action(&mut self, ctx: &Context, action: &str, mesh: &str) {
+        if self.view.tool != Tool::Mesh {
+            return;
+        }
+        let vertices = self.mesh_tool.vertices().clone();
+        if action == "mesh.glue-source" {
+            if vertices.is_empty() {
+                self.toasts
+                    .push(ctx, Tone::Error, tr(ctx, "glue-err-no-vertices"));
+            } else {
+                self.view.glue_source = Some((mesh.to_owned(), vertices));
+            }
+            return;
+        }
+        let Some(doc) = &self.doc else { return };
+        match crate::glue::create(doc.dispatcher.model(), &self.view, mesh, &vertices) {
+            Ok((command, label)) => {
+                let name = label.rsplit(": ").next().unwrap_or_default().to_owned();
+                if self.submit_labeled(ctx, command, Some(label)) {
+                    self.view.glue_source = None;
+                    self.view.select_only(Selection::Glue(name));
+                    self.view.touch();
+                }
+            }
+            Err(key) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
+        }
     }
 
     fn save_keymap(&mut self, ctx: &Context) {
@@ -822,6 +855,8 @@ impl Editor {
             | "mesh.delete-edge"
             | "mesh.weld"
             | "mesh.weld-near"
+            | "mesh.glue-source"
+            | "mesh.glue"
             | "mesh.retriangulate"
             | "mesh.fill-grid"
             | "mesh.contour" => {
@@ -2060,6 +2095,7 @@ fn selection_name(s: &Selection) -> &str {
         | Selection::Mesh(n)
         | Selection::Warp(n)
         | Selection::Rotation(n)
+        | Selection::Glue(n)
         | Selection::Parameter(n) => n,
     }
 }

@@ -21,6 +21,7 @@ fn kind_of(s: &Selection) -> Option<(Kind, &str)> {
         Selection::Mesh(n) => Some((Kind::Mesh, n)),
         Selection::Warp(n) => Some((Kind::Warp, n)),
         Selection::Rotation(n) => Some((Kind::Rotation, n)),
+        Selection::Glue(n) => Some((Kind::Glue, n)),
         Selection::Parameter(_) => None,
     }
 }
@@ -33,6 +34,7 @@ pub fn rename_command(kind: Kind, name: &str, new_name: &str) -> Command {
         Kind::Mesh => Command::RenameMesh { name, new_name },
         Kind::Warp => Command::RenameWarp { name, new_name },
         Kind::Rotation => Command::RenameRotation { name, new_name },
+        Kind::Glue => Command::RenameGlue { name, new_name },
     }
 }
 
@@ -44,6 +46,7 @@ pub fn renamed(kind: Kind, new_name: &str) -> Selection {
         Kind::Mesh => Selection::Mesh(n),
         Kind::Warp => Selection::Warp(n),
         Kind::Rotation => Selection::Rotation(n),
+        Kind::Glue => Selection::Glue(n),
     }
 }
 
@@ -80,6 +83,7 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
     let mut meshes: Vec<String> = Vec::new();
     let mut deformers: Vec<DeformerRef> = Vec::new();
     let mut parts: Vec<String> = Vec::new();
+    let mut glues: Vec<String> = Vec::new();
     for item in items {
         let Some((kind, name)) = kind_of(item) else {
             continue;
@@ -88,6 +92,11 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
             Kind::Mesh => {
                 if !meshes.iter().any(|m| m == name) {
                     meshes.push(name.to_owned());
+                }
+            }
+            Kind::Glue => {
+                if !glues.iter().any(|g| g == name) {
+                    glues.push(name.to_owned());
                 }
             }
             Kind::Warp | Kind::Rotation => {
@@ -158,10 +167,26 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
         }
     }
     deformers.sort_by_key(|&r| std::cmp::Reverse(deformer_depth(model, r)));
-    let mut commands: Vec<Command> = meshes
+    // A glue goes before the meshes it joins.
+    for (_, name, g) in model.glues().iter() {
+        let joins = |n: &String| {
+            [g.mesh_a, g.mesh_b]
+                .iter()
+                .any(|&m| model.meshes().find(n) == Some(m))
+        };
+        if meshes.iter().any(joins) && !glues.iter().any(|x| x == name) {
+            glues.push(name.to_owned());
+        }
+    }
+    let mut commands: Vec<Command> = glues
         .iter()
-        .map(|n| Command::RemoveMesh { name: n.clone() })
+        .map(|n| Command::RemoveGlue { name: n.clone() })
         .collect();
+    commands.extend(
+        meshes
+            .iter()
+            .map(|n| Command::RemoveMesh { name: n.clone() }),
+    );
     commands.extend(deformers.iter().filter_map(|&r| {
         crate::deformer_tool::name_of(model, r).map(|name| Command::RemoveDeformer { name })
     }));
@@ -238,7 +263,7 @@ pub fn duplicate_commands(
         let (kind, name) = kind_of(item).ok_or(DuplicateError::Kind)?;
         let copy = copy_name(|n| taken(&made, n), name);
         match kind {
-            Kind::Part => return Err(DuplicateError::Kind),
+            Kind::Part | Kind::Glue => return Err(DuplicateError::Kind),
             Kind::Mesh => {
                 let id = model
                     .meshes()

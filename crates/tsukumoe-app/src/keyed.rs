@@ -314,6 +314,15 @@ pub fn retarget(
                 })
             }
         },
+        Command::SetGlueIntensity { name, intensity } => match glue_place(model, &name, at) {
+            None => Ok(Command::SetGlueIntensity { name, intensity }),
+            Some(Place::Off { label }) => Err(Refusal::OffKey(label)),
+            Some(Place::Key { key, .. }) => Ok(Command::SetGlueKeyform {
+                name,
+                key,
+                intensity,
+            }),
+        },
         other => Ok(other),
     }
 }
@@ -423,6 +432,16 @@ pub fn deformer_opacity(model: &Model, name: &str, at: &dyn Fn(ParameterId) -> f
         .as_ref()?;
     let binding = model.bindings().get(g.binding)?;
     Some(sample_at(binding, &g.keyforms, at).opacity)
+}
+
+/// The intensity of a glue at the sliders: what its keyforms interpolate there,
+/// else the base value.
+pub fn glue_intensity(model: &Model, name: &str, at: &dyn Fn(ParameterId) -> f32) -> Option<f32> {
+    let g = model.glues().get(model.glues().find(name)?)?;
+    Some(match &g.keyforms {
+        Some(k) => sample_at(model.bindings().get(k.binding)?, &k.keyforms, at),
+        None => g.intensity,
+    })
 }
 
 /// The command that sets a deformer keyform's opacity at the key the sliders

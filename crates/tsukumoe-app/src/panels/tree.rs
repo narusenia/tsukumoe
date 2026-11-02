@@ -52,7 +52,7 @@ pub fn target_of(row: &Row) -> Option<Target> {
     match row.kind {
         Kind::Mesh => Some(Target::Mesh(row.name.clone())),
         Kind::Warp | Kind::Rotation => Some(Target::Deformer(row.name.clone())),
-        Kind::Part => None,
+        Kind::Part | Kind::Glue => None,
     }
 }
 
@@ -63,7 +63,7 @@ pub fn toggle_command(row: &Row) -> Option<Command> {
     match row.kind {
         Kind::Part => Some(Command::SetPartVisible { name, visible }),
         Kind::Mesh => Some(Command::SetMeshVisible { name, visible }),
-        Kind::Warp | Kind::Rotation => None,
+        Kind::Warp | Kind::Rotation | Kind::Glue => None,
     }
 }
 
@@ -133,6 +133,7 @@ fn kind_icon(kind: Kind) -> Icon {
         Kind::Part => Icon::Folder,
         Kind::Mesh => Icon::Image,
         Kind::Warp | Kind::Rotation => Icon::Settings,
+        Kind::Glue => Icon::Link,
     }
 }
 
@@ -477,7 +478,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                     ) && *dragged != selection
                 }
                 Kind::Part => !matches!(dragged, Selection::Parameter(_)) && *dragged != selection,
-                Kind::Mesh => false,
+                Kind::Mesh | Kind::Glue => false,
             };
             if let Some(dragged) = response.dnd_hover_payload::<Selection>()
                 && can_drop(&dragged)
@@ -848,6 +849,7 @@ fn toggle_icon(kind: Kind) -> Icon {
         Kind::Mesh => Icon::Image,
         Kind::Warp => Icon::Grid,
         Kind::Rotation => Icon::Rotate,
+        Kind::Glue => Icon::Link,
     }
 }
 
@@ -857,6 +859,7 @@ fn kind_key(kind: Kind) -> &'static str {
         Kind::Mesh => "tree-kind-mesh",
         Kind::Warp => "tree-kind-warp",
         Kind::Rotation => "tree-kind-rotation",
+        Kind::Glue => "tree-kind-glue",
     }
 }
 

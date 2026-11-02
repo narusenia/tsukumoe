@@ -31,6 +31,7 @@ pub enum Kind {
     Mesh,
     Warp,
     Rotation,
+    Glue,
 }
 
 impl Panel {
@@ -38,7 +39,7 @@ impl Panel {
     pub fn kinds(self) -> &'static [Kind] {
         match self {
             Panel::Parts => &[Kind::Part, Kind::Mesh],
-            Panel::Deformers => &[Kind::Warp, Kind::Rotation, Kind::Mesh],
+            Panel::Deformers => &[Kind::Warp, Kind::Rotation, Kind::Glue, Kind::Mesh],
         }
     }
 }
@@ -84,6 +85,7 @@ impl Row {
             Kind::Mesh => Selection::Mesh(name),
             Kind::Warp => Selection::Warp(name),
             Kind::Rotation => Selection::Rotation(name),
+            Kind::Glue => Selection::Glue(name),
         }
     }
 
@@ -98,6 +100,7 @@ pub fn key_of(kind: Kind, name: &str) -> String {
         Kind::Part => format!("p:{name}"),
         Kind::Mesh => format!("m:{name}"),
         Kind::Warp | Kind::Rotation => format!("d:{name}"),
+        Kind::Glue => format!("g:{name}"),
     }
 }
 
@@ -204,6 +207,7 @@ impl Kind {
             Kind::Mesh => "mesh",
             Kind::Warp => "warp",
             Kind::Rotation => "rotation",
+            Kind::Glue => "glue",
         }
     }
 }
@@ -245,9 +249,15 @@ impl TreeView {
                 .iter()
                 .filter_map(|k| k.as_str())
                 .filter_map(|w| {
-                    [Kind::Part, Kind::Mesh, Kind::Warp, Kind::Rotation]
-                        .into_iter()
-                        .find(|k| k.word() == w)
+                    [
+                        Kind::Part,
+                        Kind::Mesh,
+                        Kind::Warp,
+                        Kind::Rotation,
+                        Kind::Glue,
+                    ]
+                    .into_iter()
+                    .find(|k| k.word() == w)
                 })
                 .collect();
         }
@@ -334,6 +344,22 @@ pub fn rows(model: &Model, view: &TreeView, panel: Panel) -> Vec<Row> {
         Panel::Deformers => {
             for r in b.sorted_deformers(|d| d.is_none()) {
                 b.deformer(r, 0, &mut out);
+            }
+            for (_, name, _) in model.glues().iter() {
+                if b.wanted(Kind::Glue, name, false) {
+                    out.push(Row {
+                        depth: 0,
+                        kind: Kind::Glue,
+                        name: name.to_owned(),
+                        visible: None,
+                        dimmed: false,
+                        parent: None,
+                        chain: Vec::new(),
+                        part: None,
+                        expandable: false,
+                        open: false,
+                    });
+                }
             }
         }
     }
@@ -1033,7 +1059,7 @@ mod tests {
         assert_eq!(names(&r), [(0, "W"), (1, "R"), (1, "Far")]);
         assert_eq!(
             Panel::Deformers.kinds(),
-            [Kind::Warp, Kind::Rotation, Kind::Mesh]
+            [Kind::Warp, Kind::Rotation, Kind::Glue, Kind::Mesh]
         );
     }
 

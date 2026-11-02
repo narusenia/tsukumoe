@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 36] = [
+pub const ACTIONS: [&str; 38] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -30,6 +30,8 @@ pub const ACTIONS: [&str; 36] = [
     "mesh.delete-edge",
     "mesh.weld",
     "mesh.weld-near",
+    "mesh.glue-source",
+    "mesh.glue",
     "mesh.symmetry",
     "mesh.retriangulate",
     "mesh.fill-grid",
@@ -115,7 +117,10 @@ mod tests {
         assert!(map.conflicts().is_empty());
         for a in ACTIONS {
             // Showing a panel has no default key; the menu and the keymap dialog reach it.
-            if !a.starts_with("panel.show.") && a != "deformer.reset" {
+            // The glue actions have no Cubism key to copy.
+            if !a.starts_with("panel.show.")
+                && !["deformer.reset", "mesh.glue-source", "mesh.glue"].contains(&a)
+            {
                 assert!(map.shortcut(a).is_some(), "{a} has no default key");
             }
         }
