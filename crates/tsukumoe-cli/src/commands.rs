@@ -220,6 +220,10 @@ pub fn examples() -> Vec<Command> {
             name: "ParamAngleX".into(),
             to: 0,
         },
+        Command::MoveParameterKeyforms {
+            from: "ParamAngleX".into(),
+            to: "ParamAngleY".into(),
+        },
         Command::BindParameter {
             parameter: "ParamAngleX".into(),
             elements: vec![
@@ -412,6 +416,7 @@ pub fn tag(command: &Command) -> &'static str {
         Command::SetParameterRepeat { .. } => "set_parameter_repeat",
         Command::SetParameterGroup { .. } => "set_parameter_group",
         Command::MoveParameter { .. } => "move_parameter",
+        Command::MoveParameterKeyforms { .. } => "move_parameter_keyforms",
         Command::BindParameter { .. } => "bind_parameter",
         Command::UnbindParameter { .. } => "unbind_parameter",
         Command::AddParameterKey { .. } => "add_parameter_key",

@@ -205,6 +205,11 @@ pub enum Command {
     /// Moves a parameter to position `to` (counted from 0, clamped) in the
     /// parameter order.
     MoveParameter { name: String, to: usize },
+    /// Puts every element that has keyforms on `from` onto `to` instead: the
+    /// axis of `from` becomes an axis of `to` with the same keyforms, its keys
+    /// scaled from the range of `from` to the range of `to`. Fails if an
+    /// element is on both parameters, or nothing is on `from`.
+    MoveParameterKeyforms { from: String, to: String },
     /// Binds elements without keyforms to a parameter: keys at its minimum,
     /// default and maximum (fewer when they coincide), every keyform a copy of
     /// the element's shape, so nothing drawn changes. Elements that get the
@@ -769,6 +774,7 @@ impl Model {
             | Command::SetParameterRepeat { .. }
             | Command::SetParameterGroup { .. }
             | Command::MoveParameter { .. }
+            | Command::MoveParameterKeyforms { .. }
             | Command::BindParameter { .. }
             | Command::UnbindParameter { .. }
             | Command::AddParameterKey { .. }
@@ -1201,6 +1207,11 @@ mod tests {
                 elements: vec![ElementRef::Mesh {
                     name: "Scalp".into(),
                 }],
+            },
+            add_param("ParamAngleZ"),
+            Command::MoveParameterKeyforms {
+                from: "ParamAngleY".into(),
+                to: "ParamAngleZ".into(),
             },
         ]
     }

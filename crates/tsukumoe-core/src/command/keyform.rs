@@ -14,7 +14,7 @@
 use crate::arena::Id;
 use crate::elements::{Parameter, ParameterId};
 use crate::history::{BindingEdit, Change, Editable};
-use crate::keyform::{Binding, BindingId, KeyformGrid};
+use crate::keyform::{Axis, Binding, BindingId, KeyformGrid};
 use crate::keyform_edit::{self, Blend, resample, sample};
 use crate::model::Model;
 use crate::rig::{
@@ -263,6 +263,16 @@ impl Model {
         });
     }
 
+    /// Puts the keyforms of element `id` on the binding `new`, which has the
+    /// shape of the old one (same number of keys per axis).
+    fn retarget<T: Bound>(&mut self, changes: &mut Vec<Change>, id: Id<T>, new: BindingId) {
+        let Some(grid) = T::table(self).get(id).and_then(|e| e.grid()) else {
+            return;
+        };
+        let grid = KeyformGrid::new(new, grid.keyforms.clone());
+        self.modify(changes, id, |e| e.set_grid(Some(grid)));
+    }
+
     fn rebuild_elem(
         &mut self,
         changes: &mut Vec<Change>,
@@ -339,6 +349,60 @@ impl Model {
                     self.parameters.move_to(id, to);
                     changes.push(Change::ParameterOrder { id, from, to });
                 }
+            }
+            Command::MoveParameterKeyforms { from, to } => {
+                let (f, t) = (
+                    self.resolve::<Parameter>(from)?,
+                    self.resolve::<Parameter>(to)?,
+                );
+                let (pf, pt) = (
+                    self.parameters.get(f).cloned().expect("resolved"),
+                    self.parameters.get(t).cloned().expect("resolved"),
+                );
+                let scale = |k: f32| {
+                    let span = pf.max - pf.min;
+                    if span > 0.0 {
+                        pt.min + (k - pf.min) / span * (pt.max - pt.min)
+                    } else {
+                        pt.default
+                    }
+                };
+                let mut moves = Vec::new();
+                for (bid, b) in self.bindings.iter() {
+                    let Some(at) = b.axes().iter().position(|a| a.parameter == f) else {
+                        continue;
+                    };
+                    if b.axes().iter().any(|a| a.parameter == t) {
+                        return Err(refused(to, "already-bound"));
+                    }
+                    if self.used_by_others(bid) {
+                        return Err(refused(from, "shared-with-other-kinds"));
+                    }
+                    let mut axes = b.axes().to_vec();
+                    axes[at] = Axis {
+                        parameter: t,
+                        keys: axes[at].keys.iter().map(|&k| scale(k)).collect(),
+                    };
+                    let next = Binding::new(axes).map_err(|_| refused(to, "bad-range"))?;
+                    moves.push((bid, next));
+                }
+                if moves.is_empty() {
+                    return Err(refused(from, "not-bound"));
+                }
+                let mut old = Vec::new();
+                for (bid, next) in moves {
+                    let nid = self.intern_binding(changes, next);
+                    for e in self.sharers(bid) {
+                        match e {
+                            Elem::Mesh(id) => self.retarget(changes, id, nid),
+                            Elem::Warp(id) => self.retarget(changes, id, nid),
+                            Elem::Rotation(id) => self.retarget(changes, id, nid),
+                            Elem::Glue(id) => self.retarget(changes, id, nid),
+                        }
+                    }
+                    old.push(bid);
+                }
+                self.drop_unused(changes, &old);
             }
             Command::BindParameter {
                 parameter,
@@ -1375,5 +1439,80 @@ mod tests {
         assert_eq!(group(&m), None);
         assert!(m.undo());
         assert_eq!(group(&m).as_deref(), Some("Head"));
+    }
+
+    fn add_q(m: &mut Model) {
+        m.apply(Command::AddParameter {
+            name: "Q".into(),
+            min: 0.0,
+            max: 10.0,
+            default: 5.0,
+            repeat: false,
+        })
+        .unwrap();
+    }
+
+    fn keys_of_axis(m: &Model, mesh: &str) -> (String, Vec<f32>) {
+        let id = m.meshes().find(mesh).unwrap();
+        let g = m.meshes().get(id).unwrap().keyforms.as_ref().unwrap();
+        let a = &m.bindings().get(g.binding).unwrap().axes()[0];
+        (
+            m.parameters().name(a.parameter).unwrap().to_owned(),
+            a.keys.clone(),
+        )
+    }
+
+    #[test]
+    fn keyforms_move_to_another_parameter_with_the_keys_scaled() {
+        let mut m = base();
+        add_q(&mut m);
+        bind(&mut m, vec![mesh_ref("A"), mesh_ref("B")]).unwrap();
+        m.apply(Command::SetMeshKeyform {
+            name: "A".into(),
+            key: vec![2],
+            positions: vec![[0.0, 0.0], [3.0, 0.0], [0.0, 3.0]],
+            opacity: 1.0,
+            draw_order: 500.0,
+        })
+        .unwrap();
+        let before = kf_of(&m, "A");
+        m.apply(Command::MoveParameterKeyforms {
+            from: "P".into(),
+            to: "Q".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            keys_of_axis(&m, "A"),
+            ("Q".to_owned(), vec![0.0, 5.0, 10.0])
+        );
+        assert_eq!(keys_of_axis(&m, "B").0, "Q");
+        assert_eq!(kf_of(&m, "A").keyforms, before.keyforms);
+        assert!(m.compile().is_ok());
+        assert!(m.undo());
+        assert_eq!(
+            keys_of_axis(&m, "A"),
+            ("P".to_owned(), vec![-1.0, 0.0, 1.0])
+        );
+        assert_eq!(kf_of(&m, "A"), before);
+    }
+
+    #[test]
+    fn moving_keyforms_needs_a_source_and_refuses_an_element_on_both() {
+        let mut m = base();
+        add_q(&mut m);
+        let go = |m: &mut Model| {
+            m.apply(Command::MoveParameterKeyforms {
+                from: "P".into(),
+                to: "Q".into(),
+            })
+        };
+        assert!(go(&mut m).is_err());
+        bind(&mut m, vec![mesh_ref("A")]).unwrap();
+        m.apply(Command::BindParameter {
+            parameter: "Q".into(),
+            elements: vec![mesh_ref("A")],
+        })
+        .unwrap();
+        assert!(go(&mut m).is_err());
     }
 }

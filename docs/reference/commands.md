@@ -464,6 +464,23 @@ parameter order.
 {"type":"move_parameter","name":"ParamAngleX","to":0}
 ```
 
+### `move_parameter_keyforms`
+
+Puts every element that has keyforms on `from` onto `to` instead: the
+axis of `from` becomes an axis of `to` with the same keyforms, its keys
+scaled from the range of `from` to the range of `to`. Fails if an
+element is on both parameters, or nothing is on `from`.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `from` | string | yes |  |
+| `to` | string | yes |  |
+| `type` | `"move_parameter_keyforms"` | yes |  |
+
+```json
+{"type":"move_parameter_keyforms","from":"ParamAngleX","to":"ParamAngleY"}
+```
+
 ### `bind_parameter`
 
 Binds elements without keyforms to a parameter: keys at its minimum,
