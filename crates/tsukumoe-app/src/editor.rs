@@ -1024,7 +1024,9 @@ impl Editor {
                         ui.menu_button(label, |ui| show_entries(ui, entries, &mut chosen));
                     }
                 }
-                ui.separator();
+                if !native {
+                    ui.separator();
+                }
                 let mut selected = Workspace::ALL
                     .iter()
                     .position(|w| *w == workspace)
