@@ -405,6 +405,40 @@ impl Model {
                 }
                 self.drop_unused(changes, &[bid]);
             }
+            Command::SetAxisOrder {
+                element,
+                parameters,
+            } => {
+                let (e, name) = self.element(element)?;
+                let bid = self
+                    .binding_of(e)
+                    .ok_or_else(|| refused(&name, "not-bound"))?;
+                let binding = self.bindings.get(bid).cloned().expect("on a binding");
+                if self.used_by_others(bid) {
+                    return Err(refused(&name, "shared-with-other-kinds"));
+                }
+                let mut axes = Vec::new();
+                for p in parameters {
+                    let pid = self.resolve::<Parameter>(p)?;
+                    let axis = binding
+                        .axes()
+                        .iter()
+                        .find(|a| a.parameter == pid)
+                        .ok_or_else(|| refused(&name, "bad-order"))?;
+                    axes.push(axis.clone());
+                }
+                if axes.len() != binding.axes().len() {
+                    return Err(refused(&name, "bad-order"));
+                }
+                let next = Binding::new(axes).map_err(|_| refused(&name, "bad-order"))?;
+                if next != binding {
+                    let nid = self.intern_binding(changes, next.clone());
+                    for s in self.sharers(bid) {
+                        self.rebuild_elem(changes, s, Some((nid, &next)), &|_| 0.0);
+                    }
+                    self.drop_unused(changes, &[bid]);
+                }
+            }
             Command::SetMeshKeyform {
                 name,
                 key,
@@ -925,6 +959,41 @@ mod tests {
         assert!(m.undo());
         assert_eq!(kf_of(&m, "A"), one_axis);
         assert_eq!(m.bindings().len(), 1);
+    }
+
+    #[test]
+    fn swapping_the_axes_keeps_the_picture_and_refuses_a_wrong_list() {
+        let mut m = bent();
+        m.apply(Command::AddParameter {
+            name: "Q".into(),
+            min: 0.0,
+            max: 2.0,
+            default: 1.0,
+            repeat: false,
+        })
+        .unwrap();
+        m.apply(Command::BindParameter {
+            parameter: "Q".into(),
+            elements: vec![mesh_ref("A"), mesh_ref("B")],
+        })
+        .unwrap();
+        let before: Vec<Vec<f32>> = [-1.0, -0.4, 0.7].iter().map(|&v| drawn(&m, v)).collect();
+        let grid = kf_of(&m, "A");
+        let order = |names: &[&str]| Command::SetAxisOrder {
+            element: mesh_ref("A"),
+            parameters: names.iter().map(|n| (*n).to_owned()).collect(),
+        };
+        m.apply(order(&["Q", "P"])).unwrap();
+        assert_ne!(kf_of(&m, "A"), grid, "the grid is in the other order");
+        assert_eq!(m.bindings().len(), 1, "B moved with A");
+        for (v, b) in [-1.0, -0.4, 0.7].iter().zip(&before) {
+            same(&drawn(&m, *v), b);
+        }
+        for bad in [&["P"][..], &["P", "P"], &["P", "Z"]] {
+            assert!(m.apply(order(bad)).is_err());
+        }
+        assert!(m.undo());
+        assert_eq!(kf_of(&m, "A"), grid);
     }
 
     #[test]

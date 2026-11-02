@@ -473,6 +473,23 @@ Removes the key at exactly `value` (and its keyforms) from the axis of
 {"type":"remove_parameter_key","parameter":"ParamAngleX","value":10.0,"element":{"kind":"mesh","name":"Skin"}}
 ```
 
+### `set_axis_order`
+
+Puts the axes of the element's binding in the order of `parameters`
+(every axis exactly once), for every element on that binding. The
+keyforms follow, so nothing drawn changes; only the order of the grid
+(the first axis changes slowest) and of the key indices.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `element` | Command | yes |  |
+| `parameters` | string[] | yes |  |
+| `type` | `"set_axis_order"` | yes |  |
+
+```json
+{"type":"set_axis_order","element":{"kind":"mesh","name":"Skin"},"parameters":["ParamAngleY","ParamAngleX"]}
+```
+
 ### `set_mesh_keyform`
 
 Replaces one keyform of a mesh: the vertices, opacity and draw order at

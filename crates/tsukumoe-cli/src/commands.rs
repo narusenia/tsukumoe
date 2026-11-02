@@ -215,6 +215,12 @@ pub fn examples() -> Vec<Command> {
                 name: "Skin".into(),
             },
         },
+        Command::SetAxisOrder {
+            element: ElementRef::Mesh {
+                name: "Skin".into(),
+            },
+            parameters: vec!["ParamAngleY".into(), "ParamAngleX".into()],
+        },
         Command::UnbindParameter {
             parameter: "ParamAngleX".into(),
             elements: vec![ElementRef::Mesh {
@@ -356,6 +362,7 @@ pub fn tag(command: &Command) -> &'static str {
         Command::BindParameter { .. } => "bind_parameter",
         Command::UnbindParameter { .. } => "unbind_parameter",
         Command::AddParameterKey { .. } => "add_parameter_key",
+        Command::SetAxisOrder { .. } => "set_axis_order",
         Command::RemoveParameterKey { .. } => "remove_parameter_key",
         Command::SetMeshKeyform { .. } => "set_mesh_keyform",
         Command::SetWarpKeyform { .. } => "set_warp_keyform",
