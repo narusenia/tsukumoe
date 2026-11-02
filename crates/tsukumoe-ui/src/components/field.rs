@@ -25,7 +25,9 @@ pub fn slider(ui: &mut Ui, value: &mut f32, range: RangeInclusive<f32>, name: &s
     .inner
 }
 
-/// A number you can type into or drag. `speed` is the change per point of drag.
+/// A number you can type into or drag. `speed` is the change per point of drag;
+/// Shift makes it a tenth. Escape while typing puts back the value the field had
+/// when it was entered.
 pub fn number(
     ui: &mut Ui,
     value: &mut f32,
@@ -34,14 +36,27 @@ pub fn number(
     name: &str,
 ) -> Response {
     let m = Theme::get(ui.ctx()).metrics;
-    ui.add_sized(
+    let fine = ui.input(|i| i.modifiers.shift);
+    let start_id = Id::unique(("number-start", name, ui.next_auto_id()));
+    let mut response = ui.add_sized(
         Vec2::new(64.0, m.control),
         DragValue::new(value)
             .range(range)
-            .speed(speed)
+            .speed(if fine { speed * 0.1 } else { speed })
             .fixed_decimals(2),
-    )
-    .accessible_name(name)
+    );
+    if response.gained_focus() {
+        ui.data_mut(|d| d.insert_temp(start_id, *value));
+    }
+    if (response.has_focus() || response.lost_focus())
+        && ui.input(|i| i.key_pressed(egui::Key::Escape))
+        && let Some(start) = ui.data(|d| d.get_temp::<f32>(start_id))
+    {
+        *value = start;
+        response.mark_changed();
+        response.surrender_focus();
+    }
+    response.accessible_name(name)
 }
 
 /// A single-line text field that fills the width left. `hint` shows while empty;
@@ -105,4 +120,30 @@ pub fn select<T: PartialEq + Clone>(
 /// A color swatch that opens a picker.
 pub fn color_picker(ui: &mut Ui, color: &mut Color32, name: &str) -> Response {
     ui.color_edit_button_srgba(color).accessible_name(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn escape_while_typing_puts_back_the_entered_value() {
+        let mut h = Harness::new_ui_state(
+            |ui, value: &mut f32| {
+                crate::init(ui.ctx());
+                number(ui, value, 0.0..=1.0, 0.01, "Opacity");
+            },
+            0.5_f32,
+        );
+        h.run();
+        h.get_by_label("Opacity").click();
+        h.run();
+        h.get_by_label("Opacity").type_text("0.9");
+        h.run();
+        h.key_press(egui::Key::Escape);
+        h.run();
+        assert_eq!(*h.state(), 0.5);
+    }
 }
