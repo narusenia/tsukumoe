@@ -103,6 +103,8 @@ pub struct ViewState {
     pub param_focus: Option<String>,
     /// The parameter whose settings window is open. Not saved.
     pub param_dialog: Option<String>,
+    /// The parameter whose keyforms "put here" moves. Not saved.
+    pub param_source: Option<String>,
     /// Pairs of parameters the panel shows as one pad (first = horizontal,
     /// second = vertical). Kept with the project, see `Document::param_links`.
     pub param_links: Vec<(String, String)>,
@@ -297,6 +299,9 @@ impl ViewState {
         if self.param_dialog.as_deref() == Some(from) {
             self.param_dialog = Some(to.to_owned());
         }
+        if self.param_source.as_deref() == Some(from) {
+            self.param_source = Some(to.to_owned());
+        }
         if self.param_focus.as_deref() == Some(from) {
             self.param_focus = Some(to.to_owned());
         }
@@ -312,6 +317,9 @@ impl ViewState {
         self.param_links.retain(|(a, b)| a != name && b != name);
         if self.param_dialog.as_deref() == Some(name) {
             self.param_dialog = None;
+        }
+        if self.param_source.as_deref() == Some(name) {
+            self.param_source = None;
         }
         if self.param_focus.as_deref() == Some(name) {
             self.param_focus = None;

@@ -9,7 +9,9 @@ use egui::{Ui, Vec2};
 use tsukumoe_core::command::Command;
 use tsukumoe_core::elements::Parameter;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{Icon, Variant, button, icon_button, number, slider, text_input, tr};
+use tsukumoe_ui::{
+    Arg, Icon, Variant, button, icon_button, number, slider, text_input, tr, tr_args,
+};
 
 use crate::confirm::Kind;
 use crate::mesh_tool::Op;
@@ -416,6 +418,33 @@ fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs
         if ui.button(tr(&ctx, "param-settings")).clicked() {
             view.param_dialog = Some(name.to_owned());
             ui.close();
+        }
+        if ui.button(tr(&ctx, "param-keyforms-pick")).clicked() {
+            view.param_source = Some(name.to_owned());
+            ui.close();
+        }
+        // The source is checked again here: it may have been renamed or deleted.
+        let source = view
+            .param_source
+            .clone()
+            .filter(|s| s != name && model.parameters().find(s).is_some());
+        if let Some(source) = source {
+            let label = tr_args(
+                &ctx,
+                "param-keyforms-put",
+                &[("name", Arg::from(source.as_str()))],
+            );
+            if ui.button(label).clicked() {
+                outs.push(Out::Op((
+                    Command::MoveParameterKeyforms {
+                        from: source.clone(),
+                        to: name.to_owned(),
+                    },
+                    format!("param_keyforms: {source} -> {name}"),
+                )));
+                view.param_source = None;
+                ui.close();
+            }
         }
         let linked = view.param_links.iter().any(|(a, b)| a == name || b == name);
         if linked {
