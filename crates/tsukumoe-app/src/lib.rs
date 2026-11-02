@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod app;
 pub mod commands;
+pub mod confirm;
 pub mod deformer_ops;
 pub mod deformer_tool;
 pub mod dispatcher;
