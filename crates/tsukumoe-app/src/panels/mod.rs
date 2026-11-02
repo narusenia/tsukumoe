@@ -12,5 +12,6 @@ pub mod palette;
 pub mod parameters;
 pub mod proportional_overlay;
 pub mod selection_overlay;
+pub mod toolbar;
 pub mod tree;
 pub mod viewport;
