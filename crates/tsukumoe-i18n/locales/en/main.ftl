@@ -285,3 +285,7 @@ proportional-falloff-constant = Constant
 proportional-distance = Distance
 proportional-distance-path = Along the edges
 proportional-distance-straight = Straight line
+window-minimize = Minimize
+window-maximize = Maximize
+window-restore = Restore
+window-close = Close

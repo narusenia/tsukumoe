@@ -19,7 +19,9 @@ use crate::actions::Tool;
 use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
-use crate::panels::{deformer_overlay, mesh_overlay, proportional_overlay, selection_overlay};
+use crate::panels::{
+    deformer_overlay, mesh_overlay, proportional_overlay, selection_overlay, toolbar,
+};
 use crate::project::Document;
 use crate::scene::{Preview, Scene, fit_view};
 use crate::view::{Selection, ViewState};
@@ -291,7 +293,7 @@ impl Viewport {
                 egui::Color32::WHITE,
             );
         }
-        let (ops, actions) = match view.tool {
+        let (ops, mut actions) = match view.tool {
             Tool::Mesh => {
                 self.mesh_tool_frame(ui, &response, rect, doc, view, drag, mesh, size, keymap)
             }
@@ -302,6 +304,10 @@ impl Viewport {
                 (Vec::new(), Vec::new())
             }
         };
+        if let Some(action) = toolbar::show(ui.ctx(), rect, view.tool, view.proportional.on, keymap)
+        {
+            actions.push(action);
+        }
         // The box around the selection, where no vertex-level overlay is open.
         if selection_overlay::shown_with(view.tool)
             && let Some(scene) = &self.scene

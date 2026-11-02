@@ -83,6 +83,7 @@ icons! {
     Locate => "locate",
     RotateCcw => "rotate-ccw",
     Sparkles => "sparkles",
+    MousePointer => "mouse-pointer-2",
 }
 
 impl Icon {

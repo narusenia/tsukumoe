@@ -38,11 +38,23 @@ impl eframe::App for App {
 
 /// Opens the window, with `project` loaded when given.
 pub fn run(project: Option<PathBuf>) -> Result<(), String> {
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("Tsukumoe")
+        .with_min_inner_size([640.0, 400.0])
+        .with_inner_size([1400.0, 900.0]);
+    // macOS keeps its own frame (traffic lights, corners, shadow, resize, full
+    // screen) with the content reaching under the title bar; elsewhere the OS
+    // frame is off and the app draws its own (`panels::titlebar`).
+    #[cfg(target_os = "macos")]
+    let viewport = viewport
+        .with_fullsize_content_view(true)
+        .with_titlebar_shown(false)
+        .with_title_shown(false);
+    #[cfg(not(target_os = "macos"))]
+    let viewport = viewport.with_decorations(false);
     let native = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Tsukumoe")
-            .with_inner_size([1400.0, 900.0]),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
