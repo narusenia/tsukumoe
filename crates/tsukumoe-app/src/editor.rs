@@ -791,23 +791,35 @@ impl Editor {
             "mesh.weld" => self.mesh_tool.weld_selected(&name, &g),
             "mesh.weld-near" => self.mesh_tool.weld_near(&name, &g),
             "mesh.retriangulate" => self.mesh_tool.retriangulate(&name, &g),
-            "mesh.fill-grid" => self.mesh_tool.fill_grid(&name, &g),
+            "mesh.fill-grid" => {
+                if self.mesh_tool.grid_auto
+                    && let Some(alpha) = self.texture_alpha_of(&name)
+                {
+                    self.mesh_tool.grid =
+                        mesh_tool::auto_grid(&alpha, self.mesh_tool.contour.threshold);
+                }
+                self.mesh_tool.fill_grid(&name, &g)
+            }
             "mesh.contour" => {
-                let alpha = self.doc.as_ref().and_then(|d| {
-                    let model = d.dispatcher.model();
-                    let texture = model.meshes().get(model.meshes().find(&name)?)?.texture;
-                    let (width, height, data) = d.texture_alpha(texture).ok()?;
-                    Some(mesh_tool::AlphaImage {
-                        width,
-                        height,
-                        data,
-                    })
-                });
+                let alpha = self.texture_alpha_of(&name);
                 self.mesh_tool.contour_mesh(&name, &g, alpha.as_ref())
             }
             _ => self.mesh_tool.flip_selected(&name, &g),
         };
         self.apply_mesh_op(ctx, op);
+    }
+
+    /// The alpha of the texture the mesh `name` uses; `None` when it cannot be read.
+    fn texture_alpha_of(&self, name: &str) -> Option<mesh_tool::AlphaImage> {
+        let d = self.doc.as_ref()?;
+        let model = d.dispatcher.model();
+        let texture = model.meshes().get(model.meshes().find(name)?)?.texture;
+        let (width, height, data) = d.texture_alpha(texture).ok()?;
+        Some(mesh_tool::AlphaImage {
+            width,
+            height,
+            data,
+        })
     }
 
     /// `mesh.glue-source` marks the selected vertices of the mesh being edited;

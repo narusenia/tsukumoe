@@ -127,6 +127,26 @@ pub struct AlphaImage {
     pub data: Vec<u8>,
 }
 
+/// Columns and rows for a mesh from the opaque area of its texture: one cell
+/// per ~64 px along the longer side (2 to 16), the shorter side by aspect.
+/// An empty texture gives 2 x 2.
+pub fn auto_grid(alpha: &AlphaImage, threshold: u8) -> (u32, u32) {
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+    for (i, &a) in alpha.data.iter().enumerate() {
+        if a >= threshold {
+            let (x, y) = (i as u32 % alpha.width, i as u32 / alpha.width);
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+    }
+    if x0 > x1 {
+        return (2, 2);
+    }
+    let (w, h) = ((x1 - x0 + 1) as f32, (y1 - y0 + 1) as f32);
+    let long = ((w.max(h) / 64.0).round() as u32).clamp(2, 16);
+    let short = ((long as f32 * w.min(h) / w.max(h)).round() as u32).clamp(2, 16);
+    if w >= h { (long, short) } else { (short, long) }
+}
+
 impl From<EditError> for ToolError {
     fn from(e: EditError) -> Self {
         Self::Edit(e)
@@ -188,6 +208,8 @@ pub struct MeshTool {
     gesture: Option<Gesture>,
     /// Columns and rows of the grid `mesh.fill-grid` lays; kept across meshes.
     pub grid: (u32, u32),
+    /// Take the grid from the texture's opaque area when filling (`auto_grid`).
+    pub grid_auto: bool,
     /// Settings of `mesh.contour`; kept across meshes.
     pub contour: ContourParams,
     /// Proportional edit; the viewport copies the editor's options here.
@@ -424,6 +446,7 @@ impl Default for MeshTool {
             pen_from: None,
             gesture: None,
             grid: (4, 4),
+            grid_auto: false,
             contour: ContourParams::default(),
             proportional: Proportional::default(),
             snapshot: None,
@@ -446,6 +469,7 @@ impl MeshTool {
                 mesh: name.map(str::to_owned),
                 pen: self.pen,
                 grid: self.grid,
+                grid_auto: self.grid_auto,
                 contour: self.contour,
                 proportional: self.proportional,
                 symmetry: self.symmetry,
@@ -1682,6 +1706,28 @@ mod tests {
         // With that diagonal selected it is kept, so nothing changes.
         t.edge = Some((0, 2));
         assert_eq!(t.retriangulate("Skin", &skew), Err(ToolError::NoChange));
+    }
+
+    #[test]
+    fn auto_grid_follows_the_opaque_area_and_its_aspect() {
+        let mut data = vec![0u8; 512 * 256];
+        // Opaque 256 x 128 block: 4 columns, 2 rows.
+        for y in 10..138 {
+            for x in 20..276 {
+                data[y * 512 + x] = 255;
+            }
+        }
+        let alpha = AlphaImage {
+            width: 512,
+            height: 256,
+            data,
+        };
+        assert_eq!(auto_grid(&alpha, 16), (4, 2));
+        let clear = AlphaImage {
+            data: vec![0; 512 * 256],
+            ..alpha
+        };
+        assert_eq!(auto_grid(&clear, 16), (2, 2));
     }
 
     #[test]
