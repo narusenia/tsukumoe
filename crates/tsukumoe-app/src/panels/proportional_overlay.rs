@@ -73,15 +73,37 @@ pub fn options(ui: &mut egui::Ui, p: &mut Proportional) -> bool {
     }
     super::overlay::boxed(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.add(
-                egui::DragValue::new(&mut p.radius)
-                    .range(RADIUS_RANGE.0..=RADIUS_RANGE.1)
-                    .speed(1.0)
-                    .max_decimals(0)
-                    .suffix(" pt"),
-            )
-            .accessible_name(tr(&ctx, "proportional-radius"))
-            .on_hover_text(tr(&ctx, "proportional-radius"));
+            match (p.fixed, p.model_radius.as_mut()) {
+                (true, Some(r)) => {
+                    let speed = 0.01 * f64::from(r.max(0.01));
+                    ui.add(egui::DragValue::new(r).range(1e-4..=1e6).speed(speed))
+                        .accessible_name(tr(&ctx, "proportional-radius"))
+                        .on_hover_text(tr(&ctx, "proportional-radius"));
+                }
+                _ => {
+                    ui.add(
+                        egui::DragValue::new(&mut p.radius)
+                            .range(RADIUS_RANGE.0..=RADIUS_RANGE.1)
+                            .speed(1.0)
+                            .max_decimals(0)
+                            .suffix(" pt"),
+                    )
+                    .accessible_name(tr(&ctx, "proportional-radius"))
+                    .on_hover_text(tr(&ctx, "proportional-radius"));
+                }
+            }
+            // The radius in points (follows the zoom) or in model units (does not).
+            let key = if p.fixed {
+                "proportional-radius-fixed"
+            } else {
+                "proportional-radius-screen"
+            };
+            if icon_button(ui, Icon::Locate, &tr(&ctx, key), Variant::Ghost).clicked() {
+                p.fixed = !p.fixed;
+                if !p.fixed {
+                    p.model_radius = None;
+                }
+            }
             let curve = format!(
                 "{}: {}",
                 tr(&ctx, "proportional-falloff"),
@@ -110,14 +132,14 @@ pub fn options(ui: &mut egui::Ui, p: &mut Proportional) -> bool {
 pub fn paint(
     painter: &Painter,
     theme: &Theme,
-    p: &Proportional,
+    radius: f32,
     moved: &[Pos2],
     weighted: Option<(&[Pos2], &[f32])>,
 ) {
     let c = &theme.colors;
     if moved.len() <= MAX_CIRCLES {
         for &at in moved {
-            painter.circle_stroke(at, p.radius, Stroke::new(1.0, c.accent.gamma_multiply(0.6)));
+            painter.circle_stroke(at, radius, Stroke::new(1.0, c.accent.gamma_multiply(0.6)));
         }
     }
     if let Some((points, weights)) = weighted {

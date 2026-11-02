@@ -216,6 +216,19 @@ impl Viewport {
             self.view_revision = view.revision();
             self.wake();
         }
+        // Turned to the fixed radius: take its size from the view as it is now.
+        if view.proportional.fixed
+            && view.proportional.model_radius.is_none()
+            && let Some(scene) = &self.scene
+        {
+            let rect = ui.available_rect_before_wrap();
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            view.proportional.settle(&mapper);
+        }
         mesh.proportional = view.proportional;
         deformer.proportional = view.proportional;
         // The wheel sets the influence radius while proportional edit drags.
@@ -775,7 +788,7 @@ impl Viewport {
                     proportional_overlay::paint(
                         &painter,
                         &theme,
-                        &tool.proportional,
+                        tool.proportional.screen_radius(&mapper),
                         &moved,
                         weights.as_deref().map(|w| (&screen[..], w)),
                     );
@@ -998,7 +1011,7 @@ impl Viewport {
                     proportional_overlay::paint(
                         &painter,
                         &theme,
-                        &tool.proportional,
+                        tool.proportional.screen_radius(&mapper),
                         &moved,
                         weights.as_deref().map(|w| (&screen[..], w)),
                     );

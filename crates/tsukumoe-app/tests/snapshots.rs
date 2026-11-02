@@ -661,7 +661,7 @@ fn proportional_snapshot(mode: Mode, name: &str) {
             proportional_overlay::paint(
                 &painter,
                 &theme,
-                &tool.proportional,
+                tool.proportional.screen_radius(&mapper),
                 &moved,
                 Some((&screen, &weights)),
             );

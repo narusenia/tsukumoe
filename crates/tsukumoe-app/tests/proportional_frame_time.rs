@@ -109,7 +109,7 @@ fn drag(
             proportional_overlay::paint(
                 &painter,
                 &theme,
-                &tool.proportional,
+                tool.proportional.screen_radius(&mapper),
                 &[pos2(start[0], start[1])],
                 weights.as_deref().map(|w| (&screen[..], w)),
             );
