@@ -171,6 +171,7 @@ mod tests {
             Command::SetWarpKeyform { .. } => "set_warp_keyform",
             Command::SetRotationKeyform { .. } => "set_rotation_keyform",
             Command::SetRotationBase { .. } => "set_rotation_base",
+            Command::SetGlueKeyform { .. } => "set_glue_keyform",
             Command::AddGlue { .. } => "add_glue",
             Command::RemoveGlue { .. } => "remove_glue",
             Command::SetGlueIntensity { .. } => "set_glue_intensity",
@@ -357,6 +358,11 @@ mod tests {
                 key: vec![1],
                 points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
                 opacity: 1.0,
+            },
+            Command::SetGlueKeyform {
+                name: "Seam".into(),
+                key: vec![2],
+                intensity: 0.5,
             },
             Command::SetRotationKeyform {
                 name: "HeadRotation".into(),

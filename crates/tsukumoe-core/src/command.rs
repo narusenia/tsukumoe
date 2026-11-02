@@ -24,14 +24,15 @@ mod keyform;
 use crate::validate::ModelError;
 use keyform::refused;
 
-/// An element a keyform grid can sit on: a mesh, or a warp or rotation
-/// deformer (they share one namespace, so only the name is needed).
+/// An element a keyform grid can sit on: a mesh, a glue, or a warp or rotation
+/// deformer (the deformers share one namespace, so only the name is needed).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ElementRef {
     Mesh { name: String },
     Deformer { name: String },
+    Glue { name: String },
 }
 
 /// The base shape of a rotation deformer: origin, angle in degrees, scale and
@@ -289,6 +290,12 @@ pub enum Command {
     RemoveGlue { name: String },
     /// Sets the base intensity of a glue. Fails if it has keyforms.
     SetGlueIntensity { name: String, intensity: f32 },
+    /// Replaces one keyform of a glue (the key is one index per axis of its binding).
+    SetGlueKeyform {
+        name: String,
+        key: Vec<usize>,
+        intensity: f32,
+    },
     /// Renames a part. Everything that refers to it keeps pointing at it.
     RenamePart { name: String, new_name: String },
     /// Renames a mesh.
@@ -757,6 +764,7 @@ impl Model {
             | Command::SetMeshKeyform { .. }
             | Command::SetMeshKeyformColors { .. }
             | Command::SetWarpKeyform { .. }
+            | Command::SetGlueKeyform { .. }
             | Command::SetRotationKeyform { .. } => self.run_keyform(command, changes)?,
         }
         Ok(())

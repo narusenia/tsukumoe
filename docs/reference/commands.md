@@ -650,6 +650,21 @@ Sets the base intensity of a glue. Fails if it has keyforms.
 {"type":"set_glue_intensity","name":"Seam","intensity":0.5}
 ```
 
+### `set_glue_keyform`
+
+Replaces one keyform of a glue (the key is one index per axis of its binding).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `intensity` | number | yes |  |
+| `key` | integer[] | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_glue_keyform"` | yes |  |
+
+```json
+{"type":"set_glue_keyform","name":"Seam","key":[2],"intensity":0.5}
+```
+
 ### `rename_part`
 
 Renames a part. Everything that refers to it keeps pointing at it.

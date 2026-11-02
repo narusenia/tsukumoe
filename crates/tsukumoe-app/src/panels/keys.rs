@@ -347,7 +347,8 @@ fn mirror_row(
     let hint_text = t("mirror-center");
     text_input(ui, &mut view.mirror_center, &hint_text, &hint_text);
     if let Some((source, key)) = &view.mirror_source {
-        let (ElementRef::Mesh { name } | ElementRef::Deformer { name }) = source;
+        let (ElementRef::Mesh { name } | ElementRef::Deformer { name } | ElementRef::Glue { name }) =
+            source;
         hint(ui, format!("{}: {name} {key:?}", t("mirror-source")));
     }
 }
