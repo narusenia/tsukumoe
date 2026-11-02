@@ -988,3 +988,54 @@ fn the_pie_tab_of_the_settings_dialog_in_the_light_theme() {
     harness.run();
     harness.snapshot_options("pie_settings_light", &SnapshotOptions::new().threshold(3.0));
 }
+
+/// The shortcuts tab: the names in one column, the fields in another.
+#[test]
+fn the_shortcuts_tab_of_the_settings_dialog_in_the_dark_theme() {
+    let mut editor = Editor::new(None);
+    assert!(editor.run_action(&egui::Context::default(), "view.keymap-settings"));
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1100.0, 800.0))
+        .wgpu()
+        .build_ui_state(
+            |ui, editor: &mut Editor| {
+                let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::Ja);
+                set_mode(&ctx, Mode::Dark);
+                editor.ui(ui, None);
+            },
+            editor,
+        );
+    harness.run();
+    harness.snapshot_options("shortcuts_dark", &SnapshotOptions::new().threshold(3.0));
+}
+
+/// The view tab (a drop-down and number fields): the names share one column, so
+/// the fields line up.
+#[test]
+fn the_view_tab_of_the_settings_dialog_in_the_dark_theme() {
+    let mut editor = Editor::new(None);
+    // The view tab has no action of its own: open the settings and switch to it.
+    assert!(editor.run_action(&egui::Context::default(), "view.settings"));
+    if let Some(tsukumoe_app::editor::Dialog::Settings(state)) = &mut editor.dialog {
+        state.tab = tsukumoe_app::editor::SettingsTab::View;
+    }
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(1100.0, 600.0))
+        .wgpu()
+        .build_ui_state(
+            |ui, editor: &mut Editor| {
+                let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::Ja);
+                set_mode(&ctx, Mode::Dark);
+                editor.ui(ui, None);
+            },
+            editor,
+        );
+    harness.run();
+    harness.snapshot_options("settings_view_dark", &SnapshotOptions::new().threshold(3.0));
+}

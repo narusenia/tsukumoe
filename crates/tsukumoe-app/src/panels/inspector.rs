@@ -41,7 +41,25 @@ fn commit_field(
     None
 }
 
-const COLOR_LABEL_WIDTH: f32 = 84.0;
+const COLOR_LABEL_WIDTH: f32 = 96.0;
+
+/// A row of the inspector: the name in a column of fixed width, then the field, so
+/// the fields of one panel start at the same place.
+fn form_row<R>(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(COLOR_LABEL_WIDTH, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(COLOR_LABEL_WIDTH);
+                ui.add(egui::Label::new(name).truncate())
+                    .on_hover_text(name);
+            },
+        );
+        add(ui)
+    })
+    .inner
+}
 
 /// A numeric field whose every change is reported at once: `Some((value, ended))`
 /// when it changed (`value` is `Some`) or an edit ended without a further
@@ -334,8 +352,7 @@ pub fn show_at(
                 ("inspector-max", 1, max),
                 ("inspector-default", 2, default),
             ] {
-                ui.horizontal(|ui| {
-                    label(ui, tr(&ctx, key));
+                form_row(ui, &tr(&ctx, key), |ui| {
                     let speed = f64::from((max - min).abs().max(1.0)) / 200.0;
                     if let Some(v) = commit_field(
                         ui,
@@ -370,8 +387,7 @@ pub fn show_at(
                 format!("{}: {}", tr(&ctx, "inspector-glue-nodes"), g.nodes.len()),
             );
             let intensity = crate::keyed::glue_intensity(model, name, at).unwrap_or(g.intensity);
-            ui.horizontal(|ui| {
-                label(ui, tr(&ctx, "inspector-glue-intensity"));
+            form_row(ui, &tr(&ctx, "inspector-glue-intensity"), |ui| {
                 if let Some((v, ended)) = live_field(
                     ui,
                     intensity,
@@ -398,8 +414,7 @@ pub fn show_at(
                 .find(name)
                 .and_then(|id| model.parts().get(id))?;
             section_header(ui, name);
-            ui.horizontal(|ui| {
-                label(ui, tr(&ctx, "inspector-opacity"));
+            form_row(ui, &tr(&ctx, "inspector-opacity"), |ui| {
                 if let Some((v, ended)) = live_field(
                     ui,
                     p.opacity,
@@ -442,8 +457,7 @@ pub fn show_at(
             );
             let (opacity, draw_order) = crate::keyed::mesh_attrs(model, name, at)
                 .unwrap_or((mesh.opacity, mesh.draw_order));
-            ui.horizontal(|ui| {
-                label(ui, tr(&ctx, "inspector-opacity"));
+            form_row(ui, &tr(&ctx, "inspector-opacity"), |ui| {
                 if let Some((v, ended)) = live_field(
                     ui,
                     opacity,
@@ -463,8 +477,7 @@ pub fn show_at(
                     }
                 }
             });
-            ui.horizontal(|ui| {
-                label(ui, tr(&ctx, "inspector-draw-order"));
+            form_row(ui, &tr(&ctx, "inspector-draw-order"), |ui| {
                 if let Some((v, ended)) = live_field(
                     ui,
                     draw_order,
@@ -529,8 +542,7 @@ pub fn show_at(
                 requests.reset = true;
             }
             if let Some(opacity) = crate::keyed::deformer_opacity(model, name, at) {
-                ui.horizontal(|ui| {
-                    label(ui, tr(&ctx, "inspector-opacity"));
+                form_row(ui, &tr(&ctx, "inspector-opacity"), |ui| {
                     if let Some(v) = commit_field(
                         ui,
                         &format!("{name}/deformer-opacity"),
@@ -566,8 +578,7 @@ pub fn show_at(
                 let Some(&p) = shape.get(i as usize) else {
                     continue;
                 };
-                ui.horizontal(|ui| {
-                    label(ui, format!("{} {i}", tr(&ctx, "inspector-point")));
+                form_row(ui, &format!("{} {i}", tr(&ctx, "inspector-point")), |ui| {
                     for (axis, original) in [(0usize, p[0]), (1, p[1])] {
                         let key = format!("{name}/point{i}/{axis}");
                         if let Some(v) = commit_field(
@@ -599,8 +610,7 @@ pub fn show_at(
                 requests.reset = true;
             }
             if let Some(opacity) = crate::keyed::deformer_opacity(model, name, at) {
-                ui.horizontal(|ui| {
-                    label(ui, tr(&ctx, "inspector-opacity"));
+                form_row(ui, &tr(&ctx, "inspector-opacity"), |ui| {
                     if let Some(v) = commit_field(
                         ui,
                         &format!("{name}/deformer-opacity"),
@@ -646,8 +656,7 @@ pub fn show_at(
                 ),
             ];
             for (key, field, original, range, speed) in rows {
-                ui.horizontal(|ui| {
-                    label(ui, tr(&ctx, key));
+                form_row(ui, &tr(&ctx, key), |ui| {
                     if let Some(v) = commit_field(
                         ui,
                         &format!("{name}/{key}"),

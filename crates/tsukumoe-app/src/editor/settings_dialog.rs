@@ -533,8 +533,7 @@ impl Editor {
                 });
             }
             if let Some(a) = axis {
-                ui.horizontal(|ui| {
-                    label(ui, t("drag-sensitivity"));
+                form_row(ui, &t("drag-sensitivity"), |ui| {
                     tsukumoe_ui::number(
                         ui,
                         &mut a.points_per_range,
@@ -564,28 +563,42 @@ impl Editor {
         let t = |key: &str| tr(ctx, key);
         let mut changed = false;
         hint(ui, t("keymap-hint"));
-        for (action, text) in ACTIONS.iter().zip(texts.iter_mut()) {
-            ui.horizontal(|ui| {
-                ui.label(t(&actions::label_key(action)));
-                let r = text_input(ui, text, action, "");
-                if r.lost_focus() {
-                    let context = actions::context_of(action);
-                    let text = text.trim();
-                    if text.is_empty() {
-                        changed |= self.keymap.unbind(action, context);
-                        *error = None;
-                    } else {
-                        match self.keymap.bind(action, context, text) {
-                            Ok(()) => {
-                                changed = true;
-                                *error = None;
+        // Two columns so every field starts at the same place, with room between the
+        // name and the field, and a field only as wide as a key chord needs.
+        egui::Grid::new("tsukumoe-keymap")
+            .num_columns(2)
+            .spacing([20.0, 6.0])
+            .show(ui, |ui| {
+                for (action, text) in ACTIONS.iter().zip(texts.iter_mut()) {
+                    ui.scope(|ui| {
+                        ui.set_min_width(300.0);
+                        ui.label(t(&actions::label_key(action)));
+                    });
+                    let r = ui
+                        .scope(|ui| {
+                            ui.set_width(180.0);
+                            text_input(ui, text, action, "")
+                        })
+                        .inner;
+                    ui.end_row();
+                    if r.lost_focus() {
+                        let context = actions::context_of(action);
+                        let text = text.trim();
+                        if text.is_empty() {
+                            changed |= self.keymap.unbind(action, context);
+                            *error = None;
+                        } else {
+                            match self.keymap.bind(action, context, text) {
+                                Ok(()) => {
+                                    changed = true;
+                                    *error = None;
+                                }
+                                Err(_) => *error = Some(t("keymap-bad")),
                             }
-                            Err(_) => *error = Some(t("keymap-bad")),
                         }
                     }
                 }
             });
-        }
         for (a, b) in self.keymap.conflicts() {
             let name = |id: &str| t(&actions::label_key(id));
             hint(
@@ -682,8 +695,7 @@ impl Editor {
                 ("settings-vertex-radius", &mut o.vertex_radius),
                 ("settings-edge-radius", &mut o.edge_radius),
             ] {
-                ui.horizontal(|ui| {
-                    label(ui, t(key));
+                form_row(ui, &t(key), |ui| {
                     let range = options::RADIUS;
                     tsukumoe_ui::number(ui, value, range.0..=range.1, 0.25, &t(key));
                 });
@@ -702,8 +714,7 @@ impl Editor {
         self.edit_options(ctx, |o| {
             hint(ui, t("settings-history-hint"));
             let mut limit = o.history_limit as f32;
-            ui.horizontal(|ui| {
-                label(ui, t("settings-history-limit"));
+            form_row(ui, &t("settings-history-limit"), |ui| {
                 tsukumoe_ui::number(
                     ui,
                     &mut limit,
@@ -726,8 +737,7 @@ impl Editor {
                     options::MIRROR_TOLERANCE,
                 ),
             ] {
-                ui.horizontal(|ui| {
-                    label(ui, t(key));
+                form_row(ui, &t(key), |ui| {
                     tsukumoe_ui::number(ui, value, range.0..=range.1, 0.0005, &t(key));
                 });
             }
@@ -746,8 +756,7 @@ impl Editor {
             hint(ui, t("settings-autosave-hint"));
             checkbox(ui, &mut o.autosave, &t("settings-autosave"));
             let mut minutes = o.autosave_minutes as f32;
-            ui.horizontal(|ui| {
-                label(ui, t("settings-autosave-minutes"));
+            form_row(ui, &t("settings-autosave-minutes"), |ui| {
                 tsukumoe_ui::number(
                     ui,
                     &mut minutes,
@@ -779,7 +788,27 @@ fn autosave_due(elapsed: std::time::Duration, minutes: u32) -> bool {
     elapsed >= std::time::Duration::from_secs(u64::from(minutes) * 60)
 }
 
-const SELECT_LABEL_WIDTH: f32 = 130.0;
+/// The width of the name column of a settings row, so every field in a tab starts
+/// at the same place whatever its name.
+const FORM_LABEL_WIDTH: f32 = 200.0;
+
+/// A settings row: the name in a fixed-width column (cut short with the whole
+/// name as its tooltip), then whatever `add` puts to its right.
+fn form_row<R>(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(FORM_LABEL_WIDTH, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(FORM_LABEL_WIDTH);
+                ui.add(egui::Label::new(name).truncate())
+                    .on_hover_text(name);
+            },
+        );
+        add(ui)
+    })
+    .inner
+}
 
 /// A drop-down with its name on the left: `select` keeps the name for screen
 /// readers only, so alone it shows just the current value ("Dark").
@@ -790,18 +819,9 @@ fn labeled_select<T: PartialEq + Clone>(
     value: &mut T,
     options: &[(T, &str)],
 ) -> egui::Response {
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(SELECT_LABEL_WIDTH, ui.spacing().interact_size.y),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_width(SELECT_LABEL_WIDTH);
-                ui.add(egui::Label::new(name).truncate());
-            },
-        );
+    form_row(ui, name, |ui| {
         tsukumoe_ui::select(ui, id, name, value, options)
     })
-    .inner
 }
 
 #[cfg(test)]
