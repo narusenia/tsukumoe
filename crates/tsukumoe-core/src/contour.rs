@@ -76,7 +76,7 @@ impl Default for ContourParams {
         Self {
             threshold: 16,
             min_island: 0.001,
-            simplify: 2.0,
+            simplify: 1.0,
             offset: 2.0,
             spacing: 64.0,
             precise: false,
