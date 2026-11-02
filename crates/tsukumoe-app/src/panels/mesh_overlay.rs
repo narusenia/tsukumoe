@@ -8,7 +8,7 @@
 
 use egui::{Align2, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
 use tsukumoe_core::elements::Point;
-use tsukumoe_ui::{Theme, Variant};
+use tsukumoe_ui::{Icon, Theme, Variant};
 
 use crate::mesh_tool::{self, MeshTool};
 
@@ -160,18 +160,16 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                 .show(ui, |ui| {
                     // The sub-tools of the mesh tool: the active one is filled.
                     ui.horizontal(|ui| {
-                        for (pen, key, hint) in [
-                            (false, "mesh-edit-select", "mesh-edit-hint"),
-                            (true, "mesh-edit-pen", "mesh-edit-pen-hint"),
+                        for (pen, icon, key) in [
+                            (false, Icon::MousePointer, "mesh-edit-select"),
+                            (true, Icon::PenLine, "mesh-edit-pen"),
                         ] {
                             let variant = if tool.pen == pen {
                                 Variant::Primary
                             } else {
                                 Variant::Secondary
                             };
-                            if tsukumoe_ui::button(ui, &t(key), variant)
-                                .on_hover_text(t(hint))
-                                .clicked()
+                            if tsukumoe_ui::icon_button(ui, icon, &t(key), variant).clicked()
                                 && tool.pen != pen
                             {
                                 tool.pen = pen;

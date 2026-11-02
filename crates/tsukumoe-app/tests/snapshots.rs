@@ -88,6 +88,7 @@ fn mesh_overlay_snapshot(mode: Mode, name: &str) {
     let mut harness = Harness::builder().with_size(size).wgpu().build_ui_state(
         move |ui, tool: &mut MeshTool| {
             let ctx = ui.ctx().clone();
+            tsukumoe_ui::init(&ctx);
             tsukumoe_ui::install_cjk_font(&ctx);
             set_language(&ctx, Language::En);
             set_mode(&ctx, mode);
