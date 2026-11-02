@@ -189,6 +189,9 @@ pub enum Command {
     /// goes back to an even grid over its current box). For when the space of
     /// the base points changed under it.
     ClearWarpRestPoints { name: String },
+    /// Switches a warp deformer between bilinear and bicubic (through the
+    /// grid points) interpolation.
+    SetWarpBezier { name: String, bezier: bool },
     /// Gives a parameter a new name. Expressions of drivers that read it are
     /// rewritten to the new name; everything else refers to it by id.
     RenameParameter { name: String, new_name: String },
@@ -640,6 +643,10 @@ impl Model {
                 let id = self.resolve::<WarpDeformer>(name)?;
                 self.modify(changes, id, |d| d.rest_points = None);
             }
+            Command::SetWarpBezier { name, bezier } => {
+                let id = self.resolve::<WarpDeformer>(name)?;
+                self.modify(changes, id, |d| d.bezier = *bezier);
+            }
             Command::SetRotationBase { name, base } => {
                 let id = self.resolve::<RotationDeformer>(name)?;
                 self.reject_keyforms::<RotationDeformer>(id, name, |d| d.keyforms.is_some())?;
@@ -966,6 +973,10 @@ mod tests {
             },
             Command::ClearWarpRestPoints {
                 name: "Warp".into(),
+            },
+            Command::SetWarpBezier {
+                name: "Warp".into(),
+                bezier: true,
             },
             Command::SetRotationBase {
                 name: "Rot".into(),

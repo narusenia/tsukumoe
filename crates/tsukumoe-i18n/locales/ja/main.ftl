@@ -104,6 +104,7 @@ inspector-opacity = 不透明度
 inspector-vertices = 頂点数
 inspector-triangles = 三角形数
 inspector-grid = 格子（行 x 列）
+inspector-bezier = なめらかな曲面（ベジェ）
 inspector-point = 格子点
 inspector-origin-x = 原点 X
 inspector-origin-y = 原点 Y

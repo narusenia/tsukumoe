@@ -409,6 +409,13 @@ pub fn show_at(
                 ui,
                 format!("{}: {} x {}", tr(&ctx, "inspector-grid"), w.rows, w.columns),
             );
+            let mut bezier = w.bezier;
+            if checkbox(ui, &mut bezier, &tr(&ctx, "inspector-bezier")).changed() {
+                command = Some(Command::SetWarpBezier {
+                    name: name.clone(),
+                    bezier,
+                });
+            }
             // The selected control points, in the parent's space (the stored base).
             let selected: Vec<u32> = deformer
                 .filter(|t| t.deformer() == Some(name.as_str()))
