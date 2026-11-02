@@ -112,11 +112,7 @@ pub fn key_here(
     element: &ElementRef,
     at: &dyn Fn(ParameterId) -> f32,
 ) -> Option<Vec<usize>> {
-    let place = match element {
-        ElementRef::Mesh { name } => keyed::mesh_place(model, name, at),
-        ElementRef::Deformer { name } => keyed::deformer_place(model, name, at),
-    };
-    match place? {
+    match keyed::element_place(model, element, at)? {
         keyed::Place::Key { key, .. } => Some(key),
         keyed::Place::Off { .. } => None,
     }

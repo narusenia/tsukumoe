@@ -190,7 +190,10 @@ pub enum Command {
     /// Binds elements without keyforms to a parameter: keys at its minimum,
     /// default and maximum (fewer when they coincide), every keyform a copy of
     /// the element's shape, so nothing drawn changes. Elements that get the
-    /// same keys share one binding. Fails for an element that already has keyforms.
+    /// same keys share one binding. An element that has keyforms already gets
+    /// the parameter as one more axis (the last), every keyform of the new
+    /// grid the old grid's value there, so nothing drawn changes. Fails for an
+    /// element that is bound to the parameter already.
     BindParameter {
         parameter: String,
         elements: Vec<ElementRef>,

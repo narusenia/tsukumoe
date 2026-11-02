@@ -139,7 +139,8 @@ pub fn neighbour(keys: &[f32], value: f32, range: f32, dir: i32) -> Option<f32> 
     }
 }
 
-/// Binds the selected elements that have no keyforms to `parameter`.
+/// Binds the selected elements to `parameter`: an element with no keyforms
+/// gets a one-axis grid, one that has them gets the parameter as one more axis.
 pub fn bind(model: &Model, parameter: &str, selection: &[Selection]) -> Result<Op, ParamError> {
     let all = elements(selection);
     if all.is_empty() {
@@ -147,7 +148,7 @@ pub fn bind(model: &Model, parameter: &str, selection: &[Selection]) -> Result<O
     }
     let free: Vec<ElementRef> = all
         .into_iter()
-        .filter(|e| binding_of(model, e).is_none())
+        .filter(|e| keys_of(model, parameter, e).is_none())
         .collect();
     if free.is_empty() {
         return Err(ParamError::AlreadyBound);
@@ -346,6 +347,26 @@ mod tests {
 
     fn apply(m: &mut Model, op: Result<Op, ParamError>) {
         m.apply(op.unwrap().0).unwrap();
+    }
+
+    #[test]
+    fn a_bound_element_can_take_a_second_parameter_but_not_the_same_twice() {
+        let mut m = model();
+        m.apply(Command::AddParameter {
+            name: "Q".into(),
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            repeat: false,
+        })
+        .unwrap();
+        let op = bind(&m, "P", &sel(&["A"]));
+        apply(&mut m, op);
+        let op = bind(&m, "Q", &sel(&["A"]));
+        apply(&mut m, op);
+        let a = ElementRef::Mesh { name: "A".into() };
+        assert_eq!(binding_of(&m, &a).unwrap().axes().len(), 2);
+        assert_eq!(bind(&m, "Q", &sel(&["A"])), Err(ParamError::AlreadyBound));
     }
 
     #[test]

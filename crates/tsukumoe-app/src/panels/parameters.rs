@@ -301,8 +301,19 @@ fn edit_section(
         hint(ui, format!("{}{}", if on { "\u{25c6} " } else { "" }, text));
     }
     if let Some(element) = param_ops::elements(selection).pop()
-        && param_ops::binding_of(model, &element).is_some()
+        && let Some(binding) = param_ops::binding_of(model, &element)
     {
+        // With several axes: which combination the sliders are on.
+        if binding.axes().len() > 1 {
+            let at = crate::keyed::values(model, view);
+            let place = crate::keyed::element_place(model, &element, &at);
+            let (mark, label) = match place {
+                Some(crate::keyed::Place::Key { label, .. }) => ("\u{25c6} ", label),
+                Some(crate::keyed::Place::Off { label }) => ("", label),
+                None => ("", String::new()),
+            };
+            hint(ui, format!("{mark}{label}"));
+        }
         mirror_row(ui, model, view, &element, outs);
     }
     ui.separator();
