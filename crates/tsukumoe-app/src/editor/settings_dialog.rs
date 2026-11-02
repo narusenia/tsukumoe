@@ -270,6 +270,11 @@ impl Editor {
         }
     }
 
+    /// The pie menu's settings alone, for the snapshot test.
+    pub fn pie_settings(&mut self, ctx: &Context, ui: &mut Ui) {
+        self.pie_contents(ctx, ui);
+    }
+
     fn pie_contents(&mut self, ctx: &Context, ui: &mut Ui) {
         let t = |key: &str| tr(ctx, key);
         let before = self.pie_config.clone();
@@ -300,7 +305,50 @@ impl Editor {
                 }
             }
         }
-        slots(ui, &mut self.pie_config.items, &options, "pie", &t);
+        // The top level as the pie itself: slot 1 at the top, going clockwise.
+        let n = self.pie_config.items.len().max(1);
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width().min(460.0), 300.0),
+            egui::Sense::hover(),
+        );
+        let (rx, ry) = (rect.width() / 2.0 - 80.0, rect.height() / 2.0 - 24.0);
+        let theme = tsukumoe_ui::Theme::get(ctx);
+        ui.painter().circle_stroke(
+            rect.center(),
+            ry.min(rx) * 0.45,
+            egui::Stroke::new(1.0, theme.colors.border),
+        );
+        for (i, entry) in self.pie_config.items.iter_mut().enumerate() {
+            let a = i as f32 * std::f32::consts::TAU / n as f32;
+            let at = rect.center() + egui::vec2(rx * a.sin(), -ry * a.cos());
+            let slot = egui::Rect::from_center_size(at, egui::vec2(150.0, 24.0));
+            // A child at a fixed spot: it must not move the parent's cursor.
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(slot));
+            let ui = &mut child;
+            match entry {
+                Entry::Action { action } => {
+                    tsukumoe_ui::select(
+                        ui,
+                        format!("pie/{i}"),
+                        &format!("{}", i + 1),
+                        action,
+                        &options,
+                    );
+                }
+                Entry::Group { label: name, .. } => {
+                    ui.label(format!("{}. {} \u{203a}", i + 1, t(name)));
+                }
+            }
+        }
+        // The slots inside a group, listed under the pie.
+        for (i, entry) in self.pie_config.items.iter_mut().enumerate() {
+            if let Entry::Group { label: name, items } = entry {
+                label(ui, format!("{}. {}", i + 1, t(name)));
+                ui.indent(format!("pie/{i}"), |ui| {
+                    slots(ui, items, &options, &format!("pie/{i}"), &t)
+                });
+            }
+        }
         if button(ui, &t("pie-reset"), Variant::Secondary).clicked() {
             self.pie_config = PieConfig::default();
         }

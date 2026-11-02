@@ -964,3 +964,23 @@ fn keyform_caption_in_the_dark_theme() {
 fn keyform_caption_in_the_light_theme() {
     keyform_caption_snapshot(Mode::Light, "keyform_caption_light");
 }
+
+/// The pie menu's settings: the slots laid around a circle.
+#[test]
+fn pie_settings_in_the_light_theme() {
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(520.0, 520.0))
+        .wgpu()
+        .build_ui_state(
+            |ui, editor: &mut Editor| {
+                let ctx = ui.ctx().clone();
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::En);
+                set_mode(&ctx, Mode::Light);
+                editor.pie_settings(&ctx, ui);
+            },
+            Editor::new(None),
+        );
+    harness.run();
+    harness.snapshot_options("pie_settings_light", &SnapshotOptions::new().threshold(3.0));
+}
