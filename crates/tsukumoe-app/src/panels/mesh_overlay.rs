@@ -219,11 +219,10 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static s
                     ui.add(float(value, max)).accessible_name(t(key));
                     ui.end_row();
                 }
-                ui.label("");
-                tsukumoe_ui::checkbox(ui, &mut c.precise, &t("mesh-edit-contour-precise"))
-                    .on_hover_text(t("mesh-edit-contour-precise-hint"));
-                ui.end_row();
             });
+        // Under the rows, at their left edge: it belongs to the whole outline.
+        tsukumoe_ui::checkbox(ui, &mut c.precise, &t("mesh-edit-contour-precise"))
+            .on_hover_text(t("mesh-edit-contour-precise-hint"));
         // The spacing is 0 (none) or at least 4.
         if c.spacing > 0.0 && c.spacing < 4.0 {
             c.spacing = 4.0;

@@ -439,3 +439,6 @@ pie-mode-own = Use slots of its own for this mode
 pie-mode-uses-common = Using the common slots.
 pie-slot-add = Add a slot
 pie-slot-remove = Remove the last slot
+pie-slot-group = Group (submenu)
+pie-group-name = Group name
+pie-group-new = New group

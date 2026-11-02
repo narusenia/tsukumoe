@@ -965,22 +965,25 @@ fn keyform_caption_in_the_light_theme() {
     keyform_caption_snapshot(Mode::Light, "keyform_caption_light");
 }
 
-/// The pie menu's settings: the slots laid around a circle.
+/// The settings dialog on its pie tab: tall enough for the slots, a picture of
+/// the pie beside the numbered list.
 #[test]
-fn pie_settings_in_the_light_theme() {
+fn the_pie_tab_of_the_settings_dialog_in_the_light_theme() {
+    let mut editor = Editor::new(None);
+    assert!(editor.run_action(&egui::Context::default(), "view.pie-settings"));
     let mut harness = Harness::builder()
-        .with_size(egui::vec2(700.0, 600.0))
+        .with_size(egui::vec2(1100.0, 800.0))
         .wgpu()
         .build_ui_state(
             |ui, editor: &mut Editor| {
                 let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
                 tsukumoe_ui::install_cjk_font(&ctx);
                 set_language(&ctx, Language::En);
                 set_mode(&ctx, Mode::Light);
-                let mut mode = 0;
-                editor.pie_settings(&ctx, ui, &mut mode);
+                editor.ui(ui, None);
             },
-            Editor::new(None),
+            editor,
         );
     harness.run();
     harness.snapshot_options("pie_settings_light", &SnapshotOptions::new().threshold(3.0));

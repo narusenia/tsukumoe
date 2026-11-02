@@ -964,7 +964,8 @@ impl Editor {
             "edit.redo" => drop(self.redo()),
             "view.palette" => self.open_palette(),
             "view.settings" => self.open_settings(SettingsTab::General),
-            "view.pie-settings" | "view.drag-settings" | "view.confirm-settings" => {
+            "view.pie-settings" => self.open_settings(SettingsTab::Pie),
+            "view.drag-settings" | "view.confirm-settings" => {
                 self.open_settings(SettingsTab::Controls);
             }
             "view.keymap-settings" => self.open_settings(SettingsTab::Shortcuts),
@@ -2281,7 +2282,7 @@ mod tests {
         for (action, tab) in [
             ("view.settings", SettingsTab::General),
             ("view.drag-settings", SettingsTab::Controls),
-            ("view.pie-settings", SettingsTab::Controls),
+            ("view.pie-settings", SettingsTab::Pie),
             ("view.confirm-settings", SettingsTab::Controls),
             ("view.keymap-settings", SettingsTab::Shortcuts),
         ] {

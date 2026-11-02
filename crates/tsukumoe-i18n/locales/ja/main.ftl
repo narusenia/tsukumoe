@@ -435,3 +435,6 @@ pie-mode-own = このモード専用の割り当てにする
 pie-mode-uses-common = 共通の割り当てを使っています。
 pie-slot-add = スロットを追加
 pie-slot-remove = 最後のスロットを削除
+pie-slot-group = グループ（サブメニュー）
+pie-group-name = グループ名
+pie-group-new = 新しいグループ

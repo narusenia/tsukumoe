@@ -115,6 +115,7 @@ impl Editor {
                     ui.separator();
                     ui.vertical(|ui| {
                         ui.set_width(WIDTH - TAB_COLUMN - 24.0);
+                        ui.set_min_height(body_height);
                         ScrollArea::vertical()
                             .max_height(body_height)
                             .auto_shrink([false, false])
@@ -274,11 +275,6 @@ impl Editor {
         }
     }
 
-    /// The pie menu's settings alone, for the snapshot test.
-    pub fn pie_settings(&mut self, ctx: &Context, ui: &mut Ui, mode: &mut usize) {
-        self.pie_contents(ctx, ui, mode);
-    }
-
     /// The pie menu: which slots each mode opens, laid out like the pie. Mode 0
     /// is the common set; a tool can have slots of its own.
     fn pie_contents(&mut self, ctx: &Context, ui: &mut Ui, mode: &mut usize) {
@@ -339,8 +335,9 @@ impl Editor {
         }
     }
 
-    /// The slots of one set, one per spot around a ring (1 at the top, going
-    /// clockwise), then the slots inside each group, and the add / remove buttons.
+    /// The slots of one set: a picture of the pie on the left, the numbered
+    /// slots on the right. Each slot is an action or a group (a submenu with a
+    /// name of its own and slots inside).
     fn pie_slots(
         ui: &mut Ui,
         items: &mut Vec<Entry>,
@@ -348,89 +345,145 @@ impl Editor {
         t: &dyn Fn(&str) -> String,
     ) {
         const MAX_SLOTS: usize = 12;
-        const SLOT_WIDTH: f32 = 170.0;
+        const PIE_PICTURE: f32 = 220.0;
+        /// The select's value that stands for "a group" (no action has a NUL in its name).
+        const GROUP: &str = "\u{0}group";
+        /// A group's name is a translation key for the built-in one, else typed text.
+        fn group_name(label: &str, t: &dyn Fn(&str) -> String) -> String {
+            t(label)
+        }
         fn rows(
             ui: &mut Ui,
             entries: &mut [Entry],
             options: &[(String, &str)],
             path: &str,
+            groups_allowed: bool,
             t: &dyn Fn(&str) -> String,
         ) {
+            let mut choices: Vec<(String, &str)> = options.to_vec();
+            let group_text = t("pie-slot-group");
+            if groups_allowed {
+                choices.push((GROUP.to_owned(), group_text.as_str()));
+            }
             for (i, entry) in entries.iter_mut().enumerate() {
                 let id = format!("{path}/{i}");
-                match entry {
-                    Entry::Action { action } => {
-                        labeled_select(ui, id, &format!("{}", i + 1), action, options);
+                let mut current = match &*entry {
+                    Entry::Action { action } => action.clone(),
+                    Entry::Group { .. } => GROUP.to_owned(),
+                };
+                let before = current.clone();
+                ui.horizontal(|ui| {
+                    ui.label(format!("{}", i + 1));
+                    tsukumoe_ui::select(
+                        ui,
+                        id.clone(),
+                        &format!("{}", i + 1),
+                        &mut current,
+                        &choices,
+                    );
+                    if let Entry::Group { label, .. } = &mut *entry {
+                        let mut text = group_name(label, t);
+                        let name = t("pie-group-name");
+                        if tsukumoe_ui::text_input(ui, &mut text, &name, &name).changed() {
+                            *label = text;
+                        }
                     }
-                    Entry::Group { label: name, items } => {
-                        label(ui, t(name));
-                        ui.indent(id.clone(), |ui| rows(ui, items, options, &id, t));
-                    }
+                });
+                if current != before {
+                    *entry = if current == GROUP {
+                        Entry::Group {
+                            label: t("pie-group-new"),
+                            items: vec![Entry::Action {
+                                action: "view.palette".to_owned(),
+                            }],
+                        }
+                    } else {
+                        Entry::Action { action: current }
+                    };
+                }
+                if let Entry::Group { items, .. } = entry {
+                    ui.indent(id.clone(), |ui| {
+                        rows(ui, items, options, &id, false, t);
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_enabled(
+                                    items.len() < MAX_SLOTS,
+                                    egui::Button::new(t("pie-slot-add")),
+                                )
+                                .clicked()
+                            {
+                                items.push(Entry::Action {
+                                    action: "view.palette".to_owned(),
+                                });
+                            }
+                            if ui
+                                .add_enabled(
+                                    items.len() > 1,
+                                    egui::Button::new(t("pie-slot-remove")),
+                                )
+                                .clicked()
+                            {
+                                items.pop();
+                            }
+                        });
+                    });
                 }
             }
         }
         let n = items.len().max(1);
-        let width = ui.available_width().min(640.0);
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 340.0), egui::Sense::hover());
-        // The slots sit on an ellipse, kept inside the area whole.
-        let rx = (rect.width() - SLOT_WIDTH) / 2.0;
-        let ry = rect.height() / 2.0 - 20.0;
-        let theme = tsukumoe_ui::Theme::get(ui.ctx());
-        ui.painter().circle_stroke(
-            rect.center(),
-            ry.min(rx) * 0.4,
-            egui::Stroke::new(1.0, theme.colors.border),
-        );
-        for (i, entry) in items.iter_mut().enumerate() {
-            let a = i as f32 * std::f32::consts::TAU / n as f32;
-            let at = rect.center() + egui::vec2(rx * a.sin(), -ry * a.cos());
-            let slot = egui::Rect::from_center_size(at, egui::vec2(SLOT_WIDTH, 24.0));
-            // A child at a fixed spot: it must not move the parent's cursor.
-            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(slot));
-            let ui = &mut child;
-            ui.set_width(SLOT_WIDTH);
-            match entry {
-                Entry::Action { action } => {
-                    tsukumoe_ui::select(
-                        ui,
-                        format!("pie/{i}"),
-                        &format!("{}", i + 1),
-                        action,
-                        options,
-                    );
-                }
-                Entry::Group { label: name, .. } => {
-                    ui.label(format!("{}. {} \u{203a}", i + 1, t(name)));
-                }
+        ui.horizontal_top(|ui| {
+            let (rect, _) =
+                ui.allocate_exact_size(egui::vec2(PIE_PICTURE, PIE_PICTURE), egui::Sense::hover());
+            let theme = tsukumoe_ui::Theme::get(ui.ctx());
+            let painter = ui.painter_at(rect);
+            let radius = PIE_PICTURE / 2.0 - 16.0;
+            painter.circle_filled(rect.center(), radius, theme.colors.surface);
+            painter.circle_stroke(
+                rect.center(),
+                radius,
+                egui::Stroke::new(1.0, theme.colors.border_strong),
+            );
+            painter.circle_filled(rect.center(), radius * 0.25, theme.colors.background);
+            for i in 0..n {
+                let a = i as f32 * std::f32::consts::TAU / n as f32;
+                let dir = egui::vec2(a.sin(), -a.cos());
+                painter.line_segment(
+                    [
+                        rect.center() + dir * radius * 0.25,
+                        rect.center() + dir * radius,
+                    ],
+                    egui::Stroke::new(1.0, theme.colors.border),
+                );
+                painter.text(
+                    rect.center() + dir * radius * 0.62,
+                    egui::Align2::CENTER_CENTER,
+                    format!("{}", i + 1),
+                    egui::FontId::proportional(theme.metrics.text + 2.0),
+                    theme.colors.text,
+                );
             }
-        }
-        // The slots inside a group, listed under the pie.
-        for (i, entry) in items.iter_mut().enumerate() {
-            if let Entry::Group { label: name, items } = entry {
-                label(ui, format!("{}. {}", i + 1, t(name)));
-                ui.indent(format!("pie/{i}"), |ui| {
-                    rows(ui, items, options, &format!("pie/{i}"), t)
+            ui.vertical(|ui| {
+                rows(ui, items, options, "pie", true, t);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            items.len() < MAX_SLOTS,
+                            egui::Button::new(t("pie-slot-add")),
+                        )
+                        .clicked()
+                    {
+                        items.push(Entry::Action {
+                            action: "view.palette".to_owned(),
+                        });
+                    }
+                    if ui
+                        .add_enabled(items.len() > 1, egui::Button::new(t("pie-slot-remove")))
+                        .clicked()
+                    {
+                        items.pop();
+                    }
                 });
-            }
-        }
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    items.len() < MAX_SLOTS,
-                    egui::Button::new(t("pie-slot-add")),
-                )
-                .clicked()
-            {
-                items.push(Entry::Action {
-                    action: "view.palette".to_owned(),
-                });
-            }
-            if ui
-                .add_enabled(items.len() > 1, egui::Button::new(t("pie-slot-remove")))
-                .clicked()
-            {
-                items.pop();
-            }
+            });
         });
     }
 
