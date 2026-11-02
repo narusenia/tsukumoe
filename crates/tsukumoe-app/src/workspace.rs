@@ -32,6 +32,9 @@ pub enum Workspace {
 impl Workspace {
     pub const ALL: [Self; 2] = [Self::Modeling, Self::Animation];
 
+    /// The workspaces the editor offers. Animation stays hidden until M5-08 gives it its tools.
+    pub const SHOWN: [Self; 1] = [Self::Modeling];
+
     pub fn key(self) -> &'static str {
         match self {
             Self::Modeling => "modeling",

@@ -178,7 +178,10 @@ impl Editor {
             .unwrap_or_default();
         let mut editor = Self {
             doc: None,
-            workspace: serde_json::from_value(state["workspace"].clone()).unwrap_or_default(),
+            workspace: serde_json::from_value(state["workspace"].clone())
+                .ok()
+                .filter(|w| Workspace::SHOWN.contains(w))
+                .unwrap_or_default(),
             layouts,
             recent: Recent::from_json(&state["recent"]),
             settings_dir,
@@ -1394,17 +1397,20 @@ impl Editor {
                 if !native {
                     ui.separator();
                 }
-                let mut selected = Workspace::ALL
-                    .iter()
-                    .position(|w| *w == workspace)
-                    .unwrap_or(0);
-                let names: Vec<String> = Workspace::ALL
-                    .iter()
-                    .map(|w| t(&format!("workspace-{}", w.key())))
-                    .collect();
-                let names_ref: Vec<&str> = names.iter().map(String::as_str).collect();
-                if tsukumoe_ui::tabs(ui, &mut selected, &names_ref).changed() {
-                    switch = Some(Workspace::ALL[selected]);
+                // One workspace needs no switcher.
+                if Workspace::SHOWN.len() > 1 {
+                    let mut selected = Workspace::SHOWN
+                        .iter()
+                        .position(|w| *w == workspace)
+                        .unwrap_or(0);
+                    let names: Vec<String> = Workspace::SHOWN
+                        .iter()
+                        .map(|w| t(&format!("workspace-{}", w.key())))
+                        .collect();
+                    let names_ref: Vec<&str> = names.iter().map(String::as_str).collect();
+                    if tsukumoe_ui::tabs(ui, &mut selected, &names_ref).changed() {
+                        switch = Some(Workspace::SHOWN[selected]);
+                    }
                 }
             });
         });
@@ -2040,7 +2046,9 @@ mod tests {
             .unwrap();
         let mut h = harness(editor);
         h.run();
-        h.get_by_label("Animation").click();
+        // Animation has no tab until M5-08; the switch itself still works.
+        assert!(h.query_by_label("Animation").is_none());
+        h.state_mut().switch_workspace(Workspace::Animation);
         h.run();
         let e = h.state();
         assert_eq!(e.workspace, Workspace::Animation);
@@ -2053,10 +2061,10 @@ mod tests {
             e.layouts.current(Workspace::Modeling),
             e.layouts.current(Workspace::Animation)
         );
-        // the choice is remembered
+        // a saved Animation choice opens as Modeling while it is hidden
         assert_eq!(
             Editor::new(Some(dir.clone())).workspace,
-            Workspace::Animation
+            Workspace::Modeling
         );
         std::fs::remove_dir_all(&dir).ok();
     }
