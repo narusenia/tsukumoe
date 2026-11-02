@@ -95,6 +95,8 @@ pub struct ViewState {
     /// Counts changes the viewport must redraw for.
     revision: u64,
     pub param_filter: String,
+    /// The parameter the panel's edit section and the key buttons work on.
+    pub param_focus: Option<String>,
     /// Proportional edit options; not saved with the project or the layout.
     pub proportional: crate::proportional::Proportional,
 }
@@ -262,6 +264,32 @@ impl ViewState {
         self.params.insert(name.to_owned(), value);
         self.touch();
         value
+    }
+
+    /// Moves a parameter's value and the panel focus to its new name.
+    pub fn rename_param(&mut self, from: &str, to: &str) {
+        if let Some(v) = self.params.remove(from) {
+            self.params.insert(to.to_owned(), v);
+        }
+        if self.param_focus.as_deref() == Some(from) {
+            self.param_focus = Some(to.to_owned());
+        }
+        if self.selection == Some(Selection::Parameter(from.to_owned())) {
+            self.selection = Some(Selection::Parameter(to.to_owned()));
+        }
+        self.touch();
+    }
+
+    /// Drops the value, the focus and the selection of a deleted parameter.
+    pub fn forget_param(&mut self, name: &str) {
+        self.params.remove(name);
+        if self.param_focus.as_deref() == Some(name) {
+            self.param_focus = None;
+        }
+        if self.selection == Some(Selection::Parameter(name.to_owned())) {
+            self.selection = None;
+        }
+        self.touch();
     }
 
     pub fn reset_params(&mut self) {

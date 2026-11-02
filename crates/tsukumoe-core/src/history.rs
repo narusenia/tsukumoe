@@ -5,7 +5,9 @@
 
 use crate::arena::Id;
 use crate::command::Command;
+use crate::driver::Driver;
 use crate::elements::{Parameter, Part};
+use crate::keyform::Binding;
 use crate::model::Model;
 use crate::rig::{ArtMesh, RotationDeformer, WarpDeformer};
 use crate::table::Table;
@@ -31,8 +33,32 @@ impl<T: Clone> Edit<T> {
     }
 }
 
+/// A binding in the arena before and after a command (no name: ids only).
+/// `before` empty is an insertion, `after` empty is a removal.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BindingEdit {
+    pub(crate) id: crate::keyform::BindingId,
+    pub(crate) before: Option<Binding>,
+    pub(crate) after: Option<Binding>,
+}
+
+impl BindingEdit {
+    fn set(&self, model: &mut Model, state: &Option<Binding>) {
+        match state {
+            Some(value) => {
+                model.bindings.restore(self.id, value.clone());
+            }
+            None => {
+                model.bindings.remove(self.id);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Change {
+    Binding(BindingEdit),
+    Driver(Edit<Driver>),
     Parameter(Edit<Parameter>),
     Part(Edit<Part>),
     // Boxed: a mesh edit holds two copies of the mesh, far larger than the others.
@@ -44,6 +70,8 @@ pub(crate) enum Change {
 impl Change {
     pub(crate) fn undo(&self, model: &mut Model) {
         match self {
+            Change::Binding(e) => e.set(model, &e.before),
+            Change::Driver(e) => e.set(&mut model.drivers, &e.before),
             Change::Parameter(e) => e.set(&mut model.parameters, &e.before),
             Change::Part(e) => e.set(&mut model.parts, &e.before),
             Change::Mesh(e) => e.set(&mut model.meshes, &e.before),
@@ -54,6 +82,8 @@ impl Change {
 
     pub(crate) fn redo(&self, model: &mut Model) {
         match self {
+            Change::Binding(e) => e.set(model, &e.after),
+            Change::Driver(e) => e.set(&mut model.drivers, &e.after),
             Change::Parameter(e) => e.set(&mut model.parameters, &e.after),
             Change::Part(e) => e.set(&mut model.parts, &e.after),
             Change::Mesh(e) => e.set(&mut model.meshes, &e.after),
@@ -82,6 +112,19 @@ impl Editable for Parameter {
     }
     fn change(edit: Edit<Self>) -> Change {
         Change::Parameter(edit)
+    }
+}
+
+impl Editable for Driver {
+    const KIND: &'static str = "driver";
+    fn table(model: &Model) -> &Table<Self> {
+        &model.drivers
+    }
+    fn table_mut(model: &mut Model) -> &mut Table<Self> {
+        &mut model.drivers
+    }
+    fn change(edit: Edit<Self>) -> Change {
+        Change::Driver(edit)
     }
 }
 

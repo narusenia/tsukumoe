@@ -19,6 +19,7 @@ pub mod eval;
 pub mod expr;
 pub mod history;
 pub mod keyform;
+pub mod keyform_edit;
 pub mod layout;
 pub mod mesh_edit;
 pub mod model;

@@ -374,6 +374,101 @@ the base points changed under it.
 {"type":"clear_warp_rest_points","name":"FaceWarp"}
 ```
 
+### `rename_parameter`
+
+Gives a parameter a new name. Expressions of drivers that read it are
+rewritten to the new name; everything else refers to it by id.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_parameter"` | yes |  |
+
+```json
+{"type":"rename_parameter","name":"ParamAngleX","new_name":"AngleX"}
+```
+
+### `set_parameter_repeat`
+
+Turns the wrap-around of a parameter on or off.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `repeat` | boolean | yes |  |
+| `type` | `"set_parameter_repeat"` | yes |  |
+
+```json
+{"type":"set_parameter_repeat","name":"ParamAngleX","repeat":true}
+```
+
+### `bind_parameter`
+
+Binds elements without keyforms to a parameter: keys at its minimum,
+default and maximum (fewer when they coincide), every keyform a copy of
+the element's shape, so nothing drawn changes. Elements that get the
+same keys share one binding. Fails for an element that already has keyforms.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `elements` | Command[] | yes |  |
+| `parameter` | string | yes |  |
+| `type` | `"bind_parameter"` | yes |  |
+
+```json
+{"type":"bind_parameter","parameter":"ParamAngleX","elements":[{"kind":"mesh","name":"Skin"},{"kind":"deformer","name":"FaceWarp"}]}
+```
+
+### `unbind_parameter`
+
+Takes elements off a parameter: the axis goes and the shape at the
+parameter's default is kept; with no axis left the keyforms go and that
+shape becomes the base shape.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `elements` | Command[] | yes |  |
+| `parameter` | string | yes |  |
+| `type` | `"unbind_parameter"` | yes |  |
+
+```json
+{"type":"unbind_parameter","parameter":"ParamAngleX","elements":[{"kind":"mesh","name":"Skin"}]}
+```
+
+### `add_parameter_key`
+
+Adds a key at `value` on the axis of `parameter` of the element's
+binding, filled with the interpolated shape (nothing drawn changes).
+Every element on that binding gets the key.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `element` | Command | yes |  |
+| `parameter` | string | yes |  |
+| `type` | `"add_parameter_key"` | yes |  |
+| `value` | number | yes |  |
+
+```json
+{"type":"add_parameter_key","parameter":"ParamAngleX","value":10.0,"element":{"kind":"mesh","name":"Skin"}}
+```
+
+### `remove_parameter_key`
+
+Removes the key at exactly `value` (and its keyforms) from the axis of
+`parameter` of the element's binding, for every element on it. The last key stays.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `element` | Command | yes |  |
+| `parameter` | string | yes |  |
+| `type` | `"remove_parameter_key"` | yes |  |
+| `value` | number | yes |  |
+
+```json
+{"type":"remove_parameter_key","parameter":"ParamAngleX","value":10.0,"element":{"kind":"mesh","name":"Skin"}}
+```
+
 ### `set_rotation_base`
 
 Replaces the base shape of a rotation deformer. Fails if it has keyforms.
