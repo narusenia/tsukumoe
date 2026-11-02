@@ -130,6 +130,8 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                         Vec2::new(LABEL_WIDTH, m.control),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
+                            // The slider starts at the same x on every row, whatever the name.
+                            ui.set_min_width(LABEL_WIDTH);
                             name_label(ui, model, view, &name, &mut outs);
                         },
                     );
@@ -260,11 +262,14 @@ fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs
     } else {
         egui::RichText::new(name)
     };
-    let r = ui.add(
-        egui::Label::new(text)
-            .truncate()
-            .sense(egui::Sense::click()),
-    );
+    // A long name is cut to the column; the tooltip shows all of it.
+    let r = ui
+        .add(
+            egui::Label::new(text)
+                .truncate()
+                .sense(egui::Sense::click()),
+        )
+        .on_hover_text(name);
     if r.clicked() {
         view.param_focus = Some(name.to_owned());
     }
@@ -369,7 +374,10 @@ fn link_row(
                 ui.allocate_ui_with_layout(
                     row,
                     egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| name_label(ui, model, view, name, outs),
+                    |ui| {
+                        ui.set_min_width(LABEL_WIDTH);
+                        name_label(ui, model, view, name, outs);
+                    },
                 );
             }
         });
