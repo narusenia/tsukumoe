@@ -149,6 +149,29 @@ pub fn menu_item(ui: &mut Ui, text: &str, shortcut: Option<&str>) -> Response {
     ui.add(button)
 }
 
+/// [`menu_item`] with an icon before the text, in the text color; `enabled`
+/// false greys it out and it does not click.
+pub fn menu_item_icon(
+    ui: &mut Ui,
+    icon: crate::icons::Icon,
+    text: &str,
+    shortcut: Option<&str>,
+    enabled: bool,
+) -> Response {
+    let t = Theme::get(ui.ctx());
+    let color = if enabled {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let mut button = egui::Button::image_and_text(icon.image(color, t.metrics.icon), text)
+        .min_size(vec2(160.0, t.metrics.control));
+    if let Some(shortcut) = shortcut {
+        button = button.shortcut_text(shortcut);
+    }
+    ui.add_enabled(enabled, button)
+}
+
 /// A menu entry that is a choice: `checked` is `None` for an ordinary entry,
 /// else a check mark (an empty space of the same width when false) comes first.
 pub fn menu_item_checked(
