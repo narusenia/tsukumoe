@@ -359,6 +359,21 @@ Replaces the base control points of a warp deformer; the count must stay `(rows 
 {"type":"set_warp_base_points","name":"FaceWarp","points":[[0.0,0.0],[2.0,0.0],[0.0,2.0],[2.0,2.0]]}
 ```
 
+### `clear_warp_rest_points`
+
+Drops the remembered original grid of a warp deformer (its reset then
+goes back to an even grid over its current box). For when the space of
+the base points changed under it.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"clear_warp_rest_points"` | yes |  |
+
+```json
+{"type":"clear_warp_rest_points","name":"FaceWarp"}
+```
+
 ### `set_rotation_base`
 
 Replaces the base shape of a rotation deformer. Fails if it has keyforms.

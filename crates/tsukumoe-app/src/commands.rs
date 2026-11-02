@@ -154,6 +154,7 @@ mod tests {
             Command::SetDeformerParent { .. } => "set_deformer_parent",
             Command::SetMeshParent { .. } => "set_mesh_parent",
             Command::SetWarpBasePoints { .. } => "set_warp_base_points",
+            Command::ClearWarpRestPoints { .. } => "clear_warp_rest_points",
             Command::SetRotationBase { .. } => "set_rotation_base",
             Command::RenamePart { .. } => "rename_part",
             Command::RenameMesh { .. } => "rename_mesh",
@@ -255,6 +256,9 @@ mod tests {
             Command::SetWarpBasePoints {
                 name: "FaceWarp".into(),
                 points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
+            },
+            Command::ClearWarpRestPoints {
+                name: "FaceWarp".into(),
             },
             Command::SetRotationBase {
                 name: "HeadRotation".into(),

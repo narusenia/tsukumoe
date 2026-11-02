@@ -77,6 +77,7 @@ fn model() -> Model {
                 columns: 2,
                 bezier: true,
                 base_points: warp_points(1.0),
+                rest_points: None,
                 keyforms: Some(KeyformGrid::new(
                     one_axis,
                     vec![warp_keyform(1.0), warp_keyform(1.1)],

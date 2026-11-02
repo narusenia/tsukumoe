@@ -362,6 +362,7 @@ mod tests {
                     columns: 1,
                     bezier: false,
                     base_points: flat.clone(),
+                    rest_points: None,
                     keyforms: Some(KeyformGrid::new(binding, vec![key(flat), key(moved)])),
                 },
             )

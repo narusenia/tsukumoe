@@ -148,6 +148,7 @@ fn rich_model() -> Model {
                 columns: 1,
                 bezier: false,
                 base_points: UNIT_GRID.to_vec(),
+                rest_points: None,
                 keyforms: Some(KeyformGrid::new(b1, vec![warp_kf(0.0), warp_kf(0.3)])),
             },
         )

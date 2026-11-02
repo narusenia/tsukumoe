@@ -133,6 +133,11 @@ pub struct WarpDeformer {
     /// Bezier-interpolated grid instead of bilinear.
     pub bezier: bool,
     pub base_points: Vec<Point>,
+    /// The grid as it was made, in the same space as `base_points`: what a
+    /// reset goes back to. Kept by editing the points, dropped when the space
+    /// of `base_points` changes (a new parent, a moved axis) and absent in
+    /// models made without an editor.
+    pub rest_points: Option<Vec<Point>>,
     pub keyforms: Option<KeyformGrid<WarpKeyform>>,
 }
 
