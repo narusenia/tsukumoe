@@ -792,3 +792,53 @@ fn parameters_panel_in_the_dark_theme() {
 fn parameters_panel_in_the_light_theme() {
     parameters_snapshot(Mode::Light, "parameters_light");
 }
+
+/// The key being edited under the help line: on a key (top) and, dimmed, off
+/// one (bottom), over the proportional options box and the tool bar.
+fn keyform_caption_snapshot(mode: Mode, name: &str) {
+    use egui::Rect;
+    use tsukumoe_app::keyed::Place;
+    use tsukumoe_app::panels::mesh_overlay;
+    use tsukumoe_ui::Theme;
+
+    let size = egui::vec2(420.0, 220.0);
+    let mut harness = Harness::builder()
+        .with_size(size)
+        .wgpu()
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            egui_extras::install_image_loaders(&ctx);
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let theme = Theme::get(&ctx);
+            let painter = ui.painter_at(ui.max_rect());
+            painter.rect_filled(ui.max_rect(), 0.0, theme.colors.background);
+            let top = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(size.x, 110.0));
+            let bottom = Rect::from_min_size(egui::pos2(0.0, 110.0), egui::vec2(size.x, 110.0));
+            mesh_overlay::caption(&painter, &theme, top, "Click to select, Shift to add.");
+            let on = Place::Key {
+                key: vec![2],
+                flat: 2,
+                label: "ParamAngleX = 30.00".into(),
+            };
+            mesh_overlay::key_caption(&painter, &theme, top, &ctx, &on);
+            mesh_overlay::caption(&painter, &theme, bottom, "Click to select, Shift to add.");
+            let off = Place::Off {
+                label: "ParamAngleX = 12.00".into(),
+            };
+            mesh_overlay::key_caption(&painter, &theme, bottom, &ctx, &off);
+        });
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn keyform_caption_in_the_dark_theme() {
+    keyform_caption_snapshot(Mode::Dark, "keyform_caption_dark");
+}
+
+#[test]
+fn keyform_caption_in_the_light_theme() {
+    keyform_caption_snapshot(Mode::Light, "keyform_caption_light");
+}
