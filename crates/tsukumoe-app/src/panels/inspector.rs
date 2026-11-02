@@ -74,9 +74,13 @@ fn color_row(
     let mut out = None;
     ui.horizontal(|ui| {
         // The same width for every row, so the buttons line up.
-        ui.add_sized(
-            [COLOR_LABEL_WIDTH, ui.spacing().interact_size.y],
-            egui::Label::new(tr(ctx, key)).truncate(),
+        ui.allocate_ui_with_layout(
+            egui::vec2(COLOR_LABEL_WIDTH, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(COLOR_LABEL_WIDTH);
+                ui.add(egui::Label::new(tr(ctx, key)).truncate());
+            },
         );
         let mut rgb = current;
         let response = ui.color_edit_button_rgb(&mut rgb);

@@ -29,7 +29,7 @@ pub fn names(model: &Model, filter: &str) -> Vec<String> {
         .collect()
 }
 
-const LABEL_WIDTH: f32 = 120.0;
+const LABEL_WIDTH: f32 = 84.0;
 /// The width of the number field next to a slider or a pad.
 const NUMBER_WIDTH: f32 = 64.0;
 /// The width of the link button at the start of a row.

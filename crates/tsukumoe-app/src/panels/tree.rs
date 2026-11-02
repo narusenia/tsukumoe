@@ -325,12 +325,15 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                 pos2(rect.right() - control, rect.top()),
                 vec2(control, rect.height()),
             );
-            let hovered = response.hovered() || ui.rect_contains_pointer(more_rect);
             // The solo button sits left of the "..." button: on a hovered row, and
-            // always on the row that is soloed.
+            // always on the row that is soloed. A button under the pointer takes the
+            // hover from the row, so both rectangles count as the row being hovered.
             let solo_ok = row.kind != Kind::Glue;
             let is_solo = solo_ok && view.solo.as_ref() == Some(&row.selection());
             let solo_rect = more_rect.translate(vec2(-control, 0.0));
+            let hovered = response.hovered()
+                || ui.rect_contains_pointer(more_rect)
+                || (solo_ok && ui.rect_contains_pointer(solo_rect));
             let right = if hovered && solo_ok || is_solo {
                 solo_rect.left()
             } else if hovered {
@@ -1032,6 +1035,28 @@ mod tests {
             m.apply(mesh(n, "Arm")).unwrap();
         }
         m
+    }
+
+    #[test]
+    fn the_solo_button_of_a_hovered_row_sets_and_ends_the_solo() {
+        let mut h = harness(many(), Panel::Parts);
+        h.run();
+        h.get_by_label("a1").hover();
+        h.run();
+        // The pointer moves onto the button: it must stay there to be clicked.
+        h.get_by_label("Solo (press again to end)").click();
+        h.run();
+        assert_eq!(h.state().1.solo, Some(Selection::Mesh("a1".into())));
+        // The soloed row keeps its button without the pointer on the row.
+        h.get_by_label("Solo (press again to end)").click();
+        h.run();
+        assert_eq!(h.state().1.solo, None);
+        // A folder can be soloed too.
+        h.get_by_label("Arm").hover();
+        h.run();
+        h.get_by_label("Solo (press again to end)").click();
+        h.run();
+        assert_eq!(h.state().1.solo, Some(Selection::Part("Arm".into())));
     }
 
     #[test]

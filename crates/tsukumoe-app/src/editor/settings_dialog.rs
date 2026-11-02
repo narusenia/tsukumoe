@@ -173,7 +173,7 @@ impl Editor {
                 .iter()
                 .map(|t| (format!("theme:{}", t.name), t.name.as_str())),
         );
-        let theme_changed = tsukumoe_ui::select(
+        let theme_changed = labeled_select(
             ui,
             "settings-theme",
             &t("host-theme"),
@@ -196,7 +196,7 @@ impl Editor {
         ];
         let density_options: Vec<(Density, &str)> =
             densities.iter().map(|(d, n)| (*d, n.as_str())).collect();
-        tsukumoe_ui::select(
+        labeled_select(
             ui,
             "settings-density",
             &t("host-density"),
@@ -207,7 +207,7 @@ impl Editor {
         let auto = t("language-auto");
         let mut languages = vec![(None, auto.as_str())];
         languages.extend(Language::ALL.map(|l| (Some(l), l.native_name())));
-        tsukumoe_ui::select(
+        labeled_select(
             ui,
             "settings-language",
             &t("host-language"),
@@ -221,7 +221,7 @@ impl Editor {
         ];
         let style_options: Vec<(TabStyle, &str)> =
             styles.iter().map(|(s, n)| (*s, n.as_str())).collect();
-        tsukumoe_ui::select(
+        labeled_select(
             ui,
             "settings-tab-style",
             &t("menu-tab-style"),
@@ -291,7 +291,7 @@ impl Editor {
                 let id = format!("{path}/{i}");
                 match entry {
                     Entry::Action { action } => {
-                        tsukumoe_ui::select(ui, id, &format!("{}", i + 1), action, options);
+                        labeled_select(ui, id, &format!("{}", i + 1), action, options);
                     }
                     Entry::Group { label: name, items } => {
                         label(ui, t(name));
@@ -332,7 +332,7 @@ impl Editor {
         ];
         let options: Vec<(Modifier, &str)> =
             modifiers.iter().map(|(m, n)| (*m, n.as_str())).collect();
-        tsukumoe_ui::select(
+        labeled_select(
             ui,
             "drag-modifier",
             &t("drag-modifier"),
@@ -347,7 +347,7 @@ impl Editor {
             options.extend(names.iter().map(|n| (Some(n.clone()), n.as_str())));
             let none = t("drag-none");
             options[0].1 = &none;
-            if tsukumoe_ui::select(ui, key, &t("drag-parameter"), &mut choice, &options).changed() {
+            if labeled_select(ui, key, &t("drag-parameter"), &mut choice, &options).changed() {
                 *axis = choice.map(|parameter| match axis.take() {
                     Some(a) => AxisTarget { parameter, ..a },
                     None => AxisTarget {
@@ -495,7 +495,7 @@ impl Editor {
         let choices: Vec<(Background, &str)> =
             names.iter().map(|(b, n)| (*b, n.as_str())).collect();
         self.edit_options(ctx, |o| {
-            tsukumoe_ui::select(
+            labeled_select(
                 ui,
                 "settings-background",
                 &t("settings-background"),
@@ -602,6 +602,31 @@ impl Editor {
 /// Whether `elapsed` since the last auto-save is at least the interval.
 fn autosave_due(elapsed: std::time::Duration, minutes: u32) -> bool {
     elapsed >= std::time::Duration::from_secs(u64::from(minutes) * 60)
+}
+
+const SELECT_LABEL_WIDTH: f32 = 130.0;
+
+/// A drop-down with its name on the left: `select` keeps the name for screen
+/// readers only, so alone it shows just the current value ("Dark").
+fn labeled_select<T: PartialEq + Clone>(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    name: &str,
+    value: &mut T,
+    options: &[(T, &str)],
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(SELECT_LABEL_WIDTH, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(SELECT_LABEL_WIDTH);
+                ui.add(egui::Label::new(name).truncate());
+            },
+        );
+        tsukumoe_ui::select(ui, id, name, value, options)
+    })
+    .inner
 }
 
 #[cfg(test)]
