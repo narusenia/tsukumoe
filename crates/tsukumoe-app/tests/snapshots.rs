@@ -758,6 +758,20 @@ fn parameters_snapshot(mode: Mode, name: &str) {
                 name: "Skin".into(),
             },
         },
+        // A second axis: the panel shows the key grid.
+        Command::BindParameter {
+            parameter: "ParamEyeOpen".into(),
+            elements: vec![ElementRef::Mesh {
+                name: "Skin".into(),
+            }],
+        },
+        Command::SetMeshKeyform {
+            name: "Skin".into(),
+            key: vec![3, 0],
+            positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
+            opacity: 1.0,
+            draw_order: 500.0,
+        },
     ] {
         model.apply(command).unwrap();
     }
@@ -768,7 +782,7 @@ fn parameters_snapshot(mode: Mode, name: &str) {
     let p = model.parameters().get(id).unwrap().clone();
     view.set_param("ParamAngleX", &p, 12.0);
     let mut harness = Harness::builder()
-        .with_size(egui::vec2(420.0, 300.0))
+        .with_size(egui::vec2(420.0, 480.0))
         .wgpu()
         .build_ui_state(
             move |ui, state: &mut (Model, ViewState)| {
