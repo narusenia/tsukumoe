@@ -54,8 +54,6 @@ pub struct DeletePlan {
     pub commands: Vec<Command>,
     /// How many elements go.
     pub count: usize,
-    /// A part with something under it is going: ask first.
-    pub needs_confirm: bool,
 }
 
 fn deformer_depth(model: &Model, r: DeformerRef) -> usize {
@@ -82,7 +80,6 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
     let mut meshes: Vec<String> = Vec::new();
     let mut deformers: Vec<DeformerRef> = Vec::new();
     let mut parts: Vec<String> = Vec::new();
-    let mut under_parts = 0;
     for item in items {
         let Some((kind, name)) = kind_of(item) else {
             continue;
@@ -126,7 +123,6 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
                     for (_, n, m) in model.meshes().iter() {
                         if m.part == part && !meshes.iter().any(|x| x == n) {
                             meshes.push(n.to_owned());
-                            under_parts += 1;
                         }
                     }
                     let owned = model
@@ -144,7 +140,6 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
                     for r in owned {
                         if !deformers.contains(&r) {
                             deformers.push(r);
-                            under_parts += 1;
                         }
                     }
                 }
@@ -154,7 +149,6 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
                     .rev()
                     .filter_map(|&id| model.parts().name(id).map(str::to_owned))
                     .collect();
-                under_parts += names.len() - 1;
                 for n in names {
                     if !parts.contains(&n) {
                         parts.push(n);
@@ -179,7 +173,6 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
     );
     DeletePlan {
         count: commands.len(),
-        needs_confirm: under_parts > 0,
         commands,
     }
 }
@@ -457,7 +450,6 @@ mod tests {
         let plan = delete_plan(d.model(), &[Selection::Part("Head".into())]);
         // Skin, Fringe; R before W; Hair before Head.
         assert_eq!(plan.count, 6);
-        assert!(plan.needs_confirm);
         let pos = |c: &Command| plan.commands.iter().position(|x| x == c).unwrap();
         assert!(
             pos(&Command::RemoveDeformer { name: "R".into() })
@@ -491,10 +483,9 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_mesh_or_a_deformer_needs_no_confirmation_and_failures_leave_the_model() {
+    fn deleting_a_mesh_or_a_deformer_and_failures_leave_the_model() {
         let mut d = Dispatcher::new(model());
         let plan = delete_plan(d.model(), &[Selection::Mesh("Sleeve".into())]);
-        assert!(!plan.needs_confirm);
         assert_eq!(
             plan.commands,
             [Command::RemoveMesh {
@@ -503,7 +494,6 @@ mod tests {
         );
         // A deformer with children cannot go: the command fails and nothing changes.
         let plan = delete_plan(d.model(), &[Selection::Warp("W".into())]);
-        assert!(!plan.needs_confirm);
         let steps = d.log().len();
         assert!(
             d.submit(Command::Batch {

@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::actions::{self, ACTIONS, Tool};
+use crate::confirm::{Confirm, KINDS, Kind};
 use crate::deformer_ops::{self, Target};
 use crate::deformer_tool::DeformerTool;
 use crate::drag::{AxisTarget, DragAssignment, Modifier};
@@ -40,14 +41,17 @@ const TREE_FILE: &str = "tree.json";
 const KEYMAP_FILE: &str = "keymap.json";
 const DRAG_FILE: &str = "drag.json";
 const PIE_FILE: &str = "pie.json";
+const CONFIRM_FILE: &str = "confirm.json";
 
 pub enum Dialog {
     Open(String),
     SaveAs(String),
     SaveLayout(String),
     ConfirmPreset(Preset),
-    /// Deleting these takes `count` elements with it.
-    ConfirmDelete(Vec<Selection>, usize),
+    /// A deletion waiting for a yes.
+    Confirm(Box<Pending>),
+    /// Which deletions ask first.
+    ConfirmSettings,
     /// The shortcut list: the text of each action's field, and the last error.
     Keymap(Vec<String>, Option<String>),
     /// The drag-to-parameter assignment being edited.
@@ -64,6 +68,27 @@ pub enum Dialog {
     SaveAsFolder(String),
 }
 
+/// What a confirmed deletion does.
+pub enum Then {
+    Tree(Vec<Selection>),
+    Param(Op),
+    Mesh(Op),
+}
+
+/// A deletion that asked first: what it is about, and what to do on yes.
+pub struct Pending {
+    kind: Kind,
+    /// The names it is about, already translated and joined.
+    what: String,
+    /// How many elements go, when that is more than what is named.
+    count: Option<usize>,
+    then: Then,
+    /// The "don't ask again" box.
+    skip: bool,
+    /// Drawn at least once: the focus has been put on Cancel.
+    shown: bool,
+}
+
 pub struct Editor {
     pub doc: Option<Document>,
     pub workspace: Workspace,
@@ -77,6 +102,7 @@ pub struct Editor {
     pub palette: Palette,
     pub keymap: Keymap,
     pub drag: DragAssignment,
+    pub confirm: Confirm,
     /// The tree panels' state of each workspace (the open one is in `view`),
     /// and what was last written to `tree.json`.
     trees: [(TreeView, TreeView); 2],
@@ -128,6 +154,7 @@ impl Editor {
             .unwrap_or_else(actions::cubism_compatible);
         let drag =
             read(DRAG_FILE).map_or_else(DragAssignment::default, |t| DragAssignment::from_json(&t));
+        let confirm = read(CONFIRM_FILE).map_or_else(Confirm::default, |t| Confirm::from_json(&t));
         let pie_config =
             read(PIE_FILE).map_or_else(PieConfig::default, |t| PieConfig::from_json(&t));
         let tree_file: serde_json::Value = read(TREE_FILE)
@@ -145,6 +172,7 @@ impl Editor {
             palette: Palette::default(),
             keymap,
             drag,
+            confirm,
             trees: Default::default(),
             trees_saved: String::new(),
             tab_style: state["tab_style"]
@@ -446,6 +474,9 @@ impl Editor {
                     self.view.forget_param(&name);
                 }
             }
+            parameters::Out::Confirm(kind, name, op) => {
+                self.ask(ctx, kind, name, None, Then::Param(op));
+            }
             parameters::Out::Rename { from, to } => {
                 let command = tsukumoe_core::command::Command::RenameParameter {
                     name: from.clone(),
@@ -504,11 +535,8 @@ impl Editor {
                 if plan.commands.is_empty() {
                     return;
                 }
-                if plan.needs_confirm {
-                    self.dialog = Some(Dialog::ConfirmDelete(items, plan.count));
-                } else {
-                    self.delete_items(ctx, &items);
-                }
+                let what = names_of(ctx, &items);
+                self.ask(ctx, Kind::Tree, what, Some(plan.count), Then::Tree(items));
             }
             tree::Out::Duplicate(items) => {
                 let Some(doc) = &self.doc else { return };
@@ -569,6 +597,42 @@ impl Editor {
         }
     }
 
+    /// Runs `then` now, or asks first when `kind` is set to ask. Every
+    /// deletion from the UI comes through here.
+    fn ask(&mut self, ctx: &Context, kind: Kind, what: String, count: Option<usize>, then: Then) {
+        if self.confirm.asks(kind) {
+            self.dialog = Some(Dialog::Confirm(Box::new(Pending {
+                kind,
+                what,
+                count,
+                then,
+                skip: false,
+                shown: false,
+            })));
+        } else {
+            self.run_then(ctx, then);
+        }
+    }
+
+    fn run_then(&mut self, ctx: &Context, then: Then) {
+        match then {
+            Then::Tree(items) => self.delete_items(ctx, &items),
+            Then::Param(op) => self.apply_parameter_out(ctx, parameters::Out::Op(op)),
+            Then::Mesh(op) => {
+                self.mesh_tool.clear_selection();
+                self.apply_mesh_op(ctx, Ok(op));
+            }
+        }
+    }
+
+    fn save_confirm(&mut self, ctx: &Context) {
+        if let Some(dir) = &self.settings_dir
+            && let Err(e) = settings::write(dir, CONFIRM_FILE, &self.confirm.to_json())
+        {
+            self.toasts.push(ctx, Tone::Error, e);
+        }
+    }
+
     /// Deletes `items` (a part with what is under it) as one undo step.
     fn delete_items(&mut self, ctx: &Context, items: &[Selection]) {
         let Some(doc) = &self.doc else { return };
@@ -613,7 +677,15 @@ impl Editor {
             return;
         }
         let op = match action {
-            "mesh.delete-vertices" => self.mesh_tool.delete_selected(&name, &g),
+            "mesh.delete-vertices" => {
+                // Ask on a copy: cancelling must keep the selection.
+                let count = self.mesh_tool.vertices().len();
+                let op = self.mesh_tool.clone().delete_selected(&name, &g);
+                return match op {
+                    Ok(op) => self.ask(ctx, Kind::Vertices, name, Some(count), Then::Mesh(op)),
+                    Err(e) => self.apply_mesh_op(ctx, Err(e)),
+                };
+            }
             "mesh.connect" => self.mesh_tool.connect_selected(&name, &g),
             "mesh.retriangulate" => self.mesh_tool.retriangulate(&name, &g),
             "mesh.fill-grid" => self.mesh_tool.fill_grid(&name, &g),
@@ -690,6 +762,7 @@ impl Editor {
             "view.palette" => self.open_palette(),
             "view.pie-settings" => self.dialog = Some(Dialog::Pie),
             "view.drag-settings" => self.dialog = Some(Dialog::Drag),
+            "view.confirm-settings" => self.dialog = Some(Dialog::ConfirmSettings),
             "view.keymap-settings" => {
                 let texts = ACTIONS
                     .iter()
@@ -1014,8 +1087,11 @@ impl Editor {
             &[]
         };
         self.viewport_hovered = false;
-        for action in self.keymap.triggered(&ctx, active) {
-            self.run_action(&ctx, &action);
+        // A dialog is modal: shortcuts wait until it is closed.
+        if self.dialog.is_none() {
+            for action in self.keymap.triggered(&ctx, active) {
+                self.run_action(&ctx, &action);
+            }
         }
         self.pie_frame(&ctx);
         let maximized = titlebar::is_maximized(&ctx);
@@ -1172,6 +1248,20 @@ impl Editor {
             return;
         };
         let t = |key: &str| tr(ctx, key);
+        if let Dialog::Confirm(pending) = dialog {
+            self.confirm_dialog(ctx, pending);
+            return;
+        }
+        if matches!(dialog, Dialog::ConfirmSettings) {
+            let mut open = true;
+            if self.confirm_settings_dialog(ctx, &mut open) {
+                self.save_confirm(ctx);
+            }
+            if open {
+                self.dialog = Some(dialog);
+            }
+            return;
+        }
         if matches!(dialog, Dialog::Pie) {
             let mut open = true;
             if self.pie_dialog(ctx, &mut open)
@@ -1230,8 +1320,12 @@ impl Editor {
             Dialog::SaveAsFolder(_) => (t("dialog-save-folder-title"), "dialog-save-folder"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
-            Dialog::ConfirmDelete(..) => (t("tree-delete-title"), "dialog-confirm-delete"),
-            Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {
+            Dialog::Confirm(_)
+            | Dialog::ConfirmSettings
+            | Dialog::Keymap(..)
+            | Dialog::Drag
+            | Dialog::Pie
+            | Dialog::PsdImport(_) => {
                 unreachable!("handled above")
             }
         };
@@ -1258,13 +1352,12 @@ impl Editor {
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
                 }
-                Dialog::ConfirmDelete(_, count) => {
-                    hint(
-                        ui,
-                        tr_args(ctx, "tree-delete-body", &[("count", Arg::from(*count))]),
-                    );
-                }
-                Dialog::Keymap(..) | Dialog::Drag | Dialog::Pie | Dialog::PsdImport(_) => {}
+                Dialog::Confirm(_)
+                | Dialog::ConfirmSettings
+                | Dialog::Keymap(..)
+                | Dialog::Drag
+                | Dialog::Pie
+                | Dialog::PsdImport(_) => {}
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -1317,7 +1410,6 @@ impl Editor {
                     }
                 }
                 Dialog::ConfirmPreset(preset) => self.apply_preset(*preset),
-                Dialog::ConfirmDelete(items, _) => self.delete_items(ctx, items),
                 _ => {}
             }
             open = false;
@@ -1325,6 +1417,84 @@ impl Editor {
         if open {
             self.dialog = Some(dialog);
         }
+    }
+}
+
+impl Editor {
+    /// A deletion waiting for a yes. Focus starts on Cancel so that Enter does
+    /// not delete; Delete is a click or Cmd/Ctrl+Enter, Escape cancels.
+    fn confirm_dialog(&mut self, ctx: &Context, mut pending: Box<Pending>) {
+        let t = |key: &str| tr(ctx, key);
+        let mut open = true;
+        let mut cancelled = false;
+        let mut done = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+        tsukumoe_ui::dialog(
+            ctx,
+            "dialog-confirm",
+            &t("confirm-title"),
+            &mut open,
+            |ui| {
+                label(ui, t(pending.kind.key()));
+                ui.add_space(4.0);
+                hint(ui, pending.what.clone());
+                if let Some(count) = pending.count {
+                    hint(
+                        ui,
+                        tr_args(ctx, "confirm-count", &[("count", Arg::from(count))]),
+                    );
+                }
+                hint(ui, t("confirm-undo"));
+                ui.add_space(4.0);
+                checkbox(ui, &mut pending.skip, &t("confirm-skip"));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    done |= button(ui, &t("confirm-delete"), Variant::Danger).clicked();
+                    let cancel = button(ui, &t("dialog-cancel"), Variant::Secondary);
+                    if !pending.shown {
+                        cancel.request_focus();
+                    }
+                    cancelled |= cancel.clicked();
+                });
+            },
+        );
+        pending.shown = true;
+        open &= !cancelled;
+        if done {
+            if pending.skip {
+                self.confirm.set(pending.kind, false);
+                self.save_confirm(ctx);
+            }
+            self.run_then(ctx, pending.then);
+        } else if open {
+            self.dialog = Some(Dialog::Confirm(pending));
+        }
+    }
+
+    /// Menu: which deletions ask first. True when something changed.
+    fn confirm_settings_dialog(&mut self, ctx: &Context, open: &mut bool) -> bool {
+        let t = |key: &str| tr(ctx, key);
+        let before = self.confirm.clone();
+        let confirm = &mut self.confirm;
+        tsukumoe_ui::dialog(
+            ctx,
+            "dialog-confirm-settings",
+            &t("confirm-settings-title"),
+            open,
+            |ui| {
+                hint(ui, t("confirm-settings-hint"));
+                for kind in KINDS {
+                    let mut asks = confirm.asks(kind);
+                    if checkbox(ui, &mut asks, &t(kind.key())).changed() {
+                        confirm.set(kind, asks);
+                    }
+                }
+                ui.add_space(8.0);
+                if button(ui, &t("confirm-reset"), Variant::Secondary).clicked() {
+                    confirm.reset();
+                }
+            },
+        );
+        self.confirm != before
     }
 }
 
@@ -1820,6 +1990,25 @@ impl PanelHost for Panels<'_> {
 }
 
 /// The name an element of the selection has.
+/// The first few names, then how many more.
+fn names_of(ctx: &Context, items: &[Selection]) -> String {
+    let mut text = items
+        .iter()
+        .take(3)
+        .map(selection_name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if items.len() > 3 {
+        let more = tr_args(
+            ctx,
+            "confirm-more",
+            &[("count", Arg::from(items.len() - 3))],
+        );
+        text = format!("{text}, {more}");
+    }
+    text
+}
+
 fn selection_name(s: &Selection) -> &str {
     match s {
         Selection::Part(n)
@@ -2166,6 +2355,18 @@ mod tests {
             .mesh_tool
             .click(&positions, &indices, &m, [100.0, 100.0], false);
         assert!(editor.run_action(&ctx, "mesh.delete-vertices"));
+        // It asks first, and nothing changes (the selection stays) until the yes.
+        assert!(matches!(
+            &editor.dialog,
+            Some(Dialog::Confirm(p)) if p.kind == crate::confirm::Kind::Vertices && p.count == Some(1)
+        ));
+        assert_eq!(editor.doc.as_ref().unwrap().dispatcher.log().len(), steps);
+        assert_eq!(editor.mesh_tool.vertices().len(), 1);
+        let Some(Dialog::Confirm(pending)) = editor.dialog.take() else {
+            panic!("a pending deletion");
+        };
+        editor.run_then(&ctx, pending.then);
+        assert!(editor.mesh_tool.vertices().is_empty());
         let d = &mut editor.doc.as_mut().unwrap().dispatcher;
         assert_eq!(d.log().len(), steps + 1);
         assert_eq!(
@@ -2384,7 +2585,10 @@ mod tests {
             &ctx,
             tree::Out::Delete(vec![Selection::Part("TreeB".into())]),
         );
-        assert!(matches!(editor.dialog, Some(Dialog::ConfirmDelete(_, 2))));
+        assert!(matches!(
+            &editor.dialog,
+            Some(Dialog::Confirm(p)) if p.kind == crate::confirm::Kind::Tree && p.count == Some(2)
+        ));
         assert_eq!(steps(&editor), base + 3);
         assert_eq!(model(&editor), (false, true));
         editor.delete_items(&ctx, &[Selection::Part("TreeB".into())]);
@@ -2399,14 +2603,72 @@ mod tests {
                 && d.model().meshes().find("Renamed").is_some()
         );
         assert!(d.model().validate().is_empty());
-        // A mesh goes at once, without asking.
+        // A mesh asks too, and goes with the yes; switched off, it goes at once.
         editor.dialog = None;
         editor.apply_tree_out(
             &ctx,
             tree::Out::Delete(vec![Selection::Mesh("Renamed.copy".into())]),
         );
+        assert!(matches!(editor.dialog, Some(Dialog::Confirm(_))));
+        editor.dialog = None;
+        editor.confirm.set(crate::confirm::Kind::Tree, false);
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Delete(vec![Selection::Mesh("Renamed.copy".into())]),
+        );
         assert!(editor.dialog.is_none());
-        assert_eq!(steps(&editor), base + 4);
+        // The undone step is replaced by the new one.
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        assert_eq!(
+            d.name_of(d.log().len() - 1).as_deref(),
+            Some("tree_delete: Renamed.copy")
+        );
+    }
+
+    #[test]
+    fn a_deletion_asks_until_its_kind_is_switched_off_and_that_is_saved() {
+        let dir = std::env::temp_dir().join(format!("tsukumoe-app-confirm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut editor = open_minimal();
+        editor.settings_dir = Some(dir.clone());
+        let ctx = Context::default();
+        let create = |e: &mut Editor| {
+            let op = crate::param_ops::create_parameter(e.doc.as_ref().unwrap().dispatcher.model());
+            e.apply_parameter_out(&ctx, parameters::Out::Op(op));
+        };
+        let delete = |e: &mut Editor| {
+            let op = crate::param_ops::delete_parameter(
+                e.doc.as_ref().unwrap().dispatcher.model(),
+                "Param",
+            )
+            .unwrap();
+            e.apply_parameter_out(
+                &ctx,
+                parameters::Out::Confirm(crate::confirm::Kind::Parameter, "Param".into(), op),
+            );
+        };
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        create(&mut editor);
+        let base = steps(&editor);
+        delete(&mut editor);
+        assert!(matches!(
+            &editor.dialog,
+            Some(Dialog::Confirm(p)) if p.kind == crate::confirm::Kind::Parameter
+        ));
+        assert_eq!(steps(&editor), base);
+        // Switched off: it goes at once, and the choice survives a restart.
+        editor.dialog = None;
+        editor.confirm.set(crate::confirm::Kind::Parameter, false);
+        editor.save_confirm(&ctx);
+        delete(&mut editor);
+        assert!(editor.dialog.is_none());
+        assert_eq!(steps(&editor), base + 1);
+        let again = Editor::new(Some(dir.clone()));
+        assert!(
+            !again.confirm.asks(crate::confirm::Kind::Parameter)
+                && again.confirm.asks(crate::confirm::Kind::Tree)
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

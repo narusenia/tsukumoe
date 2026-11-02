@@ -11,6 +11,7 @@ use tsukumoe_core::elements::Parameter;
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{Icon, Variant, button, hint, icon_button, number, slider, text_input, tr};
 
+use crate::confirm::Kind;
 use crate::mesh_tool::Op;
 use crate::param_ops;
 use crate::tree_model::matches;
@@ -37,6 +38,8 @@ const SNAP_POINTS: f32 = 6.0;
 pub enum Out {
     /// A command and its history name.
     Op(Op),
+    /// A deletion the editor may ask about first: its kind, the parameter it is about, the op.
+    Confirm(Kind, String, Op),
     /// A parameter rename; the editor moves the view state along with it.
     Rename { from: String, to: String },
     /// Something that cannot be done, as a translation key for a toast.
@@ -175,7 +178,7 @@ fn edit_section(
         // The delete button first: the name field takes the width that is left.
         if icon_button(ui, Icon::Trash, &t("param-delete"), Variant::Danger).clicked() {
             match param_ops::delete_parameter(model, name) {
-                Some(op) => outs.push(Out::Op(op)),
+                Some(op) => outs.push(Out::Confirm(Kind::Parameter, name.to_owned(), op)),
                 None => outs.push(Out::Error("param-err-not-bound")),
             }
         }
@@ -270,7 +273,7 @@ fn edit_section(
         }
         if icon_button(ui, Icon::Minus, &t("param-key-remove"), Variant::Ghost).clicked() {
             outs.push(match param_ops::remove_key(model, name, value, selection) {
-                Ok(op) => Out::Op(op),
+                Ok(op) => Out::Confirm(Kind::Key, name.to_owned(), op),
                 Err(e) => Out::Error(e.key()),
             });
         }
@@ -282,7 +285,7 @@ fn edit_section(
         }
         if keys.is_some() && button(ui, &t("param-unbind"), Variant::Secondary).clicked() {
             outs.push(match param_ops::unbind(model, name, selection) {
-                Ok(op) => Out::Op(op),
+                Ok(op) => Out::Confirm(Kind::Unbind, name.to_owned(), op),
                 Err(e) => Out::Error(e.key()),
             });
         }
