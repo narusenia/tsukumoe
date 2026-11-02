@@ -20,7 +20,7 @@ pub fn hint(ui: &mut Ui, text: impl Into<String>) -> Response {
 pub fn section_header(ui: &mut Ui, text: &str) -> Response {
     let t = Theme::get(ui.ctx());
     ui.label(
-        RichText::new(text.to_uppercase())
+        RichText::new(text)
             .size(t.metrics.text - 2.0)
             .color(t.colors.text_muted)
             .strong(),
