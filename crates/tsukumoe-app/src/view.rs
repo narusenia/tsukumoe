@@ -76,6 +76,9 @@ impl Camera {
     }
 }
 
+/// Seconds the pointer rests on an item before its card shows.
+pub const CARD_DELAY: f64 = 0.5;
+
 #[derive(Clone, Debug, Default)]
 pub struct ViewState {
     /// What is selected; with several, the one chosen last.
@@ -92,6 +95,8 @@ pub struct ViewState {
     /// What the pointer rests on in the viewport or a tree row, with the UI
     /// pass it was set in; see `set_hover`. Not saved.
     hover: Option<(Selection, u64)>,
+    /// When the pointer came to rest on the hovered item (egui time).
+    hover_since: f64,
     /// The texture pages for the mesh pictures; loaded by the editor. Not saved.
     pub atlas: crate::atlas::Atlas,
     /// The parts panel and the deformers panel.
@@ -195,6 +200,7 @@ impl ViewState {
     pub fn set_hover(&mut self, ctx: &egui::Context, s: Selection) {
         // The panel drawn earlier in this pass has not seen it: draw once more.
         if self.hover.as_ref().is_none_or(|(old, _)| *old != s) {
+            self.hover_since = ctx.input(|i| i.time);
             ctx.request_repaint();
         }
         self.hover = Some((s, ctx.cumulative_pass_nr()));
@@ -205,6 +211,17 @@ impl ViewState {
     pub fn hover(&self, ctx: &egui::Context) -> Option<&Selection> {
         let (s, pass) = self.hover.as_ref()?;
         (pass + 1 >= ctx.cumulative_pass_nr()).then_some(s)
+    }
+
+    /// The hovered item once the pointer has rested on it for [`CARD_DELAY`].
+    pub fn hover_card(&self, ctx: &egui::Context) -> Option<&Selection> {
+        let s = self.hover(ctx)?;
+        let waited = ctx.input(|i| i.time) - self.hover_since;
+        if waited < CARD_DELAY {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(CARD_DELAY - waited));
+            return None;
+        }
+        Some(s)
     }
 
     /// Selects `s` alone.
@@ -388,6 +405,28 @@ pub fn meshes_of_item(model: &tsukumoe_core::model::Model, item: &Selection) -> 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_hover_card_waits_half_a_second() {
+        let ctx = egui::Context::default();
+        let mut v = ViewState::default();
+        let at = |t: f64| egui::RawInput {
+            time: Some(t),
+            ..Default::default()
+        };
+        ctx.run_pass(at(1.0), |ctx| {
+            v.set_hover(ctx, Selection::Mesh("a".into()));
+            assert!(v.hover_card(ctx).is_none());
+        })
+        .textures_delta
+        .clear();
+        ctx.run_pass(at(1.6), |ctx| {
+            v.set_hover(ctx, Selection::Mesh("a".into()));
+            assert_eq!(v.hover_card(ctx), Some(&Selection::Mesh("a".into())));
+        })
+        .textures_delta
+        .clear();
+    }
+
     use super::*;
 
     const FIT: [f32; 4] = [-1.0, -1.0, 1.0, 1.0];

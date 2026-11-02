@@ -9,9 +9,10 @@ use egui::{Painter, Rect, Stroke, StrokeKind, pos2, vec2};
 use tsukumoe_core::elements::PartId;
 use tsukumoe_core::model::Model;
 use tsukumoe_core::rig::DeformerRef;
-use tsukumoe_ui::Theme;
+use tsukumoe_ui::{Theme, tr};
 
 use crate::actions::Tool;
+use crate::atlas::Atlas;
 use crate::mesh_tool::Mapper;
 use crate::scene::Scene;
 use crate::view::{Selection, ViewState};
@@ -207,6 +208,81 @@ pub fn paint_hover(painter: &Painter, theme: &Theme, m: &Mapper, scene: &Scene, 
             .collect();
         painter.extend(lines);
     }
+}
+
+/// A thin box around everything a hovered part draws.
+pub fn paint_hover_box(
+    painter: &Painter,
+    theme: &Theme,
+    m: &Mapper,
+    scene: &Scene,
+    names: &[String],
+) {
+    let Some(b) = scene.drawn_bounds(names.iter().map(String::as_str)) else {
+        return;
+    };
+    let (a, c) = (m.to_screen([b[0], b[1]]), m.to_screen([b[2], b[3]]));
+    painter.rect_stroke(
+        Rect::from_two_pos(pos2(a[0], a[1]), pos2(c[0], c[1])),
+        0.0,
+        Stroke::new(1.0, theme.colors.accent.gamma_multiply(0.5)),
+        egui::StrokeKind::Outside,
+    );
+}
+
+/// What a mesh is, next to the pointer: its picture, vertex count, the
+/// deformer it hangs from, the meshes masking it and its draw order.
+pub fn show_card(ctx: &egui::Context, model: &Model, atlas: &Atlas, name: &str) {
+    let Some(mesh) = model
+        .meshes()
+        .find(name)
+        .and_then(|id| model.meshes().get(id))
+    else {
+        return;
+    };
+    let Some(at) = ctx.pointer_hover_pos() else {
+        return;
+    };
+    let parent = mesh.parent.and_then(|d| match d {
+        DeformerRef::Warp(w) => model.warps().name(w),
+        DeformerRef::Rotation(r) => model.rotations().name(r),
+    });
+    let masks: Vec<&str> = mesh
+        .masks
+        .iter()
+        .filter_map(|&m| model.meshes().name(m))
+        .collect();
+    egui::Area::new(egui::Id::unique("hover-card"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(at + vec2(16.0, 16.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if let Some((page, uv)) = atlas.picture(model, name) {
+                        ui.add(egui::Image::new((page.id(), vec2(48.0, 48.0))).uv(uv));
+                    }
+                    ui.vertical(|ui| {
+                        ui.strong(name);
+                        let line = |ui: &mut egui::Ui, key: &str, value: String| {
+                            ui.label(format!("{}: {value}", tr(ctx, key)));
+                        };
+                        line(ui, "card-vertices", mesh.positions.len().to_string());
+                        line(ui, "card-parent", parent.unwrap_or("-").to_owned());
+                        line(
+                            ui,
+                            "card-masks",
+                            if masks.is_empty() {
+                                "-".into()
+                            } else {
+                                masks.join(", ")
+                            },
+                        );
+                        line(ui, "card-order", mesh.draw_order.to_string());
+                    });
+                });
+            });
+        });
 }
 
 /// The node lines of the selected glues, as the two drawn points of each

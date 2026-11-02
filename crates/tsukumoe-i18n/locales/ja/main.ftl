@@ -407,3 +407,7 @@ mesh-edit-make-contour = 輪郭から作る
 mesh-edit-weld = 結合
 deformer-make-warp = ワープを作る
 deformer-make-rotation = 回転を作る
+card-vertices = 頂点
+card-parent = 親デフォーマ
+card-masks = マスク
+card-order = 描画順

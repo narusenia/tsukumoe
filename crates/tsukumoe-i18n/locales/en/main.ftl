@@ -411,3 +411,7 @@ mesh-edit-make-contour = From outline
 mesh-edit-weld = Merge
 deformer-make-warp = Make warp
 deformer-make-rotation = Make rotation
+card-vertices = Vertices
+card-parent = Parent deformer
+card-masks = Masks
+card-order = Draw order

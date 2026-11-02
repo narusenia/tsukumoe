@@ -336,6 +336,12 @@ impl Viewport {
             let painter = ui.painter_at(rect);
             let theme = Theme::get(ui.ctx());
             selection_overlay::paint_hover(&painter, &theme, &mapper, scene, &names);
+            if matches!(hover, Selection::Part(_)) {
+                selection_overlay::paint_hover_box(&painter, &theme, &mapper, scene, &names);
+            }
+            if let Some(Selection::Mesh(name)) = view.hover_card(ui.ctx()) {
+                selection_overlay::show_card(ui.ctx(), doc.dispatcher.model(), &view.atlas, name);
+            }
         }
         // The box around the selection, where no vertex-level overlay is open.
         if selection_overlay::shown_with(view.tool)
