@@ -18,7 +18,8 @@ use crate::keyform::{Binding, BindingId, KeyformGrid};
 use crate::keyform_edit::{self, Blend, resample, sample};
 use crate::model::Model;
 use crate::rig::{
-    ArtMesh, DeformerRef, MeshKeyform, RotationDeformer, RotationKeyform, WarpDeformer, WarpKeyform,
+    ArtMesh, DeformerRef, Glue, MeshKeyform, RotationDeformer, RotationKeyform, WarpDeformer,
+    WarpKeyform,
 };
 
 use super::{Command, CommandError, ElementRef};
@@ -57,6 +58,22 @@ impl Bound for ArtMesh {
         self.draw_order = kf.draw_order;
         self.multiply_color = kf.multiply_color;
         self.screen_color = kf.screen_color;
+    }
+}
+
+impl Bound for Glue {
+    type Kf = f32;
+    fn grid(&self) -> Option<&KeyformGrid<f32>> {
+        self.keyforms.as_ref()
+    }
+    fn set_grid(&mut self, grid: Option<KeyformGrid<f32>>) {
+        self.keyforms = grid;
+    }
+    fn form(&self) -> f32 {
+        self.intensity
+    }
+    fn set_form(&mut self, kf: &f32) {
+        self.intensity = *kf;
     }
 }
 
@@ -100,9 +117,10 @@ enum Elem {
     Mesh(Id<ArtMesh>),
     Warp(Id<WarpDeformer>),
     Rotation(Id<RotationDeformer>),
+    Glue(Id<Glue>),
 }
 
-fn refused(name: &str, reason: &'static str) -> CommandError {
+pub(super) fn refused(name: &str, reason: &'static str) -> CommandError {
     CommandError::Refused {
         name: name.to_owned(),
         reason,
@@ -114,6 +132,9 @@ impl Model {
         match r {
             ElementRef::Mesh { name } => {
                 Ok((Elem::Mesh(self.resolve::<ArtMesh>(name)?), name.clone()))
+            }
+            ElementRef::Glue { name } => {
+                Ok((Elem::Glue(self.resolve::<Glue>(name)?), name.clone()))
             }
             ElementRef::Deformer { name } => Ok((
                 match self.resolve_deformer(name)? {
@@ -130,6 +151,7 @@ impl Model {
             Elem::Mesh(id) => self.meshes.get(id)?.keyforms.as_ref().map(|g| g.binding),
             Elem::Warp(id) => self.warps.get(id)?.keyforms.as_ref().map(|g| g.binding),
             Elem::Rotation(id) => self.rotations.get(id)?.keyforms.as_ref().map(|g| g.binding),
+            Elem::Glue(id) => self.glues.get(id)?.keyforms.as_ref().map(|g| g.binding),
         }
     }
 
@@ -151,18 +173,19 @@ impl Model {
                 out.push(Elem::Rotation(id));
             }
         }
+        for (id, _, g) in self.glues.iter() {
+            if g.keyforms.as_ref().is_some_and(|g| g.binding == binding) {
+                out.push(Elem::Glue(id));
+            }
+        }
         out
     }
 
-    /// True if a glue or a bone (whose keyforms these commands do not edit) is on `binding`.
+    /// True if a bone (whose keyforms these commands do not edit) is on `binding`.
     fn used_by_others(&self, binding: BindingId) -> bool {
-        self.glues
+        self.bones
             .iter()
-            .any(|(_, _, g)| g.keyforms.as_ref().is_some_and(|k| k.binding == binding))
-            || self
-                .bones
-                .iter()
-                .any(|(_, _, b)| b.keyforms.as_ref().is_some_and(|k| k.binding == binding))
+            .any(|(_, _, b)| b.keyforms.as_ref().is_some_and(|k| k.binding == binding))
     }
 
     /// The id of a binding equal to `binding`, adding one if there is none.
@@ -251,6 +274,7 @@ impl Model {
             Elem::Mesh(id) => self.rebuild(changes, id, new, fallback),
             Elem::Warp(id) => self.rebuild(changes, id, new, fallback),
             Elem::Rotation(id) => self.rebuild(changes, id, new, fallback),
+            Elem::Glue(id) => self.rebuild(changes, id, new, fallback),
         }
     }
 
@@ -503,6 +527,22 @@ impl Model {
                         let kf = &mut g.keyforms[at];
                         base.apply_to(kf);
                         kf.opacity = *opacity;
+                    }
+                });
+            }
+            Command::SetGlueKeyform {
+                name,
+                key,
+                intensity,
+            } => {
+                let id = self.resolve::<Glue>(name)?;
+                if !intensity.is_finite() {
+                    return Err(refused(name, "bad-range"));
+                }
+                let at = self.key_index(self.glues.get(id).and_then(|g| g.grid()), key, name)?;
+                self.modify(changes, id, |g| {
+                    if let Some(grid) = g.keyforms.as_mut() {
+                        grid.keyforms[at] = *intensity;
                     }
                 });
             }
@@ -1190,5 +1230,74 @@ mod tests {
             (at[0] - 1.0).abs() < 1e-6 && (at[1] - 1.0).abs() < 1e-6,
             "{at:?}"
         );
+    }
+
+    #[test]
+    fn a_glue_binds_and_its_intensity_follows_the_keys() {
+        let mut m = base();
+        m.apply(Command::AddGlue {
+            name: "G".into(),
+            mesh_a: "A".into(),
+            mesh_b: "B".into(),
+            nodes: vec![crate::rig::GlueNode {
+                index_a: 0,
+                index_b: 1,
+                weight: 0.5,
+            }],
+            intensity: 0.0,
+        })
+        .unwrap();
+        let glue = ElementRef::Glue { name: "G".into() };
+        let intensity_at = |m: &Model, v: f32| {
+            let id = m.glues().find("G").unwrap();
+            let g = m.glues().get(id).unwrap();
+            let grid = g.keyforms.as_ref().unwrap();
+            let binding = m.bindings().get(grid.binding).unwrap();
+            sample(binding, &grid.keyforms, &[v])
+        };
+        // Bound: the base intensity is copied to every key, nothing changes.
+        bind(&mut m, vec![glue.clone()]).unwrap();
+        assert_eq!(intensity_at(&m, 1.0), 0.0);
+        assert!(matches!(
+            m.apply(Command::SetGlueIntensity {
+                name: "G".into(),
+                intensity: 1.0,
+            }),
+            Err(CommandError::HasKeyforms { .. })
+        ));
+        // Keys are [-1, 0, 1]: glue fully at +1, half way between 0 and +1.
+        m.apply(Command::SetGlueKeyform {
+            name: "G".into(),
+            key: vec![2],
+            intensity: 1.0,
+        })
+        .unwrap();
+        assert_eq!(intensity_at(&m, 1.0), 1.0);
+        assert_eq!(intensity_at(&m, 0.5), 0.5);
+        assert!(
+            m.apply(Command::SetGlueKeyform {
+                name: "G".into(),
+                key: vec![9],
+                intensity: 1.0,
+            })
+            .is_err()
+        );
+        // A key added to the glue's binding keeps the shape; unbinding drops the grid.
+        m.apply(Command::AddParameterKey {
+            parameter: "P".into(),
+            value: 0.5,
+            element: glue.clone(),
+        })
+        .unwrap();
+        assert_eq!(intensity_at(&m, 0.5), 0.5);
+        m.apply(Command::UnbindParameter {
+            parameter: "P".into(),
+            elements: vec![glue],
+        })
+        .unwrap();
+        let id = m.glues().find("G").unwrap();
+        assert!(m.glues().get(id).unwrap().keyforms.is_none());
+        assert!(m.undo());
+        assert_eq!(intensity_at(&m, 0.5), 0.5);
     }
 }

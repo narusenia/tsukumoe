@@ -14,6 +14,7 @@ pub mod dispatcher;
 pub mod drag;
 pub mod draw_style;
 pub mod editor;
+pub mod glue;
 pub mod keyed;
 pub mod menu;
 pub mod mesh_tool;

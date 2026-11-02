@@ -15,21 +15,24 @@ use crate::elements::{Parameter, Part, Point};
 use crate::history::{Change, Edit, Editable, Record};
 use crate::model::Model;
 use crate::rig::{
-    ArtMesh, BlendMode, DeformerRef, RotationDeformer, RotationKeyform, WarpDeformer,
+    ArtMesh, BlendMode, DeformerRef, Glue, GlueNode, RotationDeformer, RotationKeyform,
+    WarpDeformer,
 };
 use crate::table::InsertError;
 
 mod keyform;
 use crate::validate::ModelError;
+use keyform::refused;
 
-/// An element a keyform grid can sit on: a mesh, or a warp or rotation
-/// deformer (they share one namespace, so only the name is needed).
+/// An element a keyform grid can sit on: a mesh, a glue, or a warp or rotation
+/// deformer (the deformers share one namespace, so only the name is needed).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ElementRef {
     Mesh { name: String },
     Deformer { name: String },
+    Glue { name: String },
 }
 
 /// The base shape of a rotation deformer: origin, angle in degrees, scale and
@@ -275,6 +278,24 @@ pub enum Command {
     },
     /// Replaces the base shape of a rotation deformer. Fails if it has keyforms.
     SetRotationBase { name: String, base: RotationBase },
+    /// Adds a glue between two different meshes; `nodes` pair a vertex of `mesh_a` with one of `mesh_b`.
+    AddGlue {
+        name: String,
+        mesh_a: String,
+        mesh_b: String,
+        nodes: Vec<GlueNode>,
+        intensity: f32,
+    },
+    /// Removes a glue.
+    RemoveGlue { name: String },
+    /// Sets the base intensity of a glue. Fails if it has keyforms.
+    SetGlueIntensity { name: String, intensity: f32 },
+    /// Replaces one keyform of a glue (the key is one index per axis of its binding).
+    SetGlueKeyform {
+        name: String,
+        key: Vec<usize>,
+        intensity: f32,
+    },
     /// Renames a part. Everything that refers to it keeps pointing at it.
     RenamePart { name: String, new_name: String },
     /// Renames a mesh.
@@ -283,6 +304,8 @@ pub enum Command {
     RenameWarp { name: String, new_name: String },
     /// Renames a rotation deformer.
     RenameRotation { name: String, new_name: String },
+    /// Renames a glue.
+    RenameGlue { name: String, new_name: String },
     /// Moves a mesh to another part.
     SetMeshPart { name: String, part: String },
     /// Moves a deformer (warp or rotation) to another part.
@@ -652,6 +675,44 @@ impl Model {
                 self.reject_keyforms::<RotationDeformer>(id, name, |d| d.keyforms.is_some())?;
                 self.modify(changes, id, |d| base.apply_to(&mut d.base));
             }
+            Command::AddGlue {
+                name,
+                mesh_a,
+                mesh_b,
+                nodes,
+                intensity,
+            } => {
+                let (a, b) = (
+                    self.resolve::<ArtMesh>(mesh_a)?,
+                    self.resolve::<ArtMesh>(mesh_b)?,
+                );
+                if a == b {
+                    return Err(refused(name, "same-mesh"));
+                }
+                if !intensity.is_finite() {
+                    return Err(refused(name, "bad-range"));
+                }
+                let glue = Glue {
+                    mesh_a: a,
+                    mesh_b: b,
+                    nodes: nodes.clone(),
+                    intensity: *intensity,
+                    keyforms: None,
+                };
+                self.insert(changes, name, glue)?;
+            }
+            Command::RemoveGlue { name } => {
+                let id = self.resolve::<Glue>(name)?;
+                self.remove(changes, id);
+            }
+            Command::SetGlueIntensity { name, intensity } => {
+                let id = self.resolve::<Glue>(name)?;
+                if !intensity.is_finite() {
+                    return Err(refused(name, "bad-range"));
+                }
+                self.reject_keyforms::<Glue>(id, name, |g| g.keyforms.is_some())?;
+                self.modify(changes, id, |g| g.intensity = *intensity);
+            }
             Command::RenamePart { name, new_name } => {
                 let id = self.resolve::<Part>(name)?;
                 self.rename(changes, id, new_name)?;
@@ -668,6 +729,10 @@ impl Model {
             Command::RenameRotation { name, new_name } => {
                 let id = self.resolve::<RotationDeformer>(name)?;
                 self.check_deformer_name(new_name)?;
+                self.rename(changes, id, new_name)?;
+            }
+            Command::RenameGlue { name, new_name } => {
+                let id = self.resolve::<Glue>(name)?;
                 self.rename(changes, id, new_name)?;
             }
             Command::SetMeshPart { name, part } => {
@@ -705,6 +770,7 @@ impl Model {
             | Command::SetMeshKeyform { .. }
             | Command::SetMeshKeyformColors { .. }
             | Command::SetWarpKeyform { .. }
+            | Command::SetGlueKeyform { .. }
             | Command::SetRotationKeyform { .. } => self.run_keyform(command, changes)?,
         }
         Ok(())
@@ -961,6 +1027,15 @@ mod tests {
                 name: "Skin".into(),
                 visible: false,
             },
+            glue("Seam", 1.0),
+            Command::SetGlueIntensity {
+                name: "Seam".into(),
+                intensity: 0.5,
+            },
+            glue("Gone", 1.0),
+            Command::RemoveGlue {
+                name: "Gone".into(),
+            },
             Command::SetPartVisible {
                 name: "Face".into(),
                 visible: false,
@@ -1026,6 +1101,10 @@ mod tests {
             Command::RenameRotation {
                 name: "Spin".into(),
                 new_name: "Turn".into(),
+            },
+            Command::RenameGlue {
+                name: "Seam".into(),
+                new_name: "Stitch".into(),
             },
             Command::SetDeformerPart {
                 name: "Turn".into(),
@@ -1111,6 +1190,20 @@ mod tests {
         ]
     }
 
+    fn glue(name: &str, intensity: f32) -> Command {
+        Command::AddGlue {
+            name: name.into(),
+            mesh_a: "Skin".into(),
+            mesh_b: "Clip".into(),
+            nodes: vec![GlueNode {
+                index_a: 0,
+                index_b: 1,
+                weight: 0.5,
+            }],
+            intensity,
+        }
+    }
+
     fn warp(name: &str) -> Command {
         Command::AddWarpDeformer {
             name: name.into(),
@@ -1181,6 +1274,39 @@ mod tests {
         assert_eq!(rest(&model), None);
         assert!(model.undo());
         assert_eq!(rest(&model), Some(grid));
+    }
+
+    #[test]
+    fn a_glue_needs_two_meshes_with_vertices_in_range_and_a_finite_intensity() {
+        let mut model = built(vec![
+            add_part("Face"),
+            add_mesh("Skin", "Face"),
+            add_mesh("Clip", "Face"),
+        ]);
+        let on = |a: &str, b: &str, index_b: u32, intensity: f32| Command::AddGlue {
+            name: "G".into(),
+            mesh_a: a.into(),
+            mesh_b: b.into(),
+            nodes: vec![GlueNode {
+                index_a: 0,
+                index_b,
+                weight: 0.5,
+            }],
+            intensity,
+        };
+        assert!(model.apply(on("Skin", "Skin", 1, 1.0)).is_err());
+        assert!(model.apply(on("Skin", "Clip", 99, 1.0)).is_err());
+        assert!(model.apply(on("Skin", "Clip", 1, f32::NAN)).is_err());
+        assert!(model.glues().find("G").is_none());
+        model.apply(on("Skin", "Clip", 1, 1.0)).unwrap();
+        assert!(
+            model
+                .apply(Command::SetGlueIntensity {
+                    name: "G".into(),
+                    intensity: f32::INFINITY,
+                })
+                .is_err()
+        );
     }
 
     #[test]

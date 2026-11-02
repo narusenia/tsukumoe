@@ -130,6 +130,56 @@ pub fn paint_outlines(
     }
 }
 
+/// The node lines of the selected glues, as the two drawn points of each
+/// node. Glues whose meshes are not in the scene are skipped.
+pub fn glue_segments(scene: &Scene, model: &Model, view: &ViewState) -> Vec<[[f32; 2]; 2]> {
+    let mut out = Vec::new();
+    for item in view.selected() {
+        let Selection::Glue(name) = item else {
+            continue;
+        };
+        let Some(g) = model
+            .glues()
+            .find(&name)
+            .and_then(|id| model.glues().get(id))
+        else {
+            continue;
+        };
+        let drawn = |id| {
+            model
+                .meshes()
+                .name(id)
+                .and_then(|n| scene.drawn_positions(n))
+        };
+        let (Some(a), Some(b)) = (drawn(g.mesh_a), drawn(g.mesh_b)) else {
+            continue;
+        };
+        out.extend(
+            g.nodes
+                .iter()
+                .filter_map(|n| Some([*a.get(n.index_a as usize)?, *b.get(n.index_b as usize)?])),
+        );
+    }
+    out
+}
+
+/// Draws the node lines of the selected glues: a line between the two drawn
+/// points of a node, with a ring on the end that belongs to the first mesh.
+pub fn paint_glues(painter: &Painter, theme: &Theme, m: &Mapper, segments: &[[[f32; 2]; 2]]) {
+    let c = &theme.colors;
+    let stroke = Stroke::new(1.5, c.accent);
+    let screen = |p: [f32; 2]| {
+        let s = m.to_screen(p);
+        pos2(s[0], s[1])
+    };
+    for [a, b] in segments {
+        let (a, b) = (screen(*a), screen(*b));
+        painter.line_segment([a, b], stroke);
+        painter.circle_stroke(a, 5.0, stroke);
+        painter.circle_filled(b, 2.5, c.accent);
+    }
+}
+
 /// A small badge with the number of things selected, inside the top right of the box.
 pub fn paint_badge(painter: &Painter, theme: &Theme, m: &Mapper, bounds: [f32; 4], count: usize) {
     if count < 2 {
@@ -244,6 +294,53 @@ mod tests {
             other => view.selection = other,
         }
         selection_bounds(&scene, model, &view)
+    }
+
+    #[test]
+    fn a_selected_glue_gives_one_segment_per_node_between_the_drawn_points() {
+        let mut m = Model::new();
+        let tri = |x: f32| vec![[x, 0.0], [x + 1.0, 0.0], [x, 1.0]];
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "A".into(),
+                part: "P".into(),
+                positions: tri(0.0),
+                uvs: tri(0.0),
+                indices: vec![0, 1, 2],
+            },
+            Command::AddMesh {
+                name: "B".into(),
+                part: "P".into(),
+                positions: tri(5.0),
+                uvs: tri(5.0),
+                indices: vec![0, 1, 2],
+            },
+            Command::AddGlue {
+                name: "G".into(),
+                mesh_a: "A".into(),
+                mesh_b: "B".into(),
+                nodes: vec![tsukumoe_core::rig::GlueNode {
+                    index_a: 1,
+                    index_b: 0,
+                    weight: 0.5,
+                }],
+                intensity: 0.0,
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let scene = Scene::new(&m).unwrap();
+        let mut view = ViewState::default();
+        assert!(glue_segments(&scene, &m, &view).is_empty());
+        view.select_only(Selection::Glue("G".into()));
+        assert_eq!(
+            glue_segments(&scene, &m, &view),
+            vec![[[1.0, 0.0], [5.0, 0.0]]]
+        );
     }
 
     #[test]

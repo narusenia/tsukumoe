@@ -41,6 +41,12 @@ fn mix_array<const N: usize>(parts: &[([f32; N], f32)]) -> [f32; N] {
     out
 }
 
+impl Blend for f32 {
+    fn blend(parts: &[(&Self, f32)]) -> Self {
+        parts.iter().map(|(v, w)| *v * w).sum()
+    }
+}
+
 impl Blend for MeshKeyform {
     fn blend(parts: &[(&Self, f32)]) -> Self {
         let points: Vec<(&[Point], f32)> = parts

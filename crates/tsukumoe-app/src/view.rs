@@ -19,6 +19,7 @@ pub enum Selection {
     Mesh(String),
     Warp(String),
     Rotation(String),
+    Glue(String),
     Parameter(String),
 }
 
@@ -107,6 +108,8 @@ pub struct ViewState {
     pub mirror_source: Option<(tsukumoe_core::command::ElementRef, Vec<usize>)>,
     /// The mirror line's x as typed; empty means the centre of the model.
     pub mirror_center: String,
+    /// The mesh and vertices that are one side of the glue `mesh.glue` makes. Not saved.
+    pub glue_source: Option<(String, std::collections::BTreeSet<u32>)>,
     /// The two axes (by position in the binding) the key grid shows as rows and
     /// columns; clamped to the element's axes when drawn. Not saved.
     pub grid_axes: (usize, usize),
@@ -246,6 +249,18 @@ impl ViewState {
                 Selection::Part(name) => add(crate::tree_model::meshes_under_part(model, &name)),
                 Selection::Warp(name) | Selection::Rotation(name) => {
                     add(crate::tree_model::meshes_under_deformer(model, &name));
+                }
+                Selection::Glue(name) => {
+                    if let Some(g) = model
+                        .glues()
+                        .find(&name)
+                        .and_then(|id| model.glues().get(id))
+                    {
+                        add([g.mesh_a, g.mesh_b]
+                            .iter()
+                            .filter_map(|&m| model.meshes().name(m).map(str::to_owned))
+                            .collect());
+                    }
                 }
                 Selection::Parameter(_) => {}
             }

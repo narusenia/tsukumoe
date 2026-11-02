@@ -332,6 +332,19 @@ impl Viewport {
                 view.selected_count(),
             );
         }
+        // The node lines of a selected glue, with any tool.
+        if let Some(scene) = &self.scene {
+            let segments = selection_overlay::glue_segments(scene, doc.dispatcher.model(), view);
+            if !segments.is_empty() {
+                let mapper = Mapper {
+                    origin: [rect.min.x, rect.min.y],
+                    size: [rect.width(), rect.height()],
+                    view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+                };
+                let theme = Theme::get(ui.ctx());
+                selection_overlay::paint_glues(&ui.painter_at(rect), &theme, &mapper, &segments);
+            }
+        }
         if let Some(e) = &self.error {
             hint(ui, e.clone());
         }

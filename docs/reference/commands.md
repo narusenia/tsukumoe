@@ -606,6 +606,65 @@ Replaces the base shape of a rotation deformer. Fails if it has keyforms.
 {"type":"set_rotation_base","name":"HeadRotation","base":{"origin":[0.0,0.0],"angle_degrees":15.0,"scale":1.0,"reflect_x":false,"reflect_y":false}}
 ```
 
+### `add_glue`
+
+Adds a glue between two different meshes; `nodes` pair a vertex of `mesh_a` with one of `mesh_b`.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `intensity` | number | yes |  |
+| `mesh_a` | string | yes |  |
+| `mesh_b` | string | yes |  |
+| `name` | string | yes |  |
+| `nodes` | Command[] | yes |  |
+| `type` | `"add_glue"` | yes |  |
+
+```json
+{"type":"add_glue","name":"Seam","mesh_a":"Skin","mesh_b":"Clip","nodes":[{"index_a":0,"index_b":1,"weight":0.5}],"intensity":1.0}
+```
+
+### `remove_glue`
+
+Removes a glue.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_glue"` | yes |  |
+
+```json
+{"type":"remove_glue","name":"Seam"}
+```
+
+### `set_glue_intensity`
+
+Sets the base intensity of a glue. Fails if it has keyforms.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `intensity` | number | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_glue_intensity"` | yes |  |
+
+```json
+{"type":"set_glue_intensity","name":"Seam","intensity":0.5}
+```
+
+### `set_glue_keyform`
+
+Replaces one keyform of a glue (the key is one index per axis of its binding).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `intensity` | number | yes |  |
+| `key` | integer[] | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_glue_keyform"` | yes |  |
+
+```json
+{"type":"set_glue_keyform","name":"Seam","key":[2],"intensity":0.5}
+```
+
 ### `rename_part`
 
 Renames a part. Everything that refers to it keeps pointing at it.
@@ -660,6 +719,20 @@ Renames a rotation deformer.
 
 ```json
 {"type":"rename_rotation","name":"HeadRotation","new_name":"Turn"}
+```
+
+### `rename_glue`
+
+Renames a glue.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_glue"` | yes |  |
+
+```json
+{"type":"rename_glue","name":"Seam","new_name":"Stitch"}
 ```
 
 ### `set_mesh_part`

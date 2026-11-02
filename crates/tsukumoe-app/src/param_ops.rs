@@ -77,6 +77,14 @@ pub fn binding_of<'a>(model: &'a Model, element: &ElementRef) -> Option<&'a Bind
                 .as_ref()?
                 .binding
         }
+        ElementRef::Glue { name } => {
+            model
+                .glues()
+                .get(model.glues().find(name)?)?
+                .keyforms
+                .as_ref()?
+                .binding
+        }
         ElementRef::Deformer { name } => {
             if let Some(w) = model.warps().find(name) {
                 model.warps().get(w)?.keyforms.as_ref()?.binding
@@ -120,6 +128,14 @@ pub fn edited(model: &Model, element: &ElementRef) -> Option<Vec<bool>> {
             model
                 .meshes()
                 .get(model.meshes().find(name)?)?
+                .keyforms
+                .as_ref()?,
+        ),
+        ElementRef::Glue { name } => flags(
+            model,
+            model
+                .glues()
+                .get(model.glues().find(name)?)?
                 .keyforms
                 .as_ref()?,
         ),

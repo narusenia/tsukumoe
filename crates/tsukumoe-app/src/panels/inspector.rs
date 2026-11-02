@@ -277,6 +277,36 @@ pub fn show_at(
                 });
             }
         }
+        Selection::Glue(name) => {
+            let g = model
+                .glues()
+                .find(name)
+                .and_then(|id| model.glues().get(id))?;
+            section_header(ui, name);
+            let mesh = |id| model.meshes().name(id).unwrap_or("?");
+            hint(ui, format!("{} / {}", mesh(g.mesh_a), mesh(g.mesh_b)));
+            hint(
+                ui,
+                format!("{}: {}", tr(&ctx, "inspector-glue-nodes"), g.nodes.len()),
+            );
+            let intensity = crate::keyed::glue_intensity(model, name, at).unwrap_or(g.intensity);
+            ui.horizontal(|ui| {
+                label(ui, tr(&ctx, "inspector-glue-intensity"));
+                if let Some(v) = commit_field(
+                    ui,
+                    &format!("{name}/glue-intensity"),
+                    intensity,
+                    0.0..=1.0,
+                    0.005,
+                    &tr(&ctx, "inspector-glue-intensity"),
+                ) {
+                    command = Some(Command::SetGlueIntensity {
+                        name: name.clone(),
+                        intensity: v,
+                    });
+                }
+            });
+        }
         Selection::Part(name) => {
             let p = model
                 .parts()
