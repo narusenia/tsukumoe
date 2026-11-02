@@ -14,6 +14,7 @@ use crate::deformer_tool::DeformerTool;
 use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::menu;
 use crate::mesh_tool::{self, MeshTool, Op, ToolError};
+use crate::options::Options;
 use crate::panels::palette::Palette;
 use crate::panels::{history, inspector, keys, parameters, titlebar, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
@@ -42,6 +43,7 @@ const KEYMAP_FILE: &str = "keymap.json";
 const DRAG_FILE: &str = "drag.json";
 const PIE_FILE: &str = "pie.json";
 const CONFIRM_FILE: &str = "confirm.json";
+const OPTIONS_FILE: &str = "options.json";
 
 pub enum Dialog {
     Open(String),
@@ -103,6 +105,7 @@ pub struct Editor {
     pub keymap: Keymap,
     pub drag: DragAssignment,
     pub confirm: Confirm,
+    pub options: Options,
     /// The tree panels' state of each workspace (the open one is in `view`),
     /// and what was last written to `tree.json`.
     trees: [(TreeView, TreeView); 2],
@@ -155,6 +158,7 @@ impl Editor {
         let drag =
             read(DRAG_FILE).map_or_else(DragAssignment::default, |t| DragAssignment::from_json(&t));
         let confirm = read(CONFIRM_FILE).map_or_else(Confirm::default, |t| Confirm::from_json(&t));
+        let options = read(OPTIONS_FILE).map_or_else(Options::default, |t| Options::from_json(&t));
         let pie_config =
             read(PIE_FILE).map_or_else(PieConfig::default, |t| PieConfig::from_json(&t));
         let tree_file: serde_json::Value = read(TREE_FILE)
@@ -173,6 +177,7 @@ impl Editor {
             keymap,
             drag,
             confirm,
+            options,
             trees: Default::default(),
             trees_saved: String::new(),
             tab_style: state["tab_style"]
