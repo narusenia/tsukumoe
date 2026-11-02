@@ -17,6 +17,7 @@ pub mod mesh_tool;
 #[cfg(target_os = "macos")]
 mod native;
 pub mod panels;
+pub mod param_ops;
 pub mod picker;
 pub mod pie;
 pub mod project;
