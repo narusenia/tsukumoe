@@ -309,13 +309,16 @@ pub fn menu_ui(
     let mut chosen = None;
     let item = |ui: &mut egui::Ui, action: &'static str| -> Option<&'static str> {
         let label = tsukumoe_ui::tr(&ctx, &crate::actions::label_key(action));
-        let mut button = egui::Button::new(label);
-        if let Some(keys) = shortcut(action) {
-            button = button.shortcut_text(keys);
-        }
-        ui.add_enabled(enabled(action), button)
-            .clicked()
-            .then_some(action)
+        let keys = shortcut(action);
+        tsukumoe_ui::menu_item_icon(
+            ui,
+            crate::actions::icon_of(action),
+            &label,
+            keys.as_deref(),
+            enabled(action),
+        )
+        .clicked()
+        .then_some(action)
     };
     // Whole-mesh actions, then vertices and edges in sub-menus, then the
     // deformer makers; an action in none of them (the deformer tool's) stays on top.
@@ -351,7 +354,7 @@ pub fn menu_ui(
         let any = group.iter().any(|a| enabled(a));
         let mut picked = None;
         ui.add_enabled_ui(any, |ui| {
-            ui.menu_button(label, |ui| {
+            tsukumoe_ui::menu_sub_icon(ui, None, &label, |ui| {
                 for action in group {
                     picked = picked.or(item(ui, action));
                 }

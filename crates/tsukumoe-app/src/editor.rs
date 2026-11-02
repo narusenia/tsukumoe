@@ -1846,7 +1846,7 @@ fn show_entries(ui: &mut Ui, entries: &[menu::Entry], chosen: &mut Option<String
                 ui.separator();
             }
             menu::Entry::Sub { label, entries } => {
-                ui.menu_button(label, |ui| show_entries(ui, entries, chosen));
+                tsukumoe_ui::menu_sub_icon(ui, None, label, |ui| show_entries(ui, entries, chosen));
             }
             menu::Entry::Item {
                 action,
@@ -1855,14 +1855,19 @@ fn show_entries(ui: &mut Ui, entries: &[menu::Entry], chosen: &mut Option<String
                 shortcut,
                 checked,
             } => {
-                ui.add_enabled_ui(*enabled, |ui| {
-                    if tsukumoe_ui::menu_item_checked(ui, label, shortcut.as_deref(), *checked)
-                        .clicked()
-                    {
-                        *chosen = Some(action.clone());
-                        ui.close();
-                    }
-                });
+                let clicked = if checked.is_some() {
+                    ui.add_enabled_ui(*enabled, |ui| {
+                        tsukumoe_ui::menu_item_checked(ui, label, shortcut.as_deref(), *checked)
+                    })
+                    .inner
+                } else {
+                    let icon = crate::actions::icon_of(action);
+                    tsukumoe_ui::menu_item_icon(ui, icon, label, shortcut.as_deref(), *enabled)
+                };
+                if clicked.clicked() {
+                    *chosen = Some(action.clone());
+                    ui.close();
+                }
             }
         }
     }

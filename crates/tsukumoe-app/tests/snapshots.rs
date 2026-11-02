@@ -177,7 +177,7 @@ fn menu_snapshot(mode: Mode, name: &str) {
         .build_ui_state(
             move |ui, tool: &mut MeshTool| {
                 let ctx = ui.ctx().clone();
-                tsukumoe_ui::install_cjk_font(&ctx);
+                tsukumoe_ui::init(&ctx);
                 set_language(&ctx, Language::En);
                 set_mode(&ctx, mode);
                 let keys = |a: &str| match a {

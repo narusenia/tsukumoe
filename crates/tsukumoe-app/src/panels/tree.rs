@@ -10,7 +10,10 @@
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use tsukumoe_core::command::{Command, ElementRef};
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{Icon, Theme, Variant, hint, icon_button, text_input, tr};
+use tsukumoe_ui::{
+    Icon, Theme, Variant, hint, icon_button, menu_item_checked, menu_item_icon, menu_sub_icon,
+    text_input, tr,
+};
 
 use crate::deformer_ops::Target;
 use crate::mirror;
@@ -749,74 +752,85 @@ pub fn row_menu(
     let target = target_of(row);
     if let Some(visible) = row.visible
         && let Some(command) = toggle_command(row)
-        && ui
-            .button(tr(&ctx, if visible { "tree-hide" } else { "tree-show" }))
-            .clicked()
+        && menu_item_icon(
+            ui,
+            if visible { Icon::EyeOff } else { Icon::Eye },
+            &tr(&ctx, if visible { "tree-hide" } else { "tree-show" }),
+            None,
+            true,
+        )
+        .clicked()
     {
         outs.push(Out::Command(command));
         ui.close();
     }
     if row.kind != Kind::Glue {
         let is_solo = view.solo.as_ref() == Some(&me);
-        if ui
-            .selectable_label(is_solo, tr(&ctx, "tree-solo"))
-            .clicked()
-        {
+        if menu_item_checked(ui, &tr(&ctx, "tree-solo"), None, Some(is_solo)).clicked() {
             view.solo = (!is_solo).then(|| me.clone());
             view.touch();
             ui.close();
         }
     }
     ui.separator();
-    let keyed = |key: &str, shortcut: egui::KeyboardShortcut| {
-        egui::Button::new(tr(&ctx, key)).shortcut_text(ctx.format_shortcut(&shortcut))
+    let keyed = |ui: &mut Ui, icon: Option<Icon>, key: &str, shortcut: egui::KeyboardShortcut| {
+        menu_item_icon(
+            ui,
+            icon,
+            &tr(&ctx, key),
+            Some(&ctx.format_shortcut(&shortcut)),
+            true,
+        )
     };
     use egui::{Key, KeyboardShortcut, Modifiers};
-    if ui
-        .add(keyed(
-            "tree-rename",
-            KeyboardShortcut::new(Modifiers::NONE, Key::F2),
-        ))
-        .clicked()
+    if keyed(
+        ui,
+        Some(Icon::PenLine),
+        "tree-rename",
+        KeyboardShortcut::new(Modifiers::NONE, Key::F2),
+    )
+    .clicked()
     {
         view.tree_mut(panel).renaming = Some(Renaming::new(row.kind, &row.name));
         ui.close();
     }
     if matches!(row.kind, Kind::Warp | Kind::Rotation)
-        && ui.button(tr(&ctx, "deformer-reset")).clicked()
+        && menu_item_icon(ui, Icon::RotateCcw, &tr(&ctx, "deformer-reset"), None, true).clicked()
     {
         outs.push(Out::Reset(targets.clone()));
         ui.close();
     }
     if row.kind != Kind::Part
-        && ui
-            .add(keyed(
-                "tree-duplicate",
-                KeyboardShortcut::new(Modifiers::COMMAND, Key::D),
-            ))
-            .clicked()
+        && keyed(
+            ui,
+            Some(Icon::Copy),
+            "tree-duplicate",
+            KeyboardShortcut::new(Modifiers::COMMAND, Key::D),
+        )
+        .clicked()
     {
         outs.push(Out::Duplicate(targets.clone()));
         ui.close();
     }
-    if ui
-        .add(keyed(
-            "tree-delete",
-            KeyboardShortcut::new(Modifiers::NONE, Key::Delete),
-        ))
-        .clicked()
+    if keyed(
+        ui,
+        Some(Icon::Trash),
+        "tree-delete",
+        KeyboardShortcut::new(Modifiers::NONE, Key::Delete),
+    )
+    .clicked()
     {
         outs.push(Out::Delete(targets.clone()));
         ui.close();
     }
     if let Some(element) = mirror_element(row) {
-        if ui.button(tr(&ctx, "mirror-source")).clicked() {
+        if menu_item_icon(ui, Icon::Mirror, &tr(&ctx, "mirror-source"), None, true).clicked() {
             if let Err(key) = mirror::set_source(model, view, &element) {
                 outs.push(Out::Mirror(Err(key)));
             }
             ui.close();
         }
-        if ui.button(tr(&ctx, "mirror-paste")).clicked() {
+        if menu_item_icon(ui, None, &tr(&ctx, "mirror-paste"), None, true).clicked() {
             outs.push(Out::Mirror(mirror::paste(model, view, &element)));
             ui.close();
         }
@@ -832,7 +846,7 @@ pub fn row_menu(
                 all
             }
         };
-        ui.menu_button(tr(&ctx, "tree-set-parent"), |ui| {
+        menu_sub_icon(ui, Icon::Link, &tr(&ctx, "tree-set-parent"), |ui| {
             for parent in lists.deformers.iter().filter(|d| **d != row.name) {
                 if ui.button(parent).clicked() {
                     outs.push(Out::Reparent(movers.clone(), Some(parent.clone())));
@@ -840,9 +854,12 @@ pub fn row_menu(
                 }
             }
         });
-        let unparent = ui.add_enabled(
+        let unparent = menu_item_icon(
+            ui,
+            Icon::Unlink,
+            &tr(&ctx, "tree-unparent"),
+            None,
             row.parent.is_some(),
-            egui::Button::new(tr(&ctx, "tree-unparent")),
         );
         if unparent.clicked() {
             outs.push(Out::Reparent(movers.clone(), None));
@@ -854,7 +871,7 @@ pub fn row_menu(
     } else {
         "tree-set-part"
     };
-    ui.menu_button(tr(&ctx, part_key), |ui| {
+    menu_sub_icon(ui, Icon::Folder, &tr(&ctx, part_key), |ui| {
         if row.kind == Kind::Part && ui.button(tr(&ctx, "tree-no-part")).clicked() {
             outs.push(Out::SetPart(me.clone(), None));
             ui.close();
@@ -868,7 +885,7 @@ pub fn row_menu(
     });
     if row.kind == Kind::Part || row.expandable {
         ui.separator();
-        ui.menu_button(tr(&ctx, "tree-children"), |ui| {
+        menu_sub_icon(ui, Icon::ListTree, &tr(&ctx, "tree-children"), |ui| {
             if row.kind == Kind::Part && ui.button(tr(&ctx, "tree-select-children")).clicked() {
                 let meshes = tree_model::meshes_under_part(model, &row.name);
                 if !meshes.is_empty() {

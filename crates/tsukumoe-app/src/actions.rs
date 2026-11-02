@@ -69,6 +69,32 @@ pub fn context_of(action: &str) -> Option<&'static str> {
     .then_some("viewport")
 }
 
+/// The icon an action's menu entry shows, if it has one.
+pub fn icon_of(action: &str) -> Option<tsukumoe_ui::Icon> {
+    use tsukumoe_ui::Icon;
+    Some(match action {
+        "file.open" => Icon::Folder,
+        "file.save" => Icon::Save,
+        "edit.undo" => Icon::Undo,
+        "edit.redo" => Icon::Redo,
+        "edit.repeat" => Icon::Rotate,
+        "view.palette" => Icon::Search,
+        "view.settings" => Icon::Settings,
+        "tool.select" => Icon::MousePointer,
+        "tool.mesh-edit" | "mesh.edge-pen" => Icon::PenLine,
+        "mesh.delete-vertices" | "mesh.delete-edge" => Icon::Trash,
+        "mesh.weld" | "mesh.weld-near" | "mesh.glue-source" | "mesh.glue" => Icon::Link,
+        "mesh.symmetry" => Icon::Mirror,
+        "mesh.fill-grid" => Icon::Grid,
+        "mesh.contour" => Icon::BoxSelect,
+        "mesh.reset" | "deformer.reset" | "viewport.reset-camera" => Icon::RotateCcw,
+        "viewport.zoom-in" => Icon::ZoomIn,
+        "viewport.zoom-out" => Icon::ZoomOut,
+        "viewport.solo" => Icon::Eye,
+        _ => return None,
+    })
+}
+
 /// The translation key of an action's name: `edit.undo` -> `action-edit-undo`.
 pub fn label_key(action: &str) -> String {
     format!("action-{}", action.replace('.', "-"))
