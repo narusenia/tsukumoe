@@ -306,6 +306,26 @@ impl Editor {
         let Some(doc) = self.doc.as_mut() else {
             return false;
         };
+        // An edit of a shape with keyforms goes to the key the sliders are on.
+        let command = {
+            let model = doc.dispatcher.model();
+            let at = crate::keyed::values(model, &self.view);
+            match crate::keyed::retarget(model, &at, command) {
+                Ok(command) => command,
+                Err(refusal) => {
+                    let text = match &refusal {
+                        crate::keyed::Refusal::OffKey(label) => {
+                            format!("{} ({label})", tr(ctx, refusal.key()))
+                        }
+                        crate::keyed::Refusal::ShapeChange(name) => {
+                            format!("{}: {name}", tr(ctx, refusal.key()))
+                        }
+                    };
+                    self.toasts.push(ctx, Tone::Error, text);
+                    return false;
+                }
+            }
+        };
         match doc.dispatcher.submit_labeled(command, label) {
             Ok(()) => true,
             Err(e) => {
@@ -380,6 +400,27 @@ impl Editor {
                 }
             }
             Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+        }
+    }
+
+    /// Sets the opacity of the keyform of a deformer the sliders are on, or
+    /// says that they are not on a key.
+    pub fn set_deformer_opacity(&mut self, ctx: &Context, name: &str, opacity: f32) {
+        let Some(doc) = &self.doc else { return };
+        let model = doc.dispatcher.model();
+        let at = crate::keyed::values(model, &self.view);
+        match crate::keyed::deformer_opacity_command(model, name, &at, opacity) {
+            Ok(Some(command)) => {
+                self.submit_labeled(ctx, command, Some(format!("deformer_opacity: {name}")));
+            }
+            Ok(None) => {}
+            Err(refusal) => {
+                let crate::keyed::Refusal::OffKey(label) = &refusal else {
+                    return;
+                };
+                let text = format!("{} ({label})", tr(ctx, refusal.key()));
+                self.toasts.push(ctx, Tone::Error, text);
+            }
         }
     }
 
@@ -519,7 +560,8 @@ impl Editor {
     /// state, as one undo step.
     pub fn reset_deformers(&mut self, ctx: &Context, items: &[Selection]) {
         let Some(doc) = &self.doc else { return };
-        match deformer_ops::reset(doc.dispatcher.model(), items) {
+        let at = crate::keyed::values(doc.dispatcher.model(), &self.view);
+        match deformer_ops::reset_at(doc.dispatcher.model(), items, &at) {
             Ok((command, label)) => {
                 self.submit_labeled(ctx, command, Some(label));
             }
@@ -1704,13 +1746,18 @@ impl PanelHost for Panels<'_> {
             }
             "inspector" => {
                 let mut requests = inspector::Requests::default();
-                let command = inspector::show_with(
+                let at = crate::keyed::values(doc.dispatcher.model(), &editor.view);
+                let command = inspector::show_at(
                     ui,
                     doc.dispatcher.model(),
                     editor.view.selection.as_ref(),
                     Some(&editor.deformer_tool),
                     &mut requests,
+                    &at,
                 );
+                if let Some((name, opacity)) = requests.opacity.take() {
+                    editor.set_deformer_opacity(&ctx, &name, opacity);
+                }
                 if let Some((name, origin)) = requests.move_axis.take() {
                     editor.move_axis(&ctx, &name, origin);
                 }

@@ -69,7 +69,7 @@ pub fn options(ctx: &egui::Context, rect: egui::Rect, p: &mut Proportional) -> b
     let m = theme.metrics;
     let before = *p;
     egui::Area::new(egui::Id::unique("tsukumoe-proportional-options"))
-        .fixed_pos(rect.left_top() + vec2(8.0, 32.0))
+        .fixed_pos(rect.left_top() + vec2(8.0, 52.0))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             egui::Frame::new()

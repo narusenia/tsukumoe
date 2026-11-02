@@ -145,6 +145,12 @@ pub fn sample<T: Blend>(binding: &Binding, kfs: &[T], values: &[f32]) -> T {
     T::blend(&parts)
 }
 
+/// The keyform `kfs` (on `binding`) gives when each parameter has the value `at` says.
+pub fn sample_at<T: Blend>(binding: &Binding, kfs: &[T], at: &dyn Fn(ParameterId) -> f32) -> T {
+    let values: Vec<f32> = binding.axes().iter().map(|a| at(a.parameter)).collect();
+    sample(binding, kfs, &values)
+}
+
 /// The grid of `new` filled from the grid `kfs` on `old`: at each key
 /// combination of `new`, the old grid's value there. An old axis missing
 /// from `new` is read at `fallback(parameter)`.

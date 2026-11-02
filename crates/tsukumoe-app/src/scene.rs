@@ -62,6 +62,28 @@ pub enum Preview {
     Warp { name: String, points: Vec<[f32; 2]> },
     /// The base shape of a rotation deformer.
     Rotation { name: String, base: RotationBase },
+    /// One keyform of a mesh, by its position in the dense grid.
+    MeshKeyform {
+        name: String,
+        key: usize,
+        positions: Vec<[f32; 2]>,
+        opacity: f32,
+        draw_order: f32,
+    },
+    /// One keyform of a warp deformer.
+    WarpKeyform {
+        name: String,
+        key: usize,
+        points: Vec<[f32; 2]>,
+        opacity: f32,
+    },
+    /// One keyform of a rotation deformer.
+    RotationKeyform {
+        name: String,
+        key: usize,
+        base: RotationBase,
+        opacity: f32,
+    },
 }
 
 /// What a preview replaced, to put back.
@@ -74,6 +96,22 @@ enum Saved {
     Rotation {
         index: usize,
         base: RotationKf,
+    },
+    MeshKeyform {
+        start: usize,
+        data: Vec<f32>,
+        attr: usize,
+        attrs: [f32; 8],
+    },
+    WarpKeyform {
+        start: usize,
+        data: Vec<f32>,
+        opacity: usize,
+        old_opacity: f32,
+    },
+    RotationKeyform {
+        index: usize,
+        kf: RotationKf,
     },
 }
 
@@ -138,6 +176,29 @@ impl Scene {
                 Saved::Rotation { index, base } => {
                     self.model.rotations.to_mut()[index].base = base;
                 }
+                Saved::MeshKeyform {
+                    start,
+                    data,
+                    attr,
+                    attrs,
+                } => {
+                    self.model.mesh_kf_positions.to_mut()[start..start + data.len()]
+                        .copy_from_slice(&data);
+                    self.model.mesh_kf_attrs.to_mut()[attr] = attrs;
+                }
+                Saved::WarpKeyform {
+                    start,
+                    data,
+                    opacity,
+                    old_opacity,
+                } => {
+                    self.model.warp_kf_points.to_mut()[start..start + data.len()]
+                        .copy_from_slice(&data);
+                    self.model.warp_kf_opacity.to_mut()[opacity] = old_opacity;
+                }
+                Saved::RotationKeyform { index, kf } => {
+                    self.model.rotation_kf.to_mut()[index] = kf;
+                }
             }
         }
         self.previews = previews.to_vec();
@@ -187,6 +248,99 @@ impl Scene {
                         }
                     })
                 })
+            }
+            Preview::MeshKeyform {
+                name,
+                key,
+                positions,
+                opacity,
+                draw_order,
+            } => {
+                let i = self.model.mesh_index(name)?;
+                let def = self.model.meshes[i];
+                let first = def.keyforms.get()?.first as usize;
+                let n = def.vertex_count as usize;
+                let start = def.kf_positions as usize + key * n * 2;
+                let attr = first + key;
+                if positions.len() != n
+                    || start + n * 2 > self.model.mesh_kf_positions.len()
+                    || attr >= self.model.mesh_kf_attrs.len()
+                {
+                    return None;
+                }
+                let target = self.model.mesh_kf_positions.to_mut();
+                let data = target[start..start + n * 2].to_vec();
+                for (k, p) in positions.iter().enumerate() {
+                    target[start + 2 * k] = p[0];
+                    target[start + 2 * k + 1] = p[1];
+                }
+                let attrs = self.model.mesh_kf_attrs[attr];
+                let mut changed = attrs;
+                changed[0] = *opacity;
+                changed[1] = *draw_order;
+                self.model.mesh_kf_attrs.to_mut()[attr] = changed;
+                Some(Saved::MeshKeyform {
+                    start,
+                    data,
+                    attr,
+                    attrs,
+                })
+            }
+            Preview::WarpKeyform {
+                name,
+                key,
+                points,
+                opacity,
+            } => {
+                let i = self.warp_names.iter().position(|n| n == name)?;
+                let def = self.model.warps[i];
+                let first = def.keyforms.get()?.first as usize;
+                let n = def.point_count as usize;
+                let start = def.kf_points as usize + key * n * 2;
+                let at = first + key;
+                if points.len() != n
+                    || start + n * 2 > self.model.warp_kf_points.len()
+                    || at >= self.model.warp_kf_opacity.len()
+                {
+                    return None;
+                }
+                let target = self.model.warp_kf_points.to_mut();
+                let data = target[start..start + n * 2].to_vec();
+                for (k, p) in points.iter().enumerate() {
+                    target[start + 2 * k] = p[0];
+                    target[start + 2 * k + 1] = p[1];
+                }
+                let old_opacity = self.model.warp_kf_opacity[at];
+                self.model.warp_kf_opacity.to_mut()[at] = *opacity;
+                Some(Saved::WarpKeyform {
+                    start,
+                    data,
+                    opacity: at,
+                    old_opacity,
+                })
+            }
+            Preview::RotationKeyform {
+                name,
+                key,
+                base,
+                opacity,
+            } => {
+                let i = self.rotation_names.iter().position(|n| n == name)?;
+                let first = self.model.rotations[i].keyforms.get()?.first as usize;
+                let index = first + key;
+                if index >= self.model.rotation_kf.len() {
+                    return None;
+                }
+                let old = self.model.rotation_kf[index];
+                self.model.rotation_kf.to_mut()[index] = RotationKf {
+                    origin: base.origin,
+                    angle_degrees: base.angle_degrees,
+                    scale: base.scale,
+                    reflect_x: base.reflect_x.into(),
+                    reflect_y: base.reflect_y.into(),
+                    opacity: *opacity,
+                };
+                Some(Saved::RotationKeyform { index, kf: old })
             }
             Preview::Rotation { name, base } => {
                 let i = self.rotation_names.iter().position(|n| n == name);

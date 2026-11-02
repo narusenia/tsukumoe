@@ -318,8 +318,8 @@ Removes a deformer (warp or rotation) by name; fails while a mesh or a deformer 
 ### `set_deformer_parent`
 
 Sets the parent deformer of a deformer (`null` for none). The command
-does not convert coordinates; fails if it makes a cycle or if the
-deformer has keyforms.
+does not convert coordinates (also not those of the keyforms); fails if
+it makes a cycle.
 
 | Field | Type | Required | Default |
 |---|---|---|---|
@@ -333,7 +333,8 @@ deformer has keyforms.
 
 ### `set_mesh_parent`
 
-Sets the parent deformer of a mesh (`null` for none). Fails if the mesh has keyforms.
+Sets the parent deformer of a mesh (`null` for none). The command does
+not convert coordinates (also not those of the keyforms).
 
 | Field | Type | Required | Default |
 |---|---|---|---|
@@ -467,6 +468,60 @@ Removes the key at exactly `value` (and its keyforms) from the axis of
 
 ```json
 {"type":"remove_parameter_key","parameter":"ParamAngleX","value":10.0,"element":{"kind":"mesh","name":"Skin"}}
+```
+
+### `set_mesh_keyform`
+
+Replaces one keyform of a mesh: the vertices, opacity and draw order at
+the key `key` (one key index per axis of its binding, in axis order).
+The colors of the keyform stay. Fails if the mesh has no keyforms or
+the key does not exist.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `draw_order` | number | yes |  |
+| `key` | integer[] | yes |  |
+| `name` | string | yes |  |
+| `opacity` | number | yes |  |
+| `positions` | number[2][] | yes |  |
+| `type` | `"set_mesh_keyform"` | yes |  |
+
+```json
+{"type":"set_mesh_keyform","name":"Skin","key":[1],"positions":[[0.0,0.0],[2.0,0.0],[0.0,2.0]],"opacity":1.0,"draw_order":500.0}
+```
+
+### `set_warp_keyform`
+
+Replaces one keyform of a warp deformer: the control points and opacity
+at the key `key` (one key index per axis of its binding).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `key` | integer[] | yes |  |
+| `name` | string | yes |  |
+| `opacity` | number | yes |  |
+| `points` | number[2][] | yes |  |
+| `type` | `"set_warp_keyform"` | yes |  |
+
+```json
+{"type":"set_warp_keyform","name":"FaceWarp","key":[1],"points":[[0.0,0.0],[2.0,0.0],[0.0,2.0],[2.0,2.0]],"opacity":1.0}
+```
+
+### `set_rotation_keyform`
+
+Replaces one keyform of a rotation deformer: the shape and opacity at
+the key `key` (one key index per axis of its binding).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `base` | Command | yes |  |
+| `key` | integer[] | yes |  |
+| `name` | string | yes |  |
+| `opacity` | number | yes |  |
+| `type` | `"set_rotation_keyform"` | yes |  |
+
+```json
+{"type":"set_rotation_keyform","name":"HeadRotation","key":[1],"base":{"origin":[0.0,0.0],"angle_degrees":15.0,"scale":1.0,"reflect_x":false,"reflect_y":false},"opacity":1.0}
 ```
 
 ### `set_rotation_base`

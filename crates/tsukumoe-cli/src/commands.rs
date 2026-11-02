@@ -225,6 +225,31 @@ pub fn examples() -> Vec<Command> {
             name: "ParamAngleX".into(),
             new_name: "AngleX".into(),
         },
+        Command::SetMeshKeyform {
+            name: "Skin".into(),
+            key: vec![1],
+            positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
+            opacity: 1.0,
+            draw_order: 500.0,
+        },
+        Command::SetWarpKeyform {
+            name: "FaceWarp".into(),
+            key: vec![1],
+            points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
+            opacity: 1.0,
+        },
+        Command::SetRotationKeyform {
+            name: "HeadRotation".into(),
+            key: vec![1],
+            base: RotationBase {
+                origin: [0.0, 0.0],
+                angle_degrees: 15.0,
+                scale: 1.0,
+                reflect_x: false,
+                reflect_y: false,
+            },
+            opacity: 1.0,
+        },
         Command::SetRotationBase {
             name: "HeadRotation".into(),
             base: RotationBase {
@@ -332,6 +357,9 @@ pub fn tag(command: &Command) -> &'static str {
         Command::UnbindParameter { .. } => "unbind_parameter",
         Command::AddParameterKey { .. } => "add_parameter_key",
         Command::RemoveParameterKey { .. } => "remove_parameter_key",
+        Command::SetMeshKeyform { .. } => "set_mesh_keyform",
+        Command::SetWarpKeyform { .. } => "set_warp_keyform",
+        Command::SetRotationKeyform { .. } => "set_rotation_keyform",
         Command::SetRotationBase { .. } => "set_rotation_base",
         Command::RenamePart { .. } => "rename_part",
         Command::RenameMesh { .. } => "rename_mesh",

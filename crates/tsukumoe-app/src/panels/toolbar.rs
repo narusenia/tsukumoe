@@ -11,7 +11,7 @@ use tsukumoe_ui::{Icon, Keymap, Theme, Variant, icon_button, tr};
 use crate::actions::{Tool, label_key};
 
 /// Below the help line and the proportional options box.
-const TOP: f32 = 72.0;
+const TOP: f32 = 92.0;
 
 /// The buttons, top to bottom: the action, its icon, and whether it is pressed.
 pub fn buttons(tool: Tool, proportional: bool) -> [(&'static str, Icon, bool); 4] {
