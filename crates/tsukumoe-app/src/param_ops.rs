@@ -367,6 +367,62 @@ pub fn create_parameter(model: &Model) -> Op {
     )
 }
 
+/// Drops `dragged` before or after the row `target`: it takes the group of
+/// `target` and the place next to it. `None` if nothing changes.
+pub fn move_beside(model: &Model, dragged: &str, target: &str, after: bool) -> Option<Op> {
+    let (d, t) = (
+        model.parameters().find(dragged)?,
+        model.parameters().find(target)?,
+    );
+    if d == t {
+        return None;
+    }
+    let slot = model.parameters().position(t)? + usize::from(after);
+    let group = model.parameters().get(t)?.group.clone();
+    reposition(model, dragged, group, slot)
+}
+
+/// Drops `dragged` on the header of `group`: it joins the group, after the
+/// last parameter that is in it.
+pub fn move_to_group(model: &Model, dragged: &str, group: &str) -> Option<Op> {
+    let d = model.parameters().find(dragged)?;
+    let last = model
+        .parameters()
+        .iter()
+        .filter(|(id, _, p)| *id != d && p.group.as_deref() == Some(group))
+        .filter_map(|(id, _, _)| model.parameters().position(id))
+        .max();
+    let slot = last.map_or_else(|| model.parameters().position(d), |l| Some(l + 1))?;
+    reposition(model, dragged, Some(group.to_owned()), slot)
+}
+
+/// Sets the group and moves to the insertion `slot` (an index into the list
+/// that still holds `dragged`). `None` if neither changes.
+fn reposition(model: &Model, dragged: &str, group: Option<String>, slot: usize) -> Option<Op> {
+    let id = model.parameters().find(dragged)?;
+    let from = model.parameters().position(id)?;
+    let to = if from < slot { slot - 1 } else { slot };
+    let mut commands = Vec::new();
+    if model.parameters().get(id)?.group != group {
+        commands.push(Command::SetParameterGroup {
+            name: dragged.to_owned(),
+            group,
+        });
+    }
+    if from != to {
+        commands.push(Command::MoveParameter {
+            name: dragged.to_owned(),
+            to,
+        });
+    }
+    let command = match commands.len() {
+        0 => return None,
+        1 => commands.remove(0),
+        _ => Command::Batch { commands },
+    };
+    Some((command, format!("param_move: {dragged}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,5 +615,68 @@ mod tests {
         assert_eq!(label, "param_create: Param2");
         m.apply(c).unwrap();
         assert!(m.parameters().find("Param2").is_some());
+    }
+
+    fn names(m: &Model) -> Vec<String> {
+        m.parameters()
+            .iter()
+            .map(|(_, n, _)| n.to_owned())
+            .collect()
+    }
+
+    fn three() -> Model {
+        let mut m = Model::new();
+        for n in ["A", "B", "C"] {
+            m.apply(Command::AddParameter {
+                name: n.into(),
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+                repeat: false,
+            })
+            .unwrap();
+        }
+        m
+    }
+
+    #[test]
+    fn dropping_beside_a_row_moves_and_takes_its_group() {
+        let mut m = three();
+        m.apply(Command::SetParameterGroup {
+            name: "C".into(),
+            group: Some("G".into()),
+        })
+        .unwrap();
+        let (cmd, _) = move_beside(&m, "A", "C", true).unwrap();
+        m.apply(cmd).unwrap();
+        assert_eq!(names(&m), ["B", "C", "A"]);
+        let a = m.parameters().find("A").unwrap();
+        assert_eq!(m.parameters().get(a).unwrap().group.as_deref(), Some("G"));
+        let (cmd, _) = move_beside(&m, "A", "B", false).unwrap();
+        m.apply(cmd).unwrap();
+        assert_eq!(names(&m), ["A", "B", "C"]);
+        assert_eq!(m.parameters().get(a).unwrap().group, None);
+        assert!(move_beside(&m, "A", "A", true).is_none());
+        assert!(move_beside(&m, "A", "B", false).is_none());
+    }
+
+    #[test]
+    fn dropping_on_a_header_joins_the_group_after_its_last_member() {
+        let mut m = three();
+        m.apply(Command::SetParameterGroup {
+            name: "B".into(),
+            group: Some("G".into()),
+        })
+        .unwrap();
+        let (cmd, _) = move_to_group(&m, "A", "G").unwrap();
+        m.apply(cmd).unwrap();
+        assert_eq!(names(&m), ["B", "A", "C"]);
+        let a = m.parameters().find("A").unwrap();
+        assert_eq!(m.parameters().get(a).unwrap().group.as_deref(), Some("G"));
+        assert!(move_to_group(&m, "A", "G").is_none());
+        // One undo takes both parts back.
+        assert!(m.undo());
+        assert_eq!(names(&m), ["A", "B", "C"]);
+        assert_eq!(m.parameters().get(a).unwrap().group, None);
     }
 }

@@ -435,6 +435,52 @@ Turns the wrap-around of a parameter on or off.
 {"type":"set_parameter_repeat","name":"ParamAngleX","repeat":true}
 ```
 
+### `set_parameter_group`
+
+Puts a parameter into a group (`None` takes it out of its group).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `group` | string or null | no |  |
+| `name` | string | yes |  |
+| `type` | `"set_parameter_group"` | yes |  |
+
+```json
+{"type":"set_parameter_group","name":"ParamAngleX","group":"Head"}
+```
+
+### `move_parameter`
+
+Moves a parameter to position `to` (counted from 0, clamped) in the
+parameter order.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `to` | integer | yes |  |
+| `type` | `"move_parameter"` | yes |  |
+
+```json
+{"type":"move_parameter","name":"ParamAngleX","to":0}
+```
+
+### `move_parameter_keyforms`
+
+Puts every element that has keyforms on `from` onto `to` instead: the
+axis of `from` becomes an axis of `to` with the same keyforms, its keys
+scaled from the range of `from` to the range of `to`. Fails if an
+element is on both parameters, or nothing is on `from`.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `from` | string | yes |  |
+| `to` | string | yes |  |
+| `type` | `"move_parameter_keyforms"` | yes |  |
+
+```json
+{"type":"move_parameter_keyforms","from":"ParamAngleX","to":"ParamAngleY"}
+```
+
 ### `bind_parameter`
 
 Binds elements without keyforms to a parameter: keys at its minimum,

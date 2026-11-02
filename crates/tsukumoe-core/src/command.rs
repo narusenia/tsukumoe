@@ -200,6 +200,16 @@ pub enum Command {
     RenameParameter { name: String, new_name: String },
     /// Turns the wrap-around of a parameter on or off.
     SetParameterRepeat { name: String, repeat: bool },
+    /// Puts a parameter into a group (`None` takes it out of its group).
+    SetParameterGroup { name: String, group: Option<String> },
+    /// Moves a parameter to position `to` (counted from 0, clamped) in the
+    /// parameter order.
+    MoveParameter { name: String, to: usize },
+    /// Puts every element that has keyforms on `from` onto `to` instead: the
+    /// axis of `from` becomes an axis of `to` with the same keyforms, its keys
+    /// scaled from the range of `from` to the range of `to`. Fails if an
+    /// element is on both parameters, or nothing is on `from`.
+    MoveParameterKeyforms { from: String, to: String },
     /// Binds elements without keyforms to a parameter: keys at its minimum,
     /// default and maximum (fewer when they coincide), every keyform a copy of
     /// the element's shape, so nothing drawn changes. Elements that get the
@@ -762,6 +772,9 @@ impl Model {
             }
             Command::RenameParameter { .. }
             | Command::SetParameterRepeat { .. }
+            | Command::SetParameterGroup { .. }
+            | Command::MoveParameter { .. }
+            | Command::MoveParameterKeyforms { .. }
             | Command::BindParameter { .. }
             | Command::UnbindParameter { .. }
             | Command::AddParameterKey { .. }
@@ -1164,6 +1177,14 @@ mod tests {
                 name: "ParamAngleX".into(),
                 repeat: true,
             },
+            Command::SetParameterGroup {
+                name: "ParamAngleX".into(),
+                group: Some("Head".into()),
+            },
+            Command::MoveParameter {
+                name: "ParamAngleX".into(),
+                to: 0,
+            },
             Command::RenameParameter {
                 name: "ParamAngleX".into(),
                 new_name: "AngleX".into(),
@@ -1186,6 +1207,11 @@ mod tests {
                 elements: vec![ElementRef::Mesh {
                     name: "Scalp".into(),
                 }],
+            },
+            add_param("ParamAngleZ"),
+            Command::MoveParameterKeyforms {
+                from: "ParamAngleY".into(),
+                to: "ParamAngleZ".into(),
             },
         ]
     }

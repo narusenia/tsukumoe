@@ -1,6 +1,7 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use tsukumoe_core::command::Command;
 use tsukumoe_core::driver::Driver;
 use tsukumoe_core::elements::{Parameter, Part};
 use tsukumoe_core::keyform::{Axis, Binding, KeyformGrid};
@@ -421,6 +422,42 @@ fn every_kind_of_element_survives_a_round_trip() {
     );
     // Saving again gives the same files, byte for byte.
     assert_eq!(saved(&loaded).files, project.files);
+}
+
+#[test]
+fn a_moved_and_grouped_parameter_keeps_its_place_and_group() {
+    let mut model = Model::new();
+    for n in ["A", "B", "C"] {
+        model
+            .apply(Command::AddParameter {
+                name: n.into(),
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+                repeat: false,
+            })
+            .unwrap();
+    }
+    model
+        .apply(Command::MoveParameter {
+            name: "A".into(),
+            to: 2,
+        })
+        .unwrap();
+    model
+        .apply(Command::SetParameterGroup {
+            name: "C".into(),
+            group: Some("Head".into()),
+        })
+        .unwrap();
+    let loaded = read_model(&saved(&model)).unwrap();
+    let names: Vec<_> = loaded.parameters().iter().map(|(_, n, _)| n).collect();
+    assert_eq!(names, ["B", "C", "A"]);
+    let c = loaded.parameters().find("C").unwrap();
+    assert_eq!(
+        loaded.parameters().get(c).unwrap().group.as_deref(),
+        Some("Head")
+    );
 }
 
 #[test]
