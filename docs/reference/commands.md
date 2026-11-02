@@ -318,8 +318,8 @@ Removes a deformer (warp or rotation) by name; fails while a mesh or a deformer 
 ### `set_deformer_parent`
 
 Sets the parent deformer of a deformer (`null` for none). The command
-does not convert coordinates; fails if it makes a cycle or if the
-deformer has keyforms.
+does not convert coordinates (also not those of the keyforms); fails if
+it makes a cycle.
 
 | Field | Type | Required | Default |
 |---|---|---|---|
@@ -333,7 +333,8 @@ deformer has keyforms.
 
 ### `set_mesh_parent`
 
-Sets the parent deformer of a mesh (`null` for none). Fails if the mesh has keyforms.
+Sets the parent deformer of a mesh (`null` for none). The command does
+not convert coordinates (also not those of the keyforms).
 
 | Field | Type | Required | Default |
 |---|---|---|---|
