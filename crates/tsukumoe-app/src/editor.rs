@@ -45,6 +45,9 @@ const PIE_FILE: &str = "pie.json";
 const CONFIRM_FILE: &str = "confirm.json";
 const OPTIONS_FILE: &str = "options.json";
 
+mod settings_dialog;
+use settings_dialog::{SettingsState, SettingsTab};
+
 pub enum Dialog {
     Open(String),
     SaveAs(String),
@@ -52,14 +55,8 @@ pub enum Dialog {
     ConfirmPreset(Preset),
     /// A deletion waiting for a yes.
     Confirm(Box<Pending>),
-    /// Which deletions ask first.
-    ConfirmSettings,
-    /// The shortcut list: the text of each action's field, and the last error.
-    Keymap(Vec<String>, Option<String>),
-    /// The drag-to-parameter assignment being edited.
-    Drag,
-    /// The pie menu slots being edited.
-    Pie,
+    /// The settings: look, drag, pie menu, deletion confirmations, shortcuts.
+    Settings(Box<SettingsState>),
     /// File > Import PSD.
     PsdImport(Box<PsdImport>),
     /// A folder for a new project (the path-input form of File > New).
@@ -106,6 +103,10 @@ pub struct Editor {
     pub drag: DragAssignment,
     pub confirm: Confirm,
     pub options: Options,
+    /// Language, theme and density, shared with the host's `preferences.json`.
+    pub prefs: tsukumoe_ui::Preferences,
+    /// The per-user settings folder (`preferences.json` lives here); `None` in tests.
+    pub config_dir: Option<PathBuf>,
     /// The tree panels' state of each workspace (the open one is in `view`),
     /// and what was last written to `tree.json`.
     trees: [(TreeView, TreeView); 2],
@@ -178,6 +179,8 @@ impl Editor {
             drag,
             confirm,
             options,
+            prefs: Default::default(),
+            config_dir: None,
             trees: Default::default(),
             trees_saved: String::new(),
             tab_style: state["tab_style"]
@@ -830,20 +833,11 @@ impl Editor {
             "edit.undo" => drop(self.undo()),
             "edit.redo" => drop(self.redo()),
             "view.palette" => self.open_palette(),
-            "view.pie-settings" => self.dialog = Some(Dialog::Pie),
-            "view.drag-settings" => self.dialog = Some(Dialog::Drag),
-            "view.confirm-settings" => self.dialog = Some(Dialog::ConfirmSettings),
-            "view.keymap-settings" => {
-                let texts = ACTIONS
-                    .iter()
-                    .map(|a| {
-                        self.keymap
-                            .keys_text(a, actions::context_of(a))
-                            .unwrap_or_default()
-                    })
-                    .collect();
-                self.dialog = Some(Dialog::Keymap(texts, None));
+            "view.settings" => self.open_settings(SettingsTab::General),
+            "view.pie-settings" | "view.drag-settings" | "view.confirm-settings" => {
+                self.open_settings(SettingsTab::Controls);
             }
+            "view.keymap-settings" => self.open_settings(SettingsTab::Shortcuts),
             "layout.save" => self.dialog = Some(Dialog::SaveLayout(String::new())),
             // Holding the key repeats the press; reopening would move the menu
             // to the pointer every time.
@@ -1331,42 +1325,6 @@ impl Editor {
             self.confirm_dialog(ctx, pending);
             return;
         }
-        if matches!(dialog, Dialog::ConfirmSettings) {
-            let mut open = true;
-            if self.confirm_settings_dialog(ctx, &mut open) {
-                self.save_confirm(ctx);
-            }
-            if open {
-                self.dialog = Some(dialog);
-            }
-            return;
-        }
-        if matches!(dialog, Dialog::Pie) {
-            let mut open = true;
-            if self.pie_dialog(ctx, &mut open)
-                && let Some(dir) = &self.settings_dir
-                && let Err(e) = settings::write(dir, PIE_FILE, &self.pie_config.to_json())
-            {
-                self.toasts.push(ctx, Tone::Error, e);
-            }
-            if open {
-                self.dialog = Some(dialog);
-            }
-            return;
-        }
-        if matches!(dialog, Dialog::Drag) {
-            let mut open = true;
-            if self.drag_dialog(ctx, &mut open)
-                && let Some(dir) = &self.settings_dir
-                && let Err(e) = settings::write(dir, DRAG_FILE, &self.drag.to_json())
-            {
-                self.toasts.push(ctx, Tone::Error, e);
-            }
-            if open {
-                self.dialog = Some(dialog);
-            }
-            return;
-        }
         if let Dialog::PsdImport(state) = &mut dialog {
             let mut open = true;
             self.psd_dialog(ctx, state, &mut open);
@@ -1377,12 +1335,9 @@ impl Editor {
             }
             return;
         }
-        if let Dialog::Keymap(texts, error) = &mut dialog {
+        if let Dialog::Settings(state) = &mut dialog {
             let mut open = true;
-            let changed = self.keymap_dialog(ctx, texts, error, &mut open);
-            if changed {
-                self.save_keymap(ctx);
-            }
+            self.settings_dialog(ctx, state, &mut open);
             if open {
                 self.dialog = Some(dialog);
             }
@@ -1399,12 +1354,7 @@ impl Editor {
             Dialog::SaveAsFolder(_) => (t("dialog-save-folder-title"), "dialog-save-folder"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
-            Dialog::Confirm(_)
-            | Dialog::ConfirmSettings
-            | Dialog::Keymap(..)
-            | Dialog::Drag
-            | Dialog::Pie
-            | Dialog::PsdImport(_) => {
+            Dialog::Confirm(_) | Dialog::Settings(_) | Dialog::PsdImport(_) => {
                 unreachable!("handled above")
             }
         };
@@ -1431,12 +1381,7 @@ impl Editor {
                 Dialog::ConfirmPreset(_) => {
                     hint(ui, t("layout-confirm-body"));
                 }
-                Dialog::Confirm(_)
-                | Dialog::ConfirmSettings
-                | Dialog::Keymap(..)
-                | Dialog::Drag
-                | Dialog::Pie
-                | Dialog::PsdImport(_) => {}
+                Dialog::Confirm(_) | Dialog::Settings(_) | Dialog::PsdImport(_) => {}
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -1547,33 +1492,6 @@ impl Editor {
         } else if open {
             self.dialog = Some(Dialog::Confirm(pending));
         }
-    }
-
-    /// Menu: which deletions ask first. True when something changed.
-    fn confirm_settings_dialog(&mut self, ctx: &Context, open: &mut bool) -> bool {
-        let t = |key: &str| tr(ctx, key);
-        let before = self.confirm.clone();
-        let confirm = &mut self.confirm;
-        tsukumoe_ui::dialog(
-            ctx,
-            "dialog-confirm-settings",
-            &t("confirm-settings-title"),
-            open,
-            |ui| {
-                hint(ui, t("confirm-settings-hint"));
-                for kind in KINDS {
-                    let mut asks = confirm.asks(kind);
-                    if checkbox(ui, &mut asks, &t(kind.key())).changed() {
-                        confirm.set(kind, asks);
-                    }
-                }
-                ui.add_space(8.0);
-                if button(ui, &t("confirm-reset"), Variant::Secondary).clicked() {
-                    confirm.reset();
-                }
-            },
-        );
-        self.confirm != before
     }
 }
 
@@ -1718,190 +1636,6 @@ impl Editor {
         if cancel {
             *open = false;
         }
-    }
-}
-
-impl Editor {
-    /// Which action each pie slot runs; returns whether anything changed.
-    fn pie_dialog(&mut self, ctx: &Context, open: &mut bool) -> bool {
-        let t = |key: &str| tr(ctx, key);
-        let before = self.pie_config.clone();
-        let names: Vec<(String, String)> = ACTIONS
-            .iter()
-            .map(|a| ((*a).to_owned(), t(&actions::label_key(a))))
-            .collect();
-        let options: Vec<(String, &str)> =
-            names.iter().map(|(a, n)| (a.clone(), n.as_str())).collect();
-        let config = &mut self.pie_config;
-        let mut reset = false;
-        tsukumoe_ui::dialog(ctx, "dialog-pie", &t("pie-title"), open, |ui| {
-            hint(ui, t("pie-hint"));
-            fn slots(
-                ui: &mut Ui,
-                entries: &mut [Entry],
-                options: &[(String, &str)],
-                path: &str,
-                t: &dyn Fn(&str) -> String,
-            ) {
-                for (i, entry) in entries.iter_mut().enumerate() {
-                    let id = format!("{path}/{i}");
-                    match entry {
-                        Entry::Action { action } => {
-                            tsukumoe_ui::select(ui, id, &format!("{}", i + 1), action, options);
-                        }
-                        Entry::Group { label, items } => {
-                            label_text(ui, &t(label));
-                            ui.indent(id.clone(), |ui| slots(ui, items, options, &id, t));
-                        }
-                    }
-                }
-            }
-            fn label_text(ui: &mut Ui, text: &str) {
-                label(ui, text);
-            }
-            slots(ui, &mut config.items, &options, "pie", &t);
-            reset = button(ui, &t("pie-reset"), Variant::Secondary).clicked();
-        });
-        if reset {
-            *config = PieConfig::default();
-        }
-        *config != before
-    }
-
-    /// The drag-to-parameter settings; returns whether they changed.
-    fn drag_dialog(&mut self, ctx: &Context, open: &mut bool) -> bool {
-        let t = |key: &str| tr(ctx, key);
-        let names: Vec<String> = self.doc.as_ref().map_or_else(Vec::new, |d| {
-            d.dispatcher
-                .model()
-                .parameters()
-                .iter()
-                .map(|(_, n, _)| n.to_owned())
-                .collect()
-        });
-        let before = self.drag.clone();
-        let drag = &mut self.drag;
-        tsukumoe_ui::dialog(ctx, "dialog-drag", &t("drag-title"), open, |ui| {
-            hint(ui, t("drag-hint"));
-            let modifiers = [
-                (Modifier::Alt, "Alt".to_owned()),
-                (Modifier::Ctrl, "Ctrl".to_owned()),
-                (Modifier::Cmd, "Cmd".to_owned()),
-            ];
-            let options: Vec<(Modifier, &str)> =
-                modifiers.iter().map(|(m, n)| (*m, n.as_str())).collect();
-            tsukumoe_ui::select(
-                ui,
-                "drag-modifier",
-                &t("drag-modifier"),
-                &mut drag.modifier,
-                &options,
-            );
-            for (key, axis) in [("drag-x", &mut drag.x), ("drag-y", &mut drag.y)] {
-                ui.separator();
-                label(ui, t(key));
-                let mut choice: Option<String> = axis.as_ref().map(|a| a.parameter.clone());
-                let mut options: Vec<(Option<String>, &str)> = vec![(None, "-")];
-                options.extend(names.iter().map(|n| (Some(n.clone()), n.as_str())));
-                let none = t("drag-none");
-                options[0].1 = &none;
-                if tsukumoe_ui::select(ui, key, &t("drag-parameter"), &mut choice, &options)
-                    .changed()
-                {
-                    *axis = choice.map(|parameter| match axis.take() {
-                        Some(a) => AxisTarget { parameter, ..a },
-                        None => AxisTarget {
-                            parameter,
-                            points_per_range: 400.0,
-                            invert: false,
-                        },
-                    });
-                }
-                if let Some(a) = axis {
-                    ui.horizontal(|ui| {
-                        label(ui, t("drag-sensitivity"));
-                        tsukumoe_ui::number(
-                            ui,
-                            &mut a.points_per_range,
-                            20.0..=4000.0,
-                            5.0,
-                            &t("drag-sensitivity"),
-                        );
-                        checkbox(ui, &mut a.invert, &t("drag-invert"));
-                    });
-                }
-            }
-        });
-        *drag != before
-    }
-
-    /// The shortcut list. Each field applies when it loses focus; returns
-    /// whether the keymap changed.
-    fn keymap_dialog(
-        &mut self,
-        ctx: &Context,
-        texts: &mut [String],
-        error: &mut Option<String>,
-        open: &mut bool,
-    ) -> bool {
-        let t = |key: &str| tr(ctx, key);
-        let mut changed = false;
-        let mut reset = false;
-        tsukumoe_ui::dialog(ctx, "dialog-keymap", &t("keymap-title"), open, |ui| {
-            hint(ui, t("keymap-hint"));
-            for (action, text) in ACTIONS.iter().zip(texts.iter_mut()) {
-                ui.horizontal(|ui| {
-                    ui.set_min_width(420.0);
-                    ui.label(t(&actions::label_key(action)));
-                    let r = text_input(ui, text, action, "");
-                    if r.lost_focus() {
-                        let context = actions::context_of(action);
-                        let text = text.trim();
-                        if text.is_empty() {
-                            changed |= self.keymap.unbind(action, context);
-                            *error = None;
-                        } else {
-                            match self.keymap.bind(action, context, text) {
-                                Ok(()) => {
-                                    changed = true;
-                                    *error = None;
-                                }
-                                Err(_) => *error = Some(t("keymap-bad")),
-                            }
-                        }
-                    }
-                });
-            }
-            for (a, b) in self.keymap.conflicts() {
-                let name = |id: &str| t(&actions::label_key(id));
-                hint(
-                    ui,
-                    tr_args(
-                        ctx,
-                        "keymap-conflict",
-                        &[
-                            ("a", Arg::from(name(&a).as_str())),
-                            ("b", Arg::from(name(&b).as_str())),
-                        ],
-                    ),
-                );
-            }
-            if let Some(e) = error.as_ref() {
-                hint(ui, e.clone());
-            }
-            reset = button(ui, &t("keymap-reset"), Variant::Secondary).clicked();
-        });
-        if reset {
-            self.keymap = actions::cubism_compatible();
-            for (action, text) in ACTIONS.iter().zip(texts.iter_mut()) {
-                *text = self
-                    .keymap
-                    .keys_text(action, actions::context_of(action))
-                    .unwrap_or_default();
-            }
-            changed = true;
-        }
-        changed
     }
 }
 
@@ -2375,7 +2109,20 @@ mod tests {
             Some(Dialog::ConfirmPreset(Preset::Cubism))
         ));
         assert!(editor.run_action(&ctx, "view.keymap-settings"));
-        assert!(matches!(editor.dialog, Some(Dialog::Keymap(..))));
+        assert!(matches!(editor.dialog, Some(Dialog::Settings(_))));
+        for (action, tab) in [
+            ("view.settings", SettingsTab::General),
+            ("view.drag-settings", SettingsTab::Controls),
+            ("view.pie-settings", SettingsTab::Controls),
+            ("view.confirm-settings", SettingsTab::Controls),
+            ("view.keymap-settings", SettingsTab::Shortcuts),
+        ] {
+            assert!(editor.run_action(&ctx, action));
+            assert!(
+                matches!(&editor.dialog, Some(Dialog::Settings(s)) if s.tab == tab),
+                "{action}"
+            );
+        }
         assert!(editor.run_action(&ctx, "layout.save"));
         assert!(matches!(editor.dialog, Some(Dialog::SaveLayout(_))));
         assert!(!editor.run_action(&ctx, "layout.preset.nope"));

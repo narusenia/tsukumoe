@@ -13,12 +13,13 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 38] = [
+pub const ACTIONS: [&str; 39] = [
     "file.open",
     "file.save",
     "edit.undo",
     "edit.redo",
     "view.palette",
+    "view.settings",
     "view.pie-menu",
     "tool.select",
     "tool.mesh-edit",

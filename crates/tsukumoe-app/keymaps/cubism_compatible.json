@@ -5,6 +5,7 @@
     { "action": "file.open", "keys": "Mod+O" },
     { "action": "file.save", "keys": "Mod+S" },
     { "action": "view.palette", "keys": "Mod+Shift+P" },
+    { "action": "view.settings", "keys": "Mod+," },
     { "action": "view.pie-menu", "keys": "Q" },
     { "action": "tool.select", "keys": "V" },
     { "action": "tool.mesh-edit", "keys": "M" },
