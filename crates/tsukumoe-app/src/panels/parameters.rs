@@ -10,7 +10,7 @@ use tsukumoe_core::command::Command;
 use tsukumoe_core::elements::Parameter;
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{
-    Arg, Icon, Variant, button, icon_button, number, slider, text_input, tr, tr_args,
+    Arg, Icon, Variant, button, icon_button, number_or, slider, text_input, tr, tr_args,
 };
 
 use crate::confirm::Kind;
@@ -240,7 +240,15 @@ fn row(
             paint_keys(ui, slider_rect, keys, p.min, p.max, value);
         }
         let speed = f64::from((p.max - p.min).abs()) / 200.0;
-        changed |= number(ui, &mut value, p.min..=p.max, speed.max(1e-4), name).changed();
+        changed |= number_or(
+            ui,
+            &mut value,
+            p.min..=p.max,
+            speed.max(1e-4),
+            name,
+            Some(p.default),
+        )
+        .changed();
         if reset_button(ui, value == p.default) {
             value = p.default;
             changed = true;
@@ -663,7 +671,10 @@ fn link_row(
                 ui.allocate_ui_with_layout(
                     Vec2::new(NUMBER_WIDTH, m.control),
                     egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| changed |= number(ui, v, p.min..=p.max, speed(p), name).changed(),
+                    |ui| {
+                        changed |= number_or(ui, v, p.min..=p.max, speed(p), name, Some(p.default))
+                            .changed()
+                    },
                 );
             }
         });

@@ -534,12 +534,13 @@ impl Editor {
             }
             if let Some(a) = axis {
                 form_row(ui, &t("drag-sensitivity"), |ui| {
-                    tsukumoe_ui::number(
+                    tsukumoe_ui::number_or(
                         ui,
                         &mut a.points_per_range,
                         20.0..=4000.0,
                         5.0,
                         &t("drag-sensitivity"),
+                        Some(400.0),
                     );
                     checkbox(ui, &mut a.invert, &t("drag-invert"));
                 });
@@ -691,13 +692,25 @@ impl Editor {
                 &choices,
             );
             hint(ui, t("settings-radius-hint"));
-            for (key, value) in [
-                ("settings-vertex-radius", &mut o.vertex_radius),
-                ("settings-edge-radius", &mut o.edge_radius),
+            let d = Options::default();
+            for (key, value, default) in [
+                (
+                    "settings-vertex-radius",
+                    &mut o.vertex_radius,
+                    d.vertex_radius,
+                ),
+                ("settings-edge-radius", &mut o.edge_radius, d.edge_radius),
             ] {
                 form_row(ui, &t(key), |ui| {
                     let range = options::RADIUS;
-                    tsukumoe_ui::number(ui, value, range.0..=range.1, 0.25, &t(key));
+                    tsukumoe_ui::number_or(
+                        ui,
+                        value,
+                        range.0..=range.1,
+                        0.25,
+                        &t(key),
+                        Some(default),
+                    );
                 });
             }
             ui.add_space(8.0);
@@ -715,30 +728,41 @@ impl Editor {
             hint(ui, t("settings-history-hint"));
             let mut limit = o.history_limit as f32;
             form_row(ui, &t("settings-history-limit"), |ui| {
-                tsukumoe_ui::number(
+                tsukumoe_ui::number_or(
                     ui,
                     &mut limit,
                     0.0..=options::HISTORY_LIMIT.1 as f32,
                     1.0,
                     &t("settings-history-limit"),
+                    Some(Options::default().history_limit as f32),
                 );
             });
             o.history_limit = limit.round() as u32;
             hint(ui, t("settings-threshold-hint"));
-            for (key, value, range) in [
+            let d = Options::default();
+            for (key, value, range, default) in [
                 (
                     "settings-weld-ratio",
                     &mut o.weld_ratio,
                     options::WELD_RATIO,
+                    d.weld_ratio,
                 ),
                 (
                     "settings-mirror-tolerance",
                     &mut o.mirror_tolerance,
                     options::MIRROR_TOLERANCE,
+                    d.mirror_tolerance,
                 ),
             ] {
                 form_row(ui, &t(key), |ui| {
-                    tsukumoe_ui::number(ui, value, range.0..=range.1, 0.0005, &t(key));
+                    tsukumoe_ui::number_or(
+                        ui,
+                        value,
+                        range.0..=range.1,
+                        0.0005,
+                        &t(key),
+                        Some(default),
+                    );
                 });
             }
             ui.add_space(8.0);
@@ -757,12 +781,13 @@ impl Editor {
             checkbox(ui, &mut o.autosave, &t("settings-autosave"));
             let mut minutes = o.autosave_minutes as f32;
             form_row(ui, &t("settings-autosave-minutes"), |ui| {
-                tsukumoe_ui::number(
+                tsukumoe_ui::number_or(
                     ui,
                     &mut minutes,
                     options::AUTOSAVE_MINUTES.0 as f32..=options::AUTOSAVE_MINUTES.1 as f32,
                     1.0,
                     &t("settings-autosave-minutes"),
+                    Some(Options::default().autosave_minutes as f32),
                 );
             });
             o.autosave_minutes = minutes.round() as u32;

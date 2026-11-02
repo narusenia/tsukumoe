@@ -10,7 +10,7 @@ use egui::{Id, Ui};
 use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::elements::ParameterId;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{Icon, checkbox, hint, icon_button, label, number, section_header, tr};
+use tsukumoe_ui::{Icon, checkbox, hint, icon_button, label, number_or, section_header, tr};
 
 use crate::deformer_tool::DeformerTool;
 use crate::view::Selection;
@@ -24,10 +24,11 @@ fn commit_field(
     range: std::ops::RangeInclusive<f32>,
     speed: f64,
     name: &str,
+    default: Option<f32>,
 ) -> Option<f32> {
     let id = Id::unique(("inspector", key));
     let mut value = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(original);
-    let response = number(ui, &mut value, range, speed, name);
+    let response = number_or(ui, &mut value, range, speed, name, default);
     if response.changed() {
         ui.data_mut(|d| d.insert_temp(id, value));
     }
@@ -70,9 +71,10 @@ fn live_field(
     range: std::ops::RangeInclusive<f32>,
     speed: f64,
     name: &str,
+    default: Option<f32>,
 ) -> Option<(Option<f32>, bool)> {
     let mut value = original;
-    let response = number(ui, &mut value, range, speed, name);
+    let response = number_or(ui, &mut value, range, speed, name, default);
     let ended = response.drag_stopped() || response.lost_focus();
     let changed = response.changed() && value != original;
     (changed || ended).then_some((changed.then_some(value), ended))
@@ -361,6 +363,7 @@ pub fn show_at(
                         f32::MIN..=f32::MAX,
                         speed,
                         &tr(&ctx, key),
+                        None,
                     ) {
                         let mut r = [min, max, default];
                         r[field] = v;
@@ -394,6 +397,7 @@ pub fn show_at(
                     0.0..=1.0,
                     0.005,
                     &tr(&ctx, "inspector-glue-intensity"),
+                    None,
                 ) {
                     requests.live = Some(Live {
                         key: format!("{name}/glue-intensity"),
@@ -421,6 +425,7 @@ pub fn show_at(
                     0.0..=1.0,
                     0.005,
                     &tr(&ctx, "inspector-opacity"),
+                    Some(1.0),
                 ) {
                     requests.live = Some(Live {
                         key: format!("{name}/opacity"),
@@ -464,6 +469,7 @@ pub fn show_at(
                     0.0..=1.0,
                     0.005,
                     &tr(&ctx, "inspector-opacity"),
+                    Some(1.0),
                 ) {
                     requests.live = Some(Live {
                         key: format!("{name}/mesh-opacity"),
@@ -484,6 +490,7 @@ pub fn show_at(
                     0.0..=1000.0,
                     1.0,
                     &tr(&ctx, "inspector-draw-order"),
+                    None,
                 ) {
                     requests.live = Some(Live {
                         key: format!("{name}/draw-order"),
@@ -550,6 +557,7 @@ pub fn show_at(
                         0.0..=1.0,
                         0.005,
                         &tr(&ctx, "inspector-opacity"),
+                        Some(1.0),
                     ) {
                         requests.opacity = Some((name.clone(), v));
                     }
@@ -588,6 +596,7 @@ pub fn show_at(
                             f32::MIN..=f32::MAX,
                             0.01,
                             &tr(&ctx, "inspector-point"),
+                            None,
                         ) {
                             let mut points = shape.clone();
                             points[i as usize][axis] = v;
@@ -618,6 +627,7 @@ pub fn show_at(
                         0.0..=1.0,
                         0.005,
                         &tr(&ctx, "inspector-opacity"),
+                        Some(1.0),
                     ) {
                         requests.opacity = Some((name.clone(), v));
                     }
@@ -664,6 +674,11 @@ pub fn show_at(
                         range,
                         speed,
                         &tr(&ctx, key),
+                        match field {
+                            RotationField::Angle => Some(0.0),
+                            RotationField::Scale => Some(1.0),
+                            _ => None,
+                        },
                     ) {
                         let moved = with_field(base, field, v);
                         // The origin moves the axis only; the rest is a plain edit.
