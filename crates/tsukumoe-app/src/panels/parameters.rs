@@ -779,7 +779,8 @@ pub(super) fn settings_section(
     let mut done = false;
     let mut touched = false;
     let mut repeat = p.repeat;
-    ui.horizontal(|ui| {
+    // Wraps: in a narrow panel or a longer language the row would run past the edge.
+    ui.horizontal_wrapped(|ui| {
         for (i, key) in ["param-min", "param-default", "param-max"]
             .into_iter()
             .enumerate()
@@ -903,12 +904,16 @@ mod tests {
     }
 
     fn harness(p: Panel) -> Harness<'static, Panel> {
+        harness_in(p, tsukumoe_ui::Language::En)
+    }
+
+    fn harness_in(p: Panel, language: tsukumoe_ui::Language) -> Harness<'static, Panel> {
         Harness::builder()
             .with_size(egui::vec2(420.0, 420.0))
             .build_ui_state(
-                |ui, p: &mut Panel| {
+                move |ui, p: &mut Panel| {
                     tsukumoe_ui::init(ui.ctx());
-                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    tsukumoe_ui::set_language(ui.ctx(), language);
                     let outs = show(ui, &p.model, &mut p.view);
                     p.outs.extend(outs);
                 },
@@ -935,6 +940,67 @@ mod tests {
             h.step();
         }
         assert!((width(&h) - before).abs() < 0.5, "the window grew");
+    }
+
+    #[test]
+    fn the_settings_window_keeps_its_width_in_japanese_too() {
+        use egui_kittest::kittest::Queryable;
+        let mut p = panel();
+        p.view.param_dialog = Some("ParamAngleX".into());
+        let mut h = harness_in(p, tsukumoe_ui::Language::Ja);
+        for _ in 0..3 {
+            h.run();
+        }
+        let width = |h: &Harness<'static, Panel>| {
+            h.get_by_role_and_label(egui::accesskit::Role::TextInput, "名前")
+                .rect()
+                .right()
+        };
+        let before = width(&h);
+        for _ in 0..30 {
+            h.step();
+        }
+        assert!((width(&h) - before).abs() < 0.5, "the window grew");
+    }
+
+    #[test]
+    fn the_settings_section_stays_inside_a_narrow_panel() {
+        let p = panel();
+        let target = p.model.parameters().find("ParamAngleX").unwrap();
+        let param = p.model.parameters().get(target).unwrap().clone();
+        let right = std::rc::Rc::new(std::cell::Cell::new(0.0_f32));
+        let seen = right.clone();
+        let edge = std::rc::Rc::new(std::cell::Cell::new(0.0_f32));
+        let limit = edge.clone();
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(260.0, 300.0))
+            .build_ui_state(
+                move |ui, p: &mut Panel| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::Ja);
+                    let mut outs = Vec::new();
+                    ui.scope(|ui| {
+                        ui.set_max_width(160.0);
+                        limit.set(ui.max_rect().right());
+                        settings_section(ui, &p.model, "ParamAngleX", &param, &mut outs);
+                        seen.set(ui.min_rect().right());
+                    });
+                },
+                p,
+            );
+        h.run();
+        // The last widget of the range row, which is the one that runs out.
+        use egui_kittest::kittest::Queryable;
+        right.set(
+            h.get_by_role(egui::accesskit::Role::CheckBox)
+                .rect()
+                .right(),
+        );
+        assert!(
+            right.get() <= edge.get() + 0.5,
+            "the section ran out to {}",
+            right.get()
+        );
     }
 
     #[test]
