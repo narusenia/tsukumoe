@@ -41,7 +41,9 @@ fn commit_field(
     None
 }
 
-/// A row of three number fields for an RGB color (0 to 1); the new color once an edit ends.
+/// A color button (RGB, 0 to 1) that opens a color picker. The color shows as it
+/// is dragged; the new color is returned once, when the pointer is released
+/// (or Enter / Escape is pressed), so one drag is one undo step.
 fn color_row(
     ui: &mut Ui,
     ctx: &egui::Context,
@@ -49,22 +51,24 @@ fn color_row(
     key: &str,
     current: [f32; 3],
 ) -> Option<[f32; 3]> {
+    let id = Id::unique(("inspector-color", mesh, key));
     let mut out = None;
     ui.horizontal(|ui| {
         label(ui, tr(ctx, key));
-        for (i, channel) in ["R", "G", "B"].into_iter().enumerate() {
-            let name = format!("{} {channel}", tr(ctx, key));
-            if let Some(v) = commit_field(
-                ui,
-                &format!("{mesh}/{key}/{i}"),
-                current[i],
-                0.0..=1.0,
-                0.005,
-                &name,
-            ) {
-                let mut rgb = current;
-                rgb[i] = v;
-                out = Some(rgb);
+        let mut rgb = ui.data(|d| d.get_temp::<[f32; 3]>(id)).unwrap_or(current);
+        let response = ui.color_edit_button_rgb(&mut rgb);
+        if response.changed() {
+            ui.data_mut(|d| d.insert_temp(id, rgb));
+        }
+        let settled = ui.input(|i| {
+            i.pointer.any_released()
+                || i.key_pressed(egui::Key::Enter)
+                || i.key_pressed(egui::Key::Escape)
+        });
+        if settled && let Some(picked) = ui.data(|d| d.get_temp::<[f32; 3]>(id)) {
+            ui.data_mut(|d| d.remove::<[f32; 3]>(id));
+            if picked != current {
+                out = Some(picked);
             }
         }
     });
@@ -653,6 +657,120 @@ mod tests {
             m.apply(command).unwrap();
         }
         m
+    }
+
+    #[test]
+    fn typing_a_mesh_opacity_sends_set_mesh_opacity() {
+        use egui_kittest::kittest::Queryable;
+        let mut m = Model::new();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "A".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(300.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, Selection, Vec<Command>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    if let Some(c) = show(ui, &state.0, Some(&state.1), None) {
+                        state.2.push(c);
+                    }
+                },
+                (m, Selection::Mesh("A".into()), Vec::new()),
+            );
+        h.run();
+        let field = h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Opacity");
+        field.click();
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Opacity")
+            .type_text("0.3");
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert!(
+            matches!(h.state().2.as_slice(), [Command::SetMeshOpacity { opacity, .. }] if (*opacity - 0.3).abs() < 1e-4),
+            "{:?}",
+            h.state().2
+        );
+    }
+
+    #[test]
+    fn dragging_a_mesh_opacity_sends_set_mesh_opacity_when_released() {
+        use egui_kittest::kittest::Queryable;
+        let mut m = Model::new();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "A".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(300.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, Selection, Vec<Command>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    if let Some(c) = show(ui, &state.0, Some(&state.1), None) {
+                        state.2.push(c);
+                    }
+                },
+                (m, Selection::Mesh("A".into()), Vec::new()),
+            );
+        h.run();
+        let rect = h
+            .get_by_role_and_label(egui::accesskit::Role::SpinButton, "Opacity")
+            .rect();
+        let from = rect.center();
+        h.event(egui::Event::PointerMoved(from));
+        h.run();
+        h.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        h.run();
+        for step in 1..=10 {
+            h.event(egui::Event::PointerMoved(
+                from - egui::vec2(8.0 * step as f32, 0.0),
+            ));
+            h.run();
+        }
+        h.event(egui::Event::PointerButton {
+            pos: from - egui::vec2(80.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        });
+        h.run();
+        assert!(
+            matches!(h.state().2.as_slice(), [Command::SetMeshOpacity { opacity, .. }] if *opacity < 1.0),
+            "{:?}",
+            h.state().2
+        );
     }
 
     #[test]
