@@ -445,3 +445,5 @@ mesh-edit-contour-mode-stroke-hint = 髪の毛や線画のような細い線を�
 mesh-edit-contour-stroke-width = 線の太さ (px、0 で画像から測る)
 proportional-radius-screen = 半径: 画面（ズームで実際の範囲が変わる）。押すとモデル空間で固定
 proportional-radius-fixed = 半径: モデル空間で固定（ズームに依存しない）。押すと画面基準へ
+action-mesh-reset = メッシュを初期の形（UV の範囲を覆う四角形）に戻す
+mesh-edit-reset = 初期化

@@ -3,6 +3,7 @@
     { "action": "edit.undo", "keys": "Mod+Z" },
     { "action": "edit.redo", "keys": "Mod+Shift+Z" },
     { "action": "edit.repeat", "context": "viewport", "keys": "Shift+R" },
+    { "action": "mesh.reset", "context": "viewport", "keys": "Shift+G" },
     { "action": "file.open", "keys": "Mod+O" },
     { "action": "file.save", "keys": "Mod+S" },
     { "action": "view.palette", "keys": "Mod+Shift+P" },

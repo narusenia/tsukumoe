@@ -47,7 +47,8 @@ const CONFIRM_FILE: &str = "confirm.json";
 const OPTIONS_FILE: &str = "options.json";
 
 mod settings_dialog;
-use settings_dialog::{SettingsState, SettingsTab};
+use settings_dialog::SettingsState;
+pub use settings_dialog::SettingsTab;
 
 pub enum Dialog {
     Open(String),
@@ -838,6 +839,7 @@ impl Editor {
                 }
                 self.mesh_tool.fill_grid(&name, &g)
             }
+            "mesh.reset" => self.mesh_tool.reset(&name, &g),
             "mesh.contour" => {
                 let alpha = self.texture_alpha_of(&name);
                 self.mesh_tool.contour_mesh(&name, &g, alpha.as_ref())
@@ -1017,6 +1019,7 @@ impl Editor {
             | "mesh.glue"
             | "mesh.retriangulate"
             | "mesh.fill-grid"
+            | "mesh.reset"
             | "mesh.contour" => {
                 self.run_mesh_action(ctx, action);
             }

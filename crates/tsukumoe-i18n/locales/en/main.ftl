@@ -449,3 +449,5 @@ mesh-edit-contour-mode-stroke-hint = Makes a strip along each thin line, such as
 mesh-edit-contour-stroke-width = Line width (px, 0 measures it from the image)
 proportional-radius-screen = Radius: screen (the reach changes with the zoom). Click to fix it in the model
 proportional-radius-fixed = Radius: fixed in the model (independent of the zoom). Click to use the screen
+action-mesh-reset = Reset the mesh to its starting shape (a quad over its UV box)
+mesh-edit-reset = Reset

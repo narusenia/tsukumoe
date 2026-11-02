@@ -663,6 +663,65 @@ impl UvMap {
 /// winding of the original. Positions come from the original's
 /// position-UV correspondence; UVs are the pixel coordinates over the image
 /// size and are not clamped.
+/// The mesh as it starts: one quad (two triangles) over the box its UVs span,
+/// placed by the position-UV correspondence of `original` and wound as it is.
+/// The way back from any editing of the shape.
+pub fn reset_to_quad(original: &Geometry) -> Result<Geometry, ContourError> {
+    let map = UvMap::new(original)?;
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for uv in &original.uvs {
+        for k in 0..2 {
+            lo[k] = lo[k].min(f64::from(uv[k]));
+            hi[k] = hi[k].max(f64::from(uv[k]));
+        }
+    }
+    let corners = [
+        [lo[0], lo[1]],
+        [hi[0], lo[1]],
+        [hi[0], hi[1]],
+        [lo[0], hi[1]],
+    ];
+    let mut g = Geometry {
+        positions: corners
+            .iter()
+            .map(|&uv| to_point(map.position(uv)))
+            .collect(),
+        uvs: corners.iter().map(|&uv| to_point(uv)).collect(),
+        indices: vec![0, 1, 2, 0, 2, 3],
+    };
+    let signed: f64 = g
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|t| {
+            let p = |i: u32| {
+                let v = g.positions[i as usize];
+                [f64::from(v[0]), f64::from(v[1])]
+            };
+            cross(p(t[0]), p(t[1]), p(t[2]))
+        })
+        .sum();
+    let winding: f64 = original
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .filter(|t| t.iter().all(|&i| (i as usize) < original.positions.len()))
+        .map(|t| {
+            let p = |i: u32| {
+                let v = original.positions[i as usize];
+                [f64::from(v[0]), f64::from(v[1])]
+            };
+            cross(p(t[0]), p(t[1]), p(t[2]))
+        })
+        .sum();
+    if signed * winding < 0.0 {
+        g.indices = vec![0, 2, 1, 0, 3, 2];
+    }
+    Ok(g)
+}
+
 pub fn contour_mesh(
     original: &Geometry,
     alpha: &Alpha,
@@ -1232,5 +1291,66 @@ mod tests {
         let span = ys.iter().cloned().fold(f32::MIN, f32::max)
             - ys.iter().cloned().fold(f32::MAX, f32::min);
         assert!((span - 10.0).abs() < 1.0, "{span}");
+    }
+
+    #[test]
+    fn a_reset_gives_one_quad_over_the_uv_box_with_the_same_winding() {
+        // A 3 x 3 grid over the UV box 0.25..0.75, edited a little, in both windings.
+        let mut positions = Vec::new();
+        let mut uvs = Vec::new();
+        for y in 0..3 {
+            for x in 0..3 {
+                positions.push([x as f32 * 10.0, y as f32 * 10.0]);
+                uvs.push([0.25 + x as f32 * 0.25, 0.25 + y as f32 * 0.25]);
+            }
+        }
+        let mut indices = Vec::new();
+        for y in 0..2u32 {
+            for x in 0..2u32 {
+                let a = y * 3 + x;
+                indices.extend([a, a + 1, a + 4, a, a + 4, a + 3]);
+            }
+        }
+        positions[4][0] += 3.0;
+        for flipped in [false, true] {
+            let mut g = Geometry {
+                positions: positions.clone(),
+                uvs: uvs.clone(),
+                indices: indices.clone(),
+            };
+            if flipped {
+                g.indices = g
+                    .indices
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .flat_map(|t| [t[0], t[2], t[1]])
+                    .collect();
+            }
+            let out = reset_to_quad(&g).unwrap();
+            assert_eq!(out.positions.len(), 4);
+            assert_eq!(out.indices.len(), 6);
+            let (lo, hi) = (out.positions[0], out.positions[2]);
+            assert!(
+                (lo[0] - 0.0).abs() < 1e-4 && (hi[0] - 20.0).abs() < 1e-4,
+                "{lo:?} {hi:?}"
+            );
+            let area: f64 = out
+                .indices
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|t| {
+                    let p = |i: u32| {
+                        [
+                            f64::from(out.positions[i as usize][0]),
+                            f64::from(out.positions[i as usize][1]),
+                        ]
+                    };
+                    cross(p(t[0]), p(t[1]), p(t[2]))
+                })
+                .sum();
+            assert!((area > 0.0) != flipped, "winding kept");
+        }
     }
 }

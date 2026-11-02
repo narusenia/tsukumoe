@@ -257,6 +257,8 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static s
             c.spacing = 4.0;
         }
         chosen = chosen.or(run(ui, "mesh-edit-make-contour", "mesh.contour"));
+        ui.separator();
+        chosen = chosen.or(run(ui, "mesh-edit-reset", "mesh.reset"));
     });
     chosen
 }
@@ -359,7 +361,12 @@ pub fn menu_ui(
     chosen
 }
 
-const MENU_MESH: [&str; 3] = ["mesh.retriangulate", "mesh.fill-grid", "mesh.contour"];
+const MENU_MESH: [&str; 4] = [
+    "mesh.retriangulate",
+    "mesh.fill-grid",
+    "mesh.contour",
+    "mesh.reset",
+];
 const MENU_VERTICES: [&str; 6] = [
     "mesh.connect",
     "mesh.weld",

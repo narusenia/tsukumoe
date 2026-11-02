@@ -155,7 +155,7 @@ impl From<EditError> for ToolError {
 
 /// The actions of the right-click menu, in order. Each one is run through
 /// `Editor::run_action`, so the menu has no logic of its own.
-pub const MENU_ACTIONS: [&str; 14] = [
+pub const MENU_ACTIONS: [&str; 15] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
@@ -170,6 +170,7 @@ pub const MENU_ACTIONS: [&str; 14] = [
     "mesh.delete-vertices",
     "deformer.create-warp",
     "deformer.create-rotation",
+    "mesh.reset",
 ];
 
 /// A command and the name it gets in the history list.
@@ -1013,6 +1014,13 @@ impl MeshTool {
         Ok(geometry_op(name, "mesh_fill_grid", out))
     }
 
+    /// Puts the mesh back to one quad over its UV box (all editing undone in shape).
+    pub fn reset(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        let out = contour::reset_to_quad(g)?;
+        self.clear_selection();
+        Ok(geometry_op(name, "mesh_reset", out))
+    }
+
     /// Makes the mesh again from the alpha of its texture: an outline per
     /// island and lattice points inside (`contour::contour_mesh`). `alpha` is
     /// `None` when the texture could not be read.
@@ -1815,7 +1823,7 @@ mod tests {
             enabled(&t),
             [
                 true, true, true, false, false, true, false, false, true, false, false, false,
-                true, true
+                true, true, true
             ]
         );
         click(&mut t, &g, &m, [100.0, 100.0], false);
@@ -1823,7 +1831,7 @@ mod tests {
             enabled(&t),
             [
                 true, true, true, false, false, true, false, false, true, true, true, true, true,
-                true
+                true, true
             ]
         );
         click(&mut t, &g, &m, [0.0, 0.0], true);
@@ -1831,7 +1839,7 @@ mod tests {
             enabled(&t),
             [
                 true, true, true, true, false, true, false, true, true, true, true, true, true,
-                true
+                true, true
             ]
         );
         click(&mut t, &g, &m, [100.0, 0.0], true);
@@ -1839,7 +1847,7 @@ mod tests {
             enabled(&t),
             [
                 true, true, true, false, false, true, false, true, true, true, true, true, true,
-                true
+                true, true
             ]
         );
         click(&mut t, &g, &m, [50.0, 50.0], false);
@@ -1847,7 +1855,7 @@ mod tests {
             enabled(&t),
             [
                 true, true, true, false, true, true, true, false, true, false, false, true, true,
-                true
+                true, true
             ]
         );
     }
