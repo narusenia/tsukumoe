@@ -149,27 +149,45 @@ pub fn menu_item(ui: &mut Ui, text: &str, shortcut: Option<&str>) -> Response {
     ui.add(button)
 }
 
-/// [`menu_item`] with an icon before the text, in the text color; `enabled`
-/// false greys it out and it does not click.
+/// [`menu_item`] with an icon before the text, in the text color; `None` keeps the
+/// room of one so the labels of a menu line up. `enabled` false greys it out and
+/// it does not click.
 pub fn menu_item_icon(
     ui: &mut Ui,
-    icon: crate::icons::Icon,
+    icon: impl Into<Option<crate::icons::Icon>>,
     text: &str,
     shortcut: Option<&str>,
     enabled: bool,
 ) -> Response {
     let t = Theme::get(ui.ctx());
-    let color = if enabled {
-        ui.visuals().text_color()
-    } else {
-        ui.visuals().weak_text_color()
-    };
-    let mut button = egui::Button::image_and_text(icon.image(color, t.metrics.icon), text)
+    let mut button = egui::Button::image_and_text(menu_icon(ui, icon.into(), enabled), text)
         .min_size(vec2(160.0, t.metrics.control));
     if let Some(shortcut) = shortcut {
         button = button.shortcut_text(shortcut);
     }
     ui.add_enabled(enabled, button)
+}
+
+/// A sub-menu entry laid out like [`menu_item_icon`].
+pub fn menu_sub_icon<R>(
+    ui: &mut Ui,
+    icon: impl Into<Option<crate::icons::Icon>>,
+    text: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let image = menu_icon(ui, icon.into(), true);
+    ui.menu_image_text_button(image, text, add_contents)
+}
+
+fn menu_icon(ui: &Ui, icon: Option<crate::icons::Icon>, enabled: bool) -> egui::Image<'static> {
+    let t = Theme::get(ui.ctx());
+    let color = match icon {
+        None => egui::Color32::TRANSPARENT,
+        Some(_) if enabled => ui.visuals().text_color(),
+        Some(_) => ui.visuals().weak_text_color(),
+    };
+    icon.unwrap_or(crate::icons::Icon::Check)
+        .image(color, t.metrics.icon)
 }
 
 /// A menu entry that is a choice: `checked` is `None` for an ordinary entry,
