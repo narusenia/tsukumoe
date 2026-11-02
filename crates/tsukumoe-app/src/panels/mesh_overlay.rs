@@ -158,6 +158,8 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                 .corner_radius(m.radius)
                 .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
                 .show(ui, |ui| {
+                    tsukumoe_ui::checkbox(ui, &mut tool.pen, &t("mesh-edit-pen"))
+                        .on_hover_text(t("mesh-edit-pen-hint"));
                     ui.horizontal(|ui| {
                         ui.label(t("mesh-edit-grid"));
                         let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
@@ -200,6 +202,28 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
         });
 }
 
+/// The edge pen's preview: the start vertex ringed, and a line from it to
+/// the pointer.
+pub fn pen_preview(
+    painter: &Painter,
+    theme: &Theme,
+    m: &mesh_tool::Mapper,
+    positions: &[Point],
+    tool: &MeshTool,
+    cursor: Option<Pos2>,
+) {
+    let Some(&from) = tool.pen_from().and_then(|v| positions.get(v as usize)) else {
+        return;
+    };
+    let s = m.to_screen(from);
+    let start = pos2(s[0], s[1]);
+    let color = theme.colors.warning;
+    painter.circle_stroke(start, DOT_SELECTED + 2.0, Stroke::new(1.5, color));
+    if let Some(cursor) = cursor {
+        painter.line_segment([start, cursor], Stroke::new(1.5, color.gamma_multiply(0.8)));
+    }
+}
+
 /// The items of a right-click menu: one button per action, disabled when
 /// `enabled` says the selection does not fit, with its shortcut on the right.
 /// Returns the action that was clicked.
@@ -234,7 +258,7 @@ mod tests {
 
     fn menu_harness(tool: MeshTool) -> Harness<'static, (MeshTool, Option<&'static str>)> {
         Harness::builder()
-            .with_size(vec2(420.0, 220.0))
+            .with_size(vec2(420.0, 280.0))
             .build_ui_state(
                 |ui, (tool, chosen): &mut (MeshTool, Option<&'static str>)| {
                     tsukumoe_ui::init(ui.ctx());

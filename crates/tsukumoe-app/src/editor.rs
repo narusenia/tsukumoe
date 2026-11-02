@@ -663,6 +663,13 @@ impl Editor {
             self.view.tool = Tool::Deformer;
             return;
         }
+        if action == "mesh.edge-pen" {
+            if self.view.tool == Tool::Mesh {
+                self.mesh_tool.pen = !self.mesh_tool.pen;
+                self.mesh_tool.cancel();
+            }
+            return;
+        }
         let Some(name) = self.mesh_tool.mesh().map(str::to_owned) else {
             return;
         };
@@ -677,12 +684,16 @@ impl Editor {
             return;
         }
         let op = match action {
-            "mesh.delete-vertices" => {
+            "mesh.delete-vertices" | "mesh.delete-edge" => {
                 // Ask on a copy: cancelling must keep the selection.
-                let count = self.mesh_tool.vertices().len();
-                let op = self.mesh_tool.clone().delete_selected(&name, &g);
+                let mut copy = self.mesh_tool.clone();
+                let op = if action == "mesh.delete-edge" {
+                    copy.delete_edge(&name, &g)
+                } else {
+                    copy.delete_selected(&name, &g)
+                };
                 return match op {
-                    Ok(op) => self.ask(ctx, Kind::Vertices, name, Some(count), Then::Mesh(op)),
+                    Ok(op) => self.ask(ctx, Kind::Vertices, name, None, Then::Mesh(op)),
                     Err(e) => self.apply_mesh_op(ctx, Err(e)),
                 };
             }
@@ -786,6 +797,8 @@ impl Editor {
             "mesh.delete-vertices"
             | "mesh.connect"
             | "mesh.flip-edge"
+            | "mesh.edge-pen"
+            | "mesh.delete-edge"
             | "mesh.retriangulate"
             | "mesh.fill-grid"
             | "mesh.contour" => {
@@ -2358,7 +2371,7 @@ mod tests {
         // It asks first, and nothing changes (the selection stays) until the yes.
         assert!(matches!(
             &editor.dialog,
-            Some(Dialog::Confirm(p)) if p.kind == crate::confirm::Kind::Vertices && p.count == Some(1)
+            Some(Dialog::Confirm(p)) if p.kind == crate::confirm::Kind::Vertices && p.count.is_none()
         ));
         assert_eq!(editor.doc.as_ref().unwrap().dispatcher.log().len(), steps);
         assert_eq!(editor.mesh_tool.vertices().len(), 1);

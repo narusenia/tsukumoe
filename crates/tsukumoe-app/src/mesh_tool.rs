@@ -134,12 +134,14 @@ impl From<EditError> for ToolError {
 
 /// The actions of the right-click menu, in order. Each one is run through
 /// `Editor::run_action`, so the menu has no logic of its own.
-pub const MENU_ACTIONS: [&str; 8] = [
+pub const MENU_ACTIONS: [&str; 10] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
     "mesh.connect",
     "mesh.flip-edge",
+    "mesh.edge-pen",
+    "mesh.delete-edge",
     "mesh.delete-vertices",
     "deformer.create-warp",
     "deformer.create-rotation",
@@ -167,6 +169,10 @@ pub struct MeshTool {
     mesh: Option<String>,
     vertices: BTreeSet<u32>,
     edge: Option<(u32, u32)>,
+    /// The edge pen is on: clicks draw edges instead of selecting.
+    pub pen: bool,
+    /// The vertex the next pen edge starts at.
+    pen_from: Option<u32>,
     gesture: Option<Gesture>,
     /// Columns and rows of the grid `mesh.fill-grid` lays; kept across meshes.
     pub grid: (u32, u32),
@@ -313,12 +319,52 @@ fn geometry_op(name: &str, label: &str, g: Geometry) -> Op {
     )
 }
 
+/// `g` with a vertex added where the pointer is: on an edge it splits the
+/// edge, in a triangle it splits the triangle, outside the outline it grows
+/// the outline. The new vertex is the last one.
+fn added_in(
+    g: &Geometry,
+    shown: &[Point],
+    m: &Mapper,
+    at: [f32; 2],
+    space: &Space,
+) -> Result<(Geometry, &'static str), ToolError> {
+    Ok(match hit_test(shown, &g.indices, m, at) {
+        Hit::Vertex(_) => return Err(EditError::TooClose.into()),
+        Hit::Edge(a, b) => {
+            let (pa, pb) = (
+                m.to_screen(shown[a as usize]),
+                m.to_screen(shown[b as usize]),
+            );
+            let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
+            let t = ((at[0] - pa[0]) * dx + (at[1] - pa[1]) * dy) / (dx * dx + dy * dy).max(1e-9);
+            (
+                mesh_edit::split_edge(g, a, b, t.clamp(0.0, 1.0))?,
+                "mesh_split_edge",
+            )
+        }
+        Hit::Nothing => {
+            let local = space
+                .point_from_world(m.to_model(at))
+                .map_err(|_| EditError::OutsideMesh)?;
+            match mesh_edit::add_vertex(g, local) {
+                Err(EditError::OutsideMesh) => {
+                    (mesh_edit::extend_outline(g, local)?, "mesh_extend_outline")
+                }
+                added => (added?, "mesh_add_vertex"),
+            }
+        }
+    })
+}
+
 impl Default for MeshTool {
     fn default() -> Self {
         Self {
             mesh: None,
             vertices: BTreeSet::new(),
             edge: None,
+            pen: false,
+            pen_from: None,
             gesture: None,
             grid: (4, 4),
             contour: ContourParams::default(),
@@ -338,6 +384,7 @@ impl MeshTool {
         if self.mesh.as_deref() != name {
             *self = Self {
                 mesh: name.map(str::to_owned),
+                pen: self.pen,
                 grid: self.grid,
                 contour: self.contour,
                 proportional: self.proportional,
@@ -381,7 +428,8 @@ impl MeshTool {
         match action {
             "mesh.connect" => self.vertices.len() == 2,
             "mesh.flip-edge" => self.edge.is_some(),
-            "mesh.delete-vertices" => !self.vertices.is_empty(),
+            "mesh.delete-vertices" => !self.vertices.is_empty() || self.edge.is_some(),
+            "mesh.delete-edge" => self.edge.is_some(),
             _ => true,
         }
     }
@@ -411,6 +459,9 @@ impl MeshTool {
             .is_some_and(|(a, b)| a.max(b) as usize >= vertex_count)
         {
             self.edge = None;
+        }
+        if self.pen_from.is_some_and(|v| v as usize >= vertex_count) {
+            self.pen_from = None;
         }
         if self.gesture.is_some() && vertex_count == 0 {
             self.gesture = None;
@@ -516,6 +567,7 @@ impl MeshTool {
     pub fn cancel(&mut self) {
         self.gesture = None;
         self.snapshot = None;
+        self.pen_from = None;
     }
 
     /// How far each vertex follows the drag: 1 for the selected ones and
@@ -714,35 +766,18 @@ impl MeshTool {
         at: [f32; 2],
         space: &Space,
     ) -> Result<Op, ToolError> {
-        let (out, label) = match hit_test(shown, &g.indices, m, at) {
-            Hit::Vertex(_) => return Err(EditError::TooClose.into()),
-            Hit::Edge(a, b) => {
-                let (pa, pb) = (
-                    m.to_screen(shown[a as usize]),
-                    m.to_screen(shown[b as usize]),
-                );
-                let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
-                let t =
-                    ((at[0] - pa[0]) * dx + (at[1] - pa[1]) * dy) / (dx * dx + dy * dy).max(1e-9);
-                (
-                    mesh_edit::split_edge(g, a, b, t.clamp(0.0, 1.0))?,
-                    "mesh_split_edge",
-                )
-            }
-            Hit::Nothing => {
-                let local = space
-                    .point_from_world(m.to_model(at))
-                    .map_err(|_| EditError::OutsideMesh)?;
-                (mesh_edit::add_vertex(g, local)?, "mesh_add_vertex")
-            }
-        };
+        let (out, label) = added_in(g, shown, m, at, space)?;
         self.vertices = BTreeSet::from([g.positions.len() as u32]);
         self.edge = None;
         Ok(geometry_op(name, label, out))
     }
 
     /// Removes the selected vertices as one command.
+    /// With only an edge selected, it removes that edge instead.
     pub fn delete_selected(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        if self.vertices.is_empty() && self.edge.is_some() {
+            return self.delete_edge(name, g);
+        }
         if self.vertices.is_empty() {
             return Err(ToolError::NeedVertices);
         }
@@ -801,6 +836,69 @@ impl MeshTool {
         Ok(geometry_op(name, "mesh_contour", out))
     }
 
+    /// Removes the selected edge and the triangles on its sides (a hole, or a
+    /// smaller outline).
+    pub fn delete_edge(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        let (a, b) = self.edge.ok_or(ToolError::NeedEdge)?;
+        let out = mesh_edit::remove_edge(g, a, b)?;
+        self.clear_selection();
+        Ok(geometry_op(name, "mesh_remove_edge", out))
+    }
+
+    /// The vertex the next pen edge starts at.
+    pub fn pen_from(&self) -> Option<u32> {
+        self.pen_from
+    }
+
+    /// Ends the pen chain; the next click starts a new one.
+    pub fn pen_end(&mut self) {
+        self.pen_from = None;
+    }
+
+    /// A drag with the pen starts at the vertex under the press.
+    pub fn pen_press(&mut self, shown: &[Point], indices: &[u32], m: &Mapper, at: [f32; 2]) {
+        if let Hit::Vertex(v) = hit_test(shown, indices, m, at) {
+            self.pen_from = Some(v);
+        }
+    }
+
+    /// A pen click (or the end of a pen drag) at `at`. On a vertex it draws
+    /// an edge from the chain's start and goes on from there; elsewhere it
+    /// adds a vertex (see [`added_in`]) and joins it to the start. Each edge
+    /// is one command; a refused one changes nothing.
+    pub fn pen_click(
+        &mut self,
+        name: &str,
+        g: &Geometry,
+        shown: &[Point],
+        m: &Mapper,
+        at: [f32; 2],
+        space: &Space,
+    ) -> Result<Option<Op>, ToolError> {
+        let hit = hit_test(shown, &g.indices, m, at);
+        let (out, label, to) = if let Hit::Vertex(b) = hit {
+            let Some(a) = self.pen_from else {
+                self.pen_from = Some(b);
+                return Ok(None);
+            };
+            if a == b {
+                return Ok(None);
+            }
+            (mesh_edit::connect(g, a, b)?, "mesh_connect", b)
+        } else {
+            let (added, label) = added_in(g, shown, m, at, space)?;
+            let to = g.positions.len() as u32;
+            match self.pen_from {
+                Some(a) => (mesh_edit::connect(&added, a, to)?, "mesh_connect", to),
+                None => (added, label, to),
+            }
+        };
+        self.pen_from = Some(to);
+        self.vertices.clear();
+        self.edge = None;
+        Ok(Some(geometry_op(name, label, out)))
+    }
+
     /// Flips the selected edge; the selection is dropped, as the edge is gone.
     pub fn flip_selected(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
         let (a, b) = self.edge.ok_or(ToolError::NeedEdge)?;
@@ -838,6 +936,107 @@ mod tests {
 
     fn click(t: &mut MeshTool, g: &Geometry, m: &Mapper, at: [f32; 2], shift: bool) {
         t.click(&g.positions, &g.indices, m, at, shift);
+    }
+
+    /// A unit square plus a vertex above it at (0.5, 1.5) that is not in a
+    /// triangle yet, and UVs in the middle of the texture.
+    fn pen_square() -> (Geometry, Mapper) {
+        let (mut g, _) = square();
+        for uv in &mut g.uvs {
+            *uv = [0.25 + 0.5 * uv[0], 0.25 + 0.5 * uv[1]];
+        }
+        // Show 2 x 2 model units over 200 points, with the square at the bottom left.
+        let m = Mapper {
+            origin: [0.0, 0.0],
+            size: [200.0, 200.0],
+            view: [-0.5, -0.5, 1.5, 1.5],
+        };
+        (g, m)
+    }
+
+    #[test]
+    fn the_pen_draws_edges_from_vertex_to_vertex_and_adds_points_where_it_is_empty() {
+        let (g, m) = pen_square();
+        let mut t = tool();
+        t.pen = true;
+        let at = |p: Point| m.to_screen(p);
+        let space = Space::Drawing;
+        let pen = |t: &mut MeshTool, g: &Geometry, p: Point| {
+            t.pen_click("Skin", g, &g.positions, &m, at(p), &space)
+        };
+        // The first click on a vertex only sets the start.
+        assert!(matches!(pen(&mut t, &g, [0.0, 0.0]), Ok(None)));
+        assert_eq!(t.pen_from(), Some(0));
+        // An empty click above the square grows the outline and joins the start.
+        let Ok(Some((
+            Command::SetMeshGeometry {
+                positions, indices, ..
+            },
+            label,
+        ))) = pen(&mut t, &g, [0.5, 1.3])
+        else {
+            panic!("a geometry");
+        };
+        assert_eq!(label, "mesh_connect: Skin");
+        assert_eq!(positions.len(), 5);
+        assert_eq!(indices.len(), 9);
+        assert_eq!(t.pen_from(), Some(4));
+        // Escape ends the chain.
+        t.cancel();
+        assert_eq!(t.pen_from(), None);
+        // A refused edge says why and leaves the start where it was.
+        assert!(matches!(pen(&mut t, &g, [0.0, 0.0]), Ok(None)));
+        let far = pen(&mut t, &g, [-9.0, -9.0]);
+        assert!(far.is_err());
+        assert_eq!(t.pen_from(), Some(0));
+    }
+
+    #[test]
+    fn the_pen_connects_two_vertices_and_continues_from_the_second() {
+        let (g, m) = pen_square();
+        let mut t = tool();
+        t.pen = true;
+        let space = Space::Drawing;
+        let click = |t: &mut MeshTool, p: Point| {
+            t.pen_click("Skin", &g, &g.positions, &m, m.to_screen(p), &space)
+        };
+        assert!(matches!(click(&mut t, [1.0, 0.0]), Ok(None)));
+        // 1 -> 3 crosses the diagonal 0-2: flipped into place, one command.
+        let Ok(Some((Command::SetMeshGeometry { indices, .. }, _))) = click(&mut t, [0.0, 1.0])
+        else {
+            panic!("a geometry");
+        };
+        assert_eq!(indices.len(), 6);
+        assert_eq!(t.pen_from(), Some(3));
+        assert!(t.vertices().is_empty());
+    }
+
+    #[test]
+    fn deleting_an_edge_needs_one_and_a_lone_edge_selection_deletes_it_on_delete() {
+        let (g, m) = square();
+        let mut t = tool();
+        assert_eq!(t.delete_edge("Skin", &g), Err(ToolError::NeedEdge));
+        // The diagonal 0-2: both triangles go, so nothing is left.
+        click(&mut t, &g, &m, [50.0, 50.0], false);
+        assert_eq!(t.edge(), Some((0, 2)));
+        assert_eq!(
+            t.delete_selected("Skin", &g),
+            Err(ToolError::Edit(EditError::NothingLeft))
+        );
+        // An outline edge of a bigger mesh: one triangle goes.
+        let mut g = g;
+        g.positions.push([2.0, 0.0]);
+        g.uvs.push([2.0, 0.0]);
+        g.indices.extend([1, 4, 2]);
+        t.clear_selection();
+        click(&mut t, &g, &m, [150.0, 100.0], false);
+        let (command, label) = t.delete_selected("Skin", &g).unwrap();
+        assert_eq!(label, "mesh_remove_edge: Skin");
+        let Command::SetMeshGeometry { indices, .. } = command else {
+            panic!("a geometry");
+        };
+        assert_eq!(indices.len(), 6);
+        assert!(t.edge().is_none());
     }
 
     #[test]
@@ -1089,10 +1288,11 @@ mod tests {
             panic!();
         };
         assert_eq!(indices.len(), 12);
-        // Outside and on a vertex are refused.
+        // Outside would extend the outline, but this mesh covers the whole
+        // texture; on a vertex is refused.
         assert_eq!(
             t.add_at("Skin", &g, &m, [150.0, 30.0]),
-            Err(ToolError::Edit(EditError::OutsideMesh))
+            Err(ToolError::Edit(EditError::OutsideTexture))
         );
         assert_eq!(
             t.add_at("Skin", &g, &m, [1.0, 99.0]),
@@ -1281,27 +1481,33 @@ mod tests {
         // Nothing selected: only the whole-mesh actions.
         assert_eq!(
             enabled(&t),
-            [true, true, true, false, false, false, true, true]
+            [
+                true, true, true, false, false, true, false, false, true, true
+            ]
         );
         click(&mut t, &g, &m, [100.0, 100.0], false);
         assert_eq!(
             enabled(&t),
-            [true, true, true, false, false, true, true, true]
+            [
+                true, true, true, false, false, true, false, true, true, true
+            ]
         );
         click(&mut t, &g, &m, [0.0, 0.0], true);
         assert_eq!(
             enabled(&t),
-            [true, true, true, true, false, true, true, true]
+            [true, true, true, true, false, true, false, true, true, true]
         );
         click(&mut t, &g, &m, [100.0, 0.0], true);
         assert_eq!(
             enabled(&t),
-            [true, true, true, false, false, true, true, true]
+            [
+                true, true, true, false, false, true, false, true, true, true
+            ]
         );
         click(&mut t, &g, &m, [50.0, 50.0], false);
         assert_eq!(
             enabled(&t),
-            [true, true, true, false, true, false, true, true]
+            [true, true, true, false, true, true, true, true, true, true]
         );
     }
 
