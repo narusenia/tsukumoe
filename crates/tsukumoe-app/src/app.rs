@@ -71,6 +71,8 @@ pub fn run(project: Option<PathBuf>) -> Result<(), String> {
                 .unwrap_or_default();
             prefs.apply(&cc.egui_ctx, &builtin_themes());
             let mut editor = Editor::new(config.as_deref().map(settings::editor_dir));
+            editor.prefs = prefs;
+            editor.config_dir = config.clone();
             if let Some(path) = project {
                 editor.open(&path)?;
             }

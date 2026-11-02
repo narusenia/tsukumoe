@@ -40,6 +40,12 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
     ui.label(egui::RichText::new(name).strong());
+    // Rename, range, repeat and delete of the parameter, where its keys are.
+    egui::CollapsingHeader::new(t("param-settings"))
+        .id_salt(("keys-settings", name))
+        .show(ui, |ui| {
+            super::parameters::settings_section(ui, model, name, p, &mut outs);
+        });
     // The keys of the selected element.
     let value = view.param(name, p);
     let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
@@ -139,7 +145,7 @@ fn pad_section(
             .find(|&i| i != other)
             .unwrap_or(from)
     };
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if button(ui, &format!("\u{2195} {}", name_of(r)), Variant::Ghost).clicked() {
             r = next(r, c);
         }
@@ -298,14 +304,13 @@ fn pad_section(
         at(binding.axes()[r].parameter).clamp(rmin, rmax),
     );
     painter.circle_filled(dot, 4.0, theme.colors.accent);
-    ui.horizontal(|ui| {
-        let at_label = match crate::keyed::element_place(model, element, &at) {
-            Some(crate::keyed::Place::Key { label, .. }) => format!("\u{25c6} {label}"),
-            Some(crate::keyed::Place::Off { label }) => label,
-            None => String::new(),
-        };
-        hint(ui, at_label);
-    });
+    // Not in a `horizontal`: a long parameter name wraps only in a vertical layout.
+    let at_label = match crate::keyed::element_place(model, element, &at) {
+        Some(crate::keyed::Place::Key { label, .. }) => format!("\u{25c6} {label}"),
+        Some(crate::keyed::Place::Off { label }) => label,
+        None => String::new(),
+    };
+    hint(ui, at_label);
 }
 
 /// A mirror paste onto the keyform `key` of `element` (a cell of the grid).

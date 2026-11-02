@@ -170,7 +170,7 @@ fn menu_snapshot(mode: Mode, name: &str) {
     tool.set_mesh(Some("Skin"));
     tool.click(&positions, &indices, &mapper, [100.0, 100.0], false);
     let mut harness = Harness::builder()
-        .with_size(egui::vec2(330.0, 330.0))
+        .with_size(egui::vec2(330.0, 460.0))
         .wgpu()
         .build_ui_state(
             move |ui, tool: &mut MeshTool| {

@@ -10,7 +10,7 @@ use egui::{Id, Ui};
 use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::elements::ParameterId;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{checkbox, hint, label, number, section_header, tr};
+use tsukumoe_ui::{Icon, checkbox, hint, icon_button, label, number, section_header, tr};
 
 use crate::deformer_tool::DeformerTool;
 use crate::view::Selection;
@@ -41,31 +41,60 @@ fn commit_field(
     None
 }
 
-/// A row of three number fields for an RGB color (0 to 1); the new color once an edit ends.
+const COLOR_LABEL_WIDTH: f32 = 84.0;
+
+/// A numeric field whose every change is reported at once: `Some((value, ended))`
+/// when it changed (`value` is `Some`) or an edit ended without a further
+/// change (`value` is `None`).
+fn live_field(
+    ui: &mut Ui,
+    original: f32,
+    range: std::ops::RangeInclusive<f32>,
+    speed: f64,
+    name: &str,
+) -> Option<(Option<f32>, bool)> {
+    let mut value = original;
+    let response = number(ui, &mut value, range, speed, name);
+    let ended = response.drag_stopped() || response.lost_focus();
+    let changed = response.changed() && value != original;
+    (changed || ended).then_some((changed.then_some(value), ended))
+}
+
+/// A color button (RGB, 0 to 1) that opens a color picker. The color is reported
+/// as it is dragged, `Some((color, ended))` like [`live_field`]; `ended` is set when
+/// the pointer is released (or Enter / Escape is pressed) after a change.
 fn color_row(
     ui: &mut Ui,
     ctx: &egui::Context,
     mesh: &str,
     key: &str,
     current: [f32; 3],
-) -> Option<[f32; 3]> {
+) -> Option<(Option<[f32; 3]>, bool)> {
+    let id = Id::unique(("inspector-color", mesh, key));
     let mut out = None;
     ui.horizontal(|ui| {
-        label(ui, tr(ctx, key));
-        for (i, channel) in ["R", "G", "B"].into_iter().enumerate() {
-            let name = format!("{} {channel}", tr(ctx, key));
-            if let Some(v) = commit_field(
-                ui,
-                &format!("{mesh}/{key}/{i}"),
-                current[i],
-                0.0..=1.0,
-                0.005,
-                &name,
-            ) {
-                let mut rgb = current;
-                rgb[i] = v;
-                out = Some(rgb);
-            }
+        // The same width for every row, so the buttons line up.
+        ui.allocate_ui_with_layout(
+            egui::vec2(COLOR_LABEL_WIDTH, ui.spacing().interact_size.y),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(COLOR_LABEL_WIDTH);
+                ui.add(egui::Label::new(tr(ctx, key)).truncate());
+            },
+        );
+        let mut rgb = current;
+        let response = ui.color_edit_button_rgb(&mut rgb);
+        let picking = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+        let changed = response.changed() && rgb != current;
+        let settled = picking
+            && ui.input(|i| {
+                i.pointer.any_released()
+                    || i.key_pressed(egui::Key::Enter)
+                    || i.key_pressed(egui::Key::Escape)
+            });
+        ui.data_mut(|d| d.insert_temp(id, (picking || changed) && !settled));
+        if changed || settled {
+            out = Some((changed.then_some(rgb), settled));
         }
     });
     out
@@ -82,15 +111,19 @@ fn order_buttons(
     use crate::draw_style::{Place, reorder};
     let mut out = None;
     ui.horizontal(|ui| {
-        for (place, key) in [
-            (Place::Front, "inspector-order-front"),
-            (Place::Forward, "inspector-order-forward"),
-            (Place::Backward, "inspector-order-backward"),
-            (Place::Back, "inspector-order-back"),
+        for (place, key, icon) in [
+            (Place::Front, "inspector-order-front", Icon::ChevronsUp),
+            (Place::Forward, "inspector-order-forward", Icon::ChevronUp),
+            (
+                Place::Backward,
+                "inspector-order-backward",
+                Icon::ChevronDown,
+            ),
+            (Place::Back, "inspector-order-back", Icon::ChevronsDown),
         ] {
             let movable = reorder(model, mesh, place, at);
             ui.add_enabled_ui(movable.is_some(), |ui| {
-                if tsukumoe_ui::button(ui, &tr(ctx, key), tsukumoe_ui::Variant::Ghost).clicked() {
+                if icon_button(ui, icon, &tr(ctx, key), tsukumoe_ui::Variant::Ghost).clicked() {
                     out = movable;
                 }
             });
@@ -144,7 +177,9 @@ fn mask_rows(ui: &mut Ui, ctx: &egui::Context, model: &Model, mesh: &str) -> Opt
                         out = Some(set(all, m.mask_inverted));
                     }
                 }
-            });
+            })
+            .response
+            .accessible_name(tr(ctx, "inspector-mask-add"));
     }
     if !names.is_empty() {
         let mut inverted = m.mask_inverted;
@@ -199,9 +234,21 @@ pub fn show(
     show_with(ui, model, selection, deformer, &mut Requests::default())
 }
 
+/// A value being edited live: the editor applies each change at once and
+/// replaces the previous step of the same edit, so the whole drag is one undo
+/// step. `ended` is set on the change that finishes it (release, Enter, leaving
+/// the field).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Live {
+    pub key: String,
+    pub ended: bool,
+}
+
 /// What the inspector asks of the editor besides a plain command.
 #[derive(Debug, Default, PartialEq)]
 pub struct Requests {
+    /// The command is one moment of an edit under way (see [`Live`]).
+    pub live: Option<Live>,
     /// The reset button of a deformer was pressed.
     pub reset: bool,
     /// The origin of a rotation was edited: move its axis only (what hangs
@@ -292,18 +339,23 @@ pub fn show_at(
             let intensity = crate::keyed::glue_intensity(model, name, at).unwrap_or(g.intensity);
             ui.horizontal(|ui| {
                 label(ui, tr(&ctx, "inspector-glue-intensity"));
-                if let Some(v) = commit_field(
+                if let Some((v, ended)) = live_field(
                     ui,
-                    &format!("{name}/glue-intensity"),
                     intensity,
                     0.0..=1.0,
                     0.005,
                     &tr(&ctx, "inspector-glue-intensity"),
                 ) {
-                    command = Some(Command::SetGlueIntensity {
-                        name: name.clone(),
-                        intensity: v,
+                    requests.live = Some(Live {
+                        key: format!("{name}/glue-intensity"),
+                        ended,
                     });
+                    if let Some(v) = v {
+                        command = Some(Command::SetGlueIntensity {
+                            name: name.clone(),
+                            intensity: v,
+                        });
+                    }
                 }
             });
         }
@@ -315,18 +367,23 @@ pub fn show_at(
             section_header(ui, name);
             ui.horizontal(|ui| {
                 label(ui, tr(&ctx, "inspector-opacity"));
-                if let Some(v) = commit_field(
+                if let Some((v, ended)) = live_field(
                     ui,
-                    &format!("{name}/opacity"),
                     p.opacity,
                     0.0..=1.0,
                     0.005,
                     &tr(&ctx, "inspector-opacity"),
                 ) {
-                    command = Some(Command::SetPartOpacity {
-                        name: name.clone(),
-                        opacity: v,
+                    requests.live = Some(Live {
+                        key: format!("{name}/opacity"),
+                        ended,
                     });
+                    if let Some(v) = v {
+                        command = Some(Command::SetPartOpacity {
+                            name: name.clone(),
+                            opacity: v,
+                        });
+                    }
                 }
             });
         }
@@ -354,34 +411,44 @@ pub fn show_at(
                 .unwrap_or((mesh.opacity, mesh.draw_order));
             ui.horizontal(|ui| {
                 label(ui, tr(&ctx, "inspector-opacity"));
-                if let Some(v) = commit_field(
+                if let Some((v, ended)) = live_field(
                     ui,
-                    &format!("{name}/mesh-opacity"),
                     opacity,
                     0.0..=1.0,
                     0.005,
                     &tr(&ctx, "inspector-opacity"),
                 ) {
-                    command = Some(Command::SetMeshOpacity {
-                        name: name.clone(),
-                        opacity: v,
+                    requests.live = Some(Live {
+                        key: format!("{name}/mesh-opacity"),
+                        ended,
                     });
+                    if let Some(v) = v {
+                        command = Some(Command::SetMeshOpacity {
+                            name: name.clone(),
+                            opacity: v,
+                        });
+                    }
                 }
             });
             ui.horizontal(|ui| {
                 label(ui, tr(&ctx, "inspector-draw-order"));
-                if let Some(v) = commit_field(
+                if let Some((v, ended)) = live_field(
                     ui,
-                    &format!("{name}/draw-order"),
                     draw_order,
                     0.0..=1000.0,
                     1.0,
                     &tr(&ctx, "inspector-draw-order"),
                 ) {
-                    command = Some(Command::SetMeshDrawOrder {
-                        name: name.clone(),
-                        draw_order: v,
+                    requests.live = Some(Live {
+                        key: format!("{name}/draw-order"),
+                        ended,
                     });
+                    if let Some(v) = v {
+                        command = Some(Command::SetMeshDrawOrder {
+                            name: name.clone(),
+                            draw_order: v,
+                        });
+                    }
                 }
             });
             if let Some(c) = order_buttons(ui, &ctx, model, name, at) {
@@ -393,17 +460,23 @@ pub fn show_at(
                 ("inspector-multiply-color", multiply, true),
                 ("inspector-screen-color", screen, false),
             ] {
-                if let Some(rgb) = color_row(ui, &ctx, name, key, current) {
-                    let (multiply_color, screen_color) = if multiply_row {
-                        (rgb, screen)
-                    } else {
-                        (multiply, rgb)
-                    };
-                    command = Some(Command::SetMeshColors {
-                        name: name.clone(),
-                        multiply_color,
-                        screen_color,
+                if let Some((rgb, ended)) = color_row(ui, &ctx, name, key, current) {
+                    requests.live = Some(Live {
+                        key: format!("{name}/{key}"),
+                        ended,
                     });
+                    if let Some(rgb) = rgb {
+                        let (multiply_color, screen_color) = if multiply_row {
+                            (rgb, screen)
+                        } else {
+                            (multiply, rgb)
+                        };
+                        command = Some(Command::SetMeshColors {
+                            name: name.clone(),
+                            multiply_color,
+                            screen_color,
+                        });
+                    }
                 }
             }
             if let Some(c) = mask_rows(ui, &ctx, model, name) {
@@ -653,6 +726,122 @@ mod tests {
             m.apply(command).unwrap();
         }
         m
+    }
+
+    #[test]
+    fn typing_a_mesh_opacity_sends_set_mesh_opacity() {
+        use egui_kittest::kittest::Queryable;
+        let mut m = Model::new();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "A".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(300.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, Selection, Vec<Command>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    if let Some(c) = show(ui, &state.0, Some(&state.1), None) {
+                        state.2.push(c);
+                    }
+                },
+                (m, Selection::Mesh("A".into()), Vec::new()),
+            );
+        h.run();
+        let field = h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Opacity");
+        field.click();
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Opacity")
+            .type_text("0.3");
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert!(
+            matches!(h.state().2.as_slice(), [Command::SetMeshOpacity { opacity, .. }] if (*opacity - 0.3).abs() < 1e-4),
+            "{:?}",
+            h.state().2
+        );
+    }
+
+    #[test]
+    fn dragging_a_mesh_opacity_sends_set_mesh_opacity_when_released() {
+        use egui_kittest::kittest::Queryable;
+        let mut m = Model::new();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "A".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(300.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, Selection, Vec<Command>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    if let Some(c) = show(ui, &state.0, Some(&state.1), None) {
+                        state.2.push(c);
+                    }
+                },
+                (m, Selection::Mesh("A".into()), Vec::new()),
+            );
+        h.run();
+        let rect = h
+            .get_by_role_and_label(egui::accesskit::Role::SpinButton, "Opacity")
+            .rect();
+        let from = rect.center();
+        h.event(egui::Event::PointerMoved(from));
+        h.run();
+        h.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        });
+        h.run();
+        for step in 1..=10 {
+            h.event(egui::Event::PointerMoved(
+                from - egui::vec2(8.0 * step as f32, 0.0),
+            ));
+            h.run();
+        }
+        h.event(egui::Event::PointerButton {
+            pos: from - egui::vec2(80.0, 0.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        });
+        h.run();
+        // Each change is sent while dragging; the last one is below the start.
+        let sent = &h.state().2;
+        assert!(sent.len() > 1, "{sent:?}");
+        assert!(
+            matches!(sent.last(), Some(Command::SetMeshOpacity { opacity, .. }) if *opacity < 1.0),
+            "{sent:?}"
+        );
     }
 
     #[test]

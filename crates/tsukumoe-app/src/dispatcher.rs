@@ -23,6 +23,8 @@ pub struct Dispatcher {
     saved: Option<usize>,
     error: Option<String>,
     revision: u64,
+    /// Undo steps kept; 0 keeps all.
+    limit: usize,
 }
 
 impl Dispatcher {
@@ -35,7 +37,31 @@ impl Dispatcher {
             saved: Some(0),
             error: None,
             revision: 0,
+            limit: 0,
         }
+    }
+
+    /// Keeps at most `limit` undo steps (0 keeps all); older ones are dropped now and
+    /// as new commands arrive.
+    pub fn set_history_limit(&mut self, limit: usize) {
+        if self.limit != limit {
+            self.limit = limit;
+            self.trim();
+        }
+    }
+
+    /// Forgets the oldest applied steps beyond the limit, in the model and in the list.
+    fn trim(&mut self) {
+        if self.limit == 0 || self.cursor <= self.limit {
+            return;
+        }
+        let k = self.cursor - self.limit;
+        self.model.forget_oldest_steps(k);
+        self.log.drain(..k);
+        self.labels.drain(..k);
+        self.cursor -= k;
+        // The saved state is out of reach once its step is forgotten.
+        self.saved = self.saved.and_then(|s| s.checked_sub(k));
     }
 
     pub fn model(&self) -> &Model {
@@ -71,6 +97,7 @@ impl Dispatcher {
                 self.log.push(command);
                 self.labels.push(label);
                 self.cursor += 1;
+                self.trim();
                 self.revision += 1;
                 Ok(())
             }
@@ -80,6 +107,17 @@ impl Dispatcher {
                 Err(message)
             }
         }
+    }
+
+    /// Replaces the last applied step with `command`: undoes it, then applies
+    /// the new one as the step in its place. For an edit whose value changes
+    /// continuously (a drag), so that the whole edit is one undo step. The
+    /// caller makes sure the last step is its own.
+    pub fn amend_labeled(&mut self, command: Command, label: Option<String>) -> Result<(), String> {
+        if self.cursor > 0 {
+            self.undo();
+        }
+        self.submit_labeled(command, label)
     }
 
     pub fn undo(&mut self) -> bool {
@@ -229,6 +267,20 @@ mod tests {
     }
 
     #[test]
+    fn an_amended_step_replaces_the_last_one_and_stays_one_undo_step() {
+        let mut d = Dispatcher::new(Model::new());
+        d.submit(add("a")).unwrap();
+        d.submit_labeled(add("b"), None).unwrap();
+        d.amend_labeled(add("c"), None).unwrap();
+        d.amend_labeled(add("d"), None).unwrap();
+        assert_eq!(names(&d), ["a", "d"]);
+        assert_eq!((d.log().len(), d.cursor()), (2, 2));
+        assert!(d.undo());
+        assert_eq!(names(&d), ["a"]);
+        assert!(d.dirty());
+    }
+
+    #[test]
     fn dirty_follows_the_saved_position() {
         let mut d = Dispatcher::new(Model::new());
         assert!(!d.dirty());
@@ -249,6 +301,30 @@ mod tests {
         d.jump_to(0);
         d.jump_to(1);
         assert!(d.dirty());
+    }
+
+    #[test]
+    fn the_history_limit_forgets_the_oldest_steps_in_the_model_and_the_list() {
+        let mut d = Dispatcher::new(Model::new());
+        d.set_history_limit(2);
+        for n in ["a", "b", "c", "d"] {
+            d.submit(add(n)).unwrap();
+        }
+        assert_eq!((d.log().len(), d.cursor()), (2, 2));
+        assert_eq!(names(&d), ["a", "b", "c", "d"]);
+        assert!(d.undo() && d.undo());
+        assert!(!d.undo());
+        assert_eq!(names(&d), ["a", "b"]);
+        // The start is out of reach, so the document stays unsaved.
+        assert!(d.dirty());
+        // 0 keeps everything again; lowering the limit trims at once.
+        d.set_history_limit(0);
+        for n in ["x", "y", "z"] {
+            d.submit(add(n)).unwrap();
+        }
+        assert_eq!(d.log().len(), 3);
+        d.set_history_limit(1);
+        assert_eq!((d.log().len(), d.cursor()), (1, 1));
     }
 
     #[test]

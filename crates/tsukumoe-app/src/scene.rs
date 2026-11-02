@@ -127,7 +127,27 @@ pub struct Scene {
 
 impl Scene {
     pub fn new(source: &Model) -> Result<Self, String> {
-        let model = source.compile().map_err(|e| format!("{e:?}"))?;
+        Self::new_solo(source, None)
+    }
+
+    /// [`Scene::new`] drawing only the meshes named in `keep` (when given), on top
+    /// of the ones the model already hides. The model is not changed.
+    pub fn new_solo(source: &Model, keep: Option<&[String]>) -> Result<Self, String> {
+        let mut model = source.compile().map_err(|e| format!("{e:?}"))?;
+        if let Some(keep) = keep {
+            let kept: Vec<u32> = keep
+                .iter()
+                .filter_map(|n| model.mesh_index(n))
+                .map(|i| i as u32)
+                .collect();
+            let mut hidden: Vec<u32> = (0..model.meshes.len() as u32)
+                .filter(|i| !kept.contains(i))
+                .chain(model.mesh_hidden.iter().copied())
+                .collect();
+            hidden.sort_unstable();
+            hidden.dedup();
+            model.mesh_hidden = std::borrow::Cow::Owned(hidden);
+        }
         let mut frame = Frame::new(&model);
         frame.evaluate(&model);
         let bounds = bounds(frame.draw_list(&model).positions()).unwrap_or(FALLBACK_VIEW);
@@ -761,5 +781,44 @@ mod tests {
             },
         );
         close(&live, &after);
+    }
+
+    #[test]
+    fn a_solo_scene_draws_only_the_kept_meshes_and_leaves_the_model_alone() {
+        use tsukumoe_core::command::Command;
+        let mut m = Model::new();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "A".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri.clone(),
+                indices: vec![0, 1, 2],
+            },
+            Command::AddMesh {
+                name: "B".into(),
+                part: "P".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let drawn = |scene: &Scene| {
+            let list = scene.frame.draw_list(&scene.model);
+            list.order().to_vec()
+        };
+        assert_eq!(drawn(&Scene::new(&m).unwrap()).len(), 2);
+        let solo = Scene::new_solo(&m, Some(&["B".to_owned()])).unwrap();
+        let b = solo.model.mesh_index("B").unwrap() as u32;
+        assert_eq!(drawn(&solo), vec![b]);
+        // A name the model does not have keeps nothing drawn rather than failing.
+        assert!(drawn(&Scene::new_solo(&m, Some(&["Nope".to_owned()])).unwrap()).is_empty());
     }
 }

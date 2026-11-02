@@ -78,6 +78,8 @@ icons! {
     ListTree => "list-tree",
     Grid => "grid-3x3",
     ArrowUpDown => "arrow-up-down",
+    ChevronsUp => "chevrons-up",
+    ChevronsDown => "chevrons-down",
     ChevronsUpDown => "chevrons-up-down",
     ChevronsDownUp => "chevrons-down-up",
     Locate => "locate",

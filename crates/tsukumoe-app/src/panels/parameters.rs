@@ -29,7 +29,7 @@ pub fn names(model: &Model, filter: &str) -> Vec<String> {
         .collect()
 }
 
-const LABEL_WIDTH: f32 = 120.0;
+const LABEL_WIDTH: f32 = 84.0;
 /// The width of the number field next to a slider or a pad.
 const NUMBER_WIDTH: f32 = 64.0;
 /// The width of the link button at the start of a row.
@@ -77,6 +77,9 @@ fn paint_keys(ui: &Ui, rect: egui::Rect, keys: &[f32], min: f32, max: f32, value
         );
     }
 }
+
+/// The width of the settings window of a parameter.
+const SETTINGS_WIDTH: f32 = 380.0;
 
 pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let ctx = ui.ctx().clone();
@@ -130,6 +133,8 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                         Vec2::new(LABEL_WIDTH, m.control),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
+                            // The slider starts at the same x on every row, whatever the name.
+                            ui.set_min_width(LABEL_WIDTH);
                             name_label(ui, model, view, &name, &mut outs);
                         },
                     );
@@ -181,7 +186,13 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     .id(ui.make_persistent_id(("param-settings", &name)))
                     .open(&mut open)
                     .collapsible(false)
-                    .show(&ctx, |ui| settings_section(ui, model, &name, p, &mut outs));
+                    .resizable(false)
+                    .show(&ctx, |ui| {
+                        // A fixed width: the name field fills what is left, so an
+                        // auto-sized window would grow on every frame.
+                        ui.set_width(SETTINGS_WIDTH);
+                        settings_section(ui, model, &name, p, &mut outs);
+                    });
             }
             None => open = false,
         }
@@ -260,11 +271,14 @@ fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs
     } else {
         egui::RichText::new(name)
     };
-    let r = ui.add(
-        egui::Label::new(text)
-            .truncate()
-            .sense(egui::Sense::click()),
-    );
+    // A long name is cut to the column; the tooltip shows all of it.
+    let r = ui
+        .add(
+            egui::Label::new(text)
+                .truncate()
+                .sense(egui::Sense::click()),
+        )
+        .on_hover_text(name);
     if r.clicked() {
         view.param_focus = Some(name.to_owned());
     }
@@ -369,7 +383,10 @@ fn link_row(
                 ui.allocate_ui_with_layout(
                     row,
                     egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| name_label(ui, model, view, name, outs),
+                    |ui| {
+                        ui.set_min_width(LABEL_WIDTH);
+                        name_label(ui, model, view, name, outs);
+                    },
                 );
             }
         });
@@ -463,7 +480,13 @@ fn link_row(
 }
 
 /// The settings of one parameter: its name and range, repeat and delete.
-fn settings_section(ui: &mut Ui, model: &Model, name: &str, p: &Parameter, outs: &mut Vec<Out>) {
+pub(super) fn settings_section(
+    ui: &mut Ui,
+    model: &Model,
+    name: &str,
+    p: &Parameter,
+    outs: &mut Vec<Out>,
+) {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
     // The name: edited in a buffer, sent when the field is left.
@@ -634,6 +657,27 @@ mod tests {
                 },
                 p,
             )
+    }
+
+    #[test]
+    fn the_settings_window_keeps_its_width_from_frame_to_frame() {
+        use egui_kittest::kittest::Queryable;
+        let mut p = panel();
+        p.view.param_dialog = Some("ParamAngleX".into());
+        let mut h = harness(p);
+        for _ in 0..3 {
+            h.run();
+        }
+        let width = |h: &Harness<'static, Panel>| {
+            h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Name")
+                .rect()
+                .right()
+        };
+        let before = width(&h);
+        for _ in 0..30 {
+            h.step();
+        }
+        assert!((width(&h) - before).abs() < 0.5, "the window grew");
     }
 
     #[test]

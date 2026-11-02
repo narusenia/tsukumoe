@@ -218,6 +218,12 @@ impl History {
         !self.redo.is_empty()
     }
 
+    /// Drops the `n` oldest undo steps (to bound memory). The commands left no
+    /// longer replay to the current model: `commands` starts from a later state.
+    pub(crate) fn forget_oldest(&mut self, n: usize) {
+        self.undo.drain(..n.min(self.undo.len()));
+    }
+
     /// The commands currently applied, oldest first. Replaying them on an
     /// empty model gives the same model.
     pub fn commands(&self) -> impl Iterator<Item = &Command> {

@@ -21,6 +21,7 @@ pub mod mesh_tool;
 pub mod mirror;
 #[cfg(target_os = "macos")]
 mod native;
+pub mod options;
 pub mod panels;
 pub mod param_ops;
 pub mod picker;
