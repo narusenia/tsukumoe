@@ -29,7 +29,9 @@ pub fn names(model: &Model, filter: &str) -> Vec<String> {
         .collect()
 }
 
-const LABEL_WIDTH: f32 = 84.0;
+const LABEL_WIDTH: f32 = 68.0;
+/// The width of the drag handle at the start of a row.
+const GRIP_WIDTH: f32 = 16.0;
 /// The width of the number field next to a slider or a pad.
 const NUMBER_WIDTH: f32 = 64.0;
 /// The width of the link button at the start of a row.
@@ -485,7 +487,8 @@ fn link_row(
     let (mut va, mut vb) = (view.param(a, pa), view.param(b, pb));
     let mut changed = false;
     let shift = ui.input(|i| i.modifiers.shift);
-    let row = Vec2::new(LABEL_WIDTH, m.control);
+    // The names column covers the grip too, so the pad lines up with the sliders.
+    let row = Vec2::new(LABEL_WIDTH + GRIP_WIDTH, m.control);
     let gap = ui.spacing().item_spacing.y;
     let focused = [a, b].contains(&view.param_focus.as_deref().unwrap_or_default());
     let bg = ui.painter().add(egui::Shape::Noop);
@@ -509,7 +512,7 @@ fn link_row(
                     row,
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.set_min_width(LABEL_WIDTH);
+                        ui.set_min_width(LABEL_WIDTH + GRIP_WIDTH);
                         name_label(ui, model, view, name, outs);
                     },
                 );
