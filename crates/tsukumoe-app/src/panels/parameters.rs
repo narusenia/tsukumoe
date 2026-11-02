@@ -37,6 +37,9 @@ const LABEL_WIDTH: f32 = 68.0;
 const GRIP_WIDTH: f32 = 16.0;
 /// The width of the number field next to a slider or a pad.
 const NUMBER_WIDTH: f32 = 64.0;
+/// The least widths of a name and a slider; below them a row runs past the panel.
+const MIN_LABEL_WIDTH: f32 = 58.0;
+const MIN_SLIDER_WIDTH: f32 = 28.0;
 /// The width of the link button at the start of a row.
 const LINK_WIDTH: f32 = 24.0;
 /// The width of the reset button at the end of a row.
@@ -214,16 +217,22 @@ fn row(
     let row = ui.horizontal(|ui| {
         grip(ui, name);
         link_button(ui, model, view, name, outs);
+        // What follows the slider: the number, the reset button and the gaps before them.
+        let after = NUMBER_WIDTH + RESET_WIDTH + 2.0 * ui.spacing().item_spacing.x;
+        // The name gives way in a narrow panel, so the slider keeps its least width
+        // and the number stays inside.
+        let label = (ui.available_width() - after - MIN_SLIDER_WIDTH - ui.spacing().item_spacing.x)
+            .clamp(MIN_LABEL_WIDTH, LABEL_WIDTH);
         ui.allocate_ui_with_layout(
-            Vec2::new(LABEL_WIDTH, m.control),
+            Vec2::new(label, m.control),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 // The slider starts at the same x on every row, whatever the name.
-                ui.set_min_width(LABEL_WIDTH);
+                ui.set_min_width(label);
                 name_label(ui, model, view, name, outs);
             },
         );
-        let width = (ui.available_width() - 72.0 - RESET_WIDTH).max(40.0);
+        let width = (ui.available_width() - after).max(MIN_SLIDER_WIDTH);
         let slider_rect = ui
             .allocate_ui(Vec2::new(width, m.control), |ui| {
                 let r = slider(ui, &mut value, p.min..=p.max, name);
@@ -1035,6 +1044,30 @@ mod tests {
             "the section ran out to {}",
             right.get()
         );
+    }
+
+    #[test]
+    fn a_narrow_row_keeps_its_number_and_reset_inside_the_panel() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(230.0, 300.0))
+            .build_ui_state(
+                |ui, p: &mut Panel| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    let outs = show(ui, &p.model, &mut p.view);
+                    p.outs.extend(outs);
+                },
+                panel(),
+            );
+        h.run();
+        for n in h.get_all_by_role(egui::accesskit::Role::SpinButton) {
+            assert!(
+                n.rect().right() <= 230.0 - 2.0,
+                "a number ends at {}",
+                n.rect().right()
+            );
+        }
     }
 
     #[test]
