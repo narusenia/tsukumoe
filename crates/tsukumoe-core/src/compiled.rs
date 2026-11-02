@@ -592,6 +592,11 @@ pub struct CompiledModel<'a> {
     /// Meshes left out of the draw list (the mesh or one of its parts is
     /// hidden), as ascending mesh indices. Optional in `.tmod`.
     pub mesh_hidden: Cow<'a, [u32]>,
+
+    /// Warps evaluated with the cubic surface instead of bilinear lookup, as
+    /// ascending warp indices. Optional in `.tmod`; a reader that does not know
+    /// it evaluates every warp bilinearly.
+    pub warp_bezier: Cow<'a, [u32]>,
 }
 
 impl CompiledModel<'_> {
@@ -641,6 +646,7 @@ impl CompiledModel<'_> {
             blend_deltas: Cow::Owned(self.blend_deltas.into_owned()),
             blend_refs: Cow::Owned(self.blend_refs.into_owned()),
             mesh_hidden: Cow::Owned(self.mesh_hidden.into_owned()),
+            warp_bezier: Cow::Owned(self.warp_bezier.into_owned()),
         }
     }
 
@@ -923,7 +929,10 @@ impl Model {
             });
         }
 
-        for (_, _, warp) in self.warps.iter() {
+        for (i, (_, _, warp)) in self.warps.iter().enumerate() {
+            if warp.bezier {
+                c.warp_bezier.to_mut().push(idx(i));
+            }
             let point_start = c.warp_base_points.len();
             flatten(&warp.base_points, &mut c.warp_base_points);
             let kf_points = c.warp_kf_points.len();

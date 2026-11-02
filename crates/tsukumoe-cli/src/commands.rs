@@ -186,6 +186,10 @@ pub fn examples() -> Vec<Command> {
         Command::ClearWarpRestPoints {
             name: "FaceWarp".into(),
         },
+        Command::SetWarpBezier {
+            name: "FaceWarp".into(),
+            bezier: true,
+        },
         Command::SetParameterRepeat {
             name: "ParamAngleX".into(),
             repeat: true,
@@ -368,6 +372,7 @@ pub fn tag(command: &Command) -> &'static str {
         Command::SetMeshParent { .. } => "set_mesh_parent",
         Command::SetWarpBasePoints { .. } => "set_warp_base_points",
         Command::ClearWarpRestPoints { .. } => "clear_warp_rest_points",
+        Command::SetWarpBezier { .. } => "set_warp_bezier",
         Command::RenameParameter { .. } => "rename_parameter",
         Command::SetParameterRepeat { .. } => "set_parameter_repeat",
         Command::BindParameter { .. } => "bind_parameter",

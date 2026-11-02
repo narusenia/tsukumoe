@@ -96,6 +96,8 @@ pub mod id {
     pub const POSE_LINKS: u32 = 0x99;
     /// Optional: ascending indices of the meshes the draw list leaves out.
     pub const MESH_HIDDEN: u32 = 0x9A;
+    /// Optional: ascending indices of the warps evaluated with the cubic surface.
+    pub const WARP_BEZIER: u32 = 0x9B;
 }
 
 /// The name of a section ID in this version, for tools that print the table.
@@ -157,6 +159,7 @@ pub fn section_name(section: u32) -> Option<&'static str> {
         POSE_ENTRIES => "pose_entries",
         POSE_LINKS => "pose_links",
         MESH_HIDDEN => "mesh_hidden",
+        WARP_BEZIER => "warp_bezier",
         _ => return None,
     })
 }
@@ -471,6 +474,18 @@ pub fn write_with(
         });
     }
 
+    if !model.warp_bezier.is_empty() {
+        s.push(Section {
+            id: id::WARP_BEZIER,
+            flags: 0,
+            count: u32::try_from(model.warp_bezier.len()).map_err(|_| Error::Section {
+                id: id::WARP_BEZIER,
+                reason: "too many elements",
+            })?,
+            data: Cow::Borrowed(bytemuck::cast_slice(&model.warp_bezier)),
+        });
+    }
+
     Ok(assemble(&s))
 }
 
@@ -618,6 +633,7 @@ impl<'a> Tmod<'a> {
                 || id == id::TEXTURE_DATA
                 || (id::PLAYBACK_STRINGS..=id::POSE_LINKS).contains(&id)
                 || id == id::MESH_HIDDEN
+                || id == id::WARP_BEZIER
         };
         for e in &entries {
             if !known(e.id) && e.flags & SECTION_REQUIRED != 0 {
@@ -717,6 +733,11 @@ impl<'a> Tmod<'a> {
             blend_refs: arr!(id::BLEND_REFS),
             mesh_hidden: if find(id::MESH_HIDDEN).is_some() {
                 arr!(id::MESH_HIDDEN)
+            } else {
+                Cow::Borrowed(&[])
+            },
+            warp_bezier: if find(id::WARP_BEZIER).is_some() {
+                arr!(id::WARP_BEZIER)
             } else {
                 Cow::Borrowed(&[])
             },

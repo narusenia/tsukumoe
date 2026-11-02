@@ -223,6 +223,22 @@ Sets the draw order of a mesh (ascending order is back to front).
 {"type":"set_mesh_draw_order","name":"Skin","draw_order":700.0}
 ```
 
+### `set_mesh_colors`
+
+Sets the multiply and screen colors (RGB, 0 to 1) of a mesh; a mesh with
+keyforms is edited at a key by `SetMeshKeyformColors`.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `multiply_color` | number[3] | yes |  |
+| `name` | string | yes |  |
+| `screen_color` | number[3] | yes |  |
+| `type` | `"set_mesh_colors"` | yes |  |
+
+```json
+{"type":"set_mesh_colors","name":"Skin","multiply_color":[0.5,0.75,1.0],"screen_color":[0.25,0.0,0.0]}
+```
+
 ### `set_mesh_uvs`
 
 Replaces the UVs of a mesh; the count must match its positions.
@@ -375,6 +391,21 @@ the base points changed under it.
 {"type":"clear_warp_rest_points","name":"FaceWarp"}
 ```
 
+### `set_warp_bezier`
+
+Switches a warp deformer between bilinear and bicubic (through the
+grid points) interpolation.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `bezier` | boolean | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_warp_bezier"` | yes |  |
+
+```json
+{"type":"set_warp_bezier","name":"FaceWarp","bezier":true}
+```
+
 ### `rename_parameter`
 
 Gives a parameter a new name. Expressions of drivers that read it are
@@ -508,6 +539,23 @@ the key does not exist.
 
 ```json
 {"type":"set_mesh_keyform","name":"Skin","key":[1],"positions":[[0.0,0.0],[2.0,0.0],[0.0,2.0]],"opacity":1.0,"draw_order":500.0}
+```
+
+### `set_mesh_keyform_colors`
+
+Replaces the multiply and screen colors of one keyform of a mesh; the
+shape, opacity and draw order of the keyform stay.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `key` | integer[] | yes |  |
+| `multiply_color` | number[3] | yes |  |
+| `name` | string | yes |  |
+| `screen_color` | number[3] | yes |  |
+| `type` | `"set_mesh_keyform_colors"` | yes |  |
+
+```json
+{"type":"set_mesh_keyform_colors","name":"Skin","key":[1],"multiply_color":[0.5,0.5,0.5],"screen_color":[0.0,0.25,0.0]}
 ```
 
 ### `set_warp_keyform`

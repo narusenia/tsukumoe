@@ -904,6 +904,46 @@ fn bad_playback_data_is_not_written() {
 }
 
 #[test]
+fn bezier_warps_survive_a_round_trip_and_are_optional() {
+    use crate::rig::WarpDeformer;
+    let mut m = Model::new();
+    let part = m
+        .parts
+        .insert("P", crate::elements::Part::default())
+        .unwrap();
+    let grid = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+    let warp = |bezier| WarpDeformer {
+        part,
+        parent: None,
+        rows: 1,
+        columns: 1,
+        bezier,
+        base_points: grid.clone(),
+        rest_points: None,
+        keyforms: None,
+    };
+    m.warps.insert("A", warp(false)).unwrap();
+    m.warps.insert("B", warp(true)).unwrap();
+    let c = m.compile().unwrap();
+    assert_eq!(&*c.warp_bezier, [1]);
+    let bytes = write(&c, &[]).unwrap();
+    let buf = AlignedBuf::from_bytes(&bytes);
+    assert_eq!(&*Tmod::parse(&buf).unwrap().model.warp_bezier, [1]);
+    // With no bezier warp the file has no such section.
+    let id_b = m.warps.find("B").unwrap();
+    m.warps.get_mut(id_b).unwrap().bezier = false;
+    let bytes = write(&m.compile().unwrap(), &[]).unwrap();
+    let buf = AlignedBuf::from_bytes(&bytes);
+    let t = Tmod::parse(&buf).unwrap();
+    assert!(t.model.warp_bezier.is_empty());
+    assert!(!t.sections.iter().any(|s| s.id == id::WARP_BEZIER));
+    // An index past the warps is rejected.
+    let mut bad = c.clone();
+    bad.warp_bezier = Cow::Owned(vec![7]);
+    assert!(write(&bad, &[]).map_or(true, |b| parse(&b).is_err()));
+}
+
+#[test]
 fn hidden_meshes_survive_a_round_trip_and_are_optional() {
     let mut m = Model::new();
     let part = m

@@ -108,6 +108,7 @@ inspector-opacity = Opacity
 inspector-vertices = Vertices
 inspector-triangles = Triangles
 inspector-grid = Grid (rows x columns)
+inspector-bezier = Smooth surface (Bezier)
 inspector-point = Point
 inspector-origin-x = Origin X
 inspector-origin-y = Origin Y

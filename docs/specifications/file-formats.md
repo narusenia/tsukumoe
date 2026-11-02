@@ -174,6 +174,7 @@ The distribution format. Designed for zero-copy loading: after validation, the e
 | `0x98` | `pose_entries` | `PoseEntryDef` | 12 | optional playback: entries of all groups |
 | `0x99` | `pose_links` | `u32` | 4 | optional playback: part indices linked to an entry |
 | `0x9A` | `mesh_hidden` | `u32` | 4 | optional: ascending indices of the meshes the draw list leaves out (a hidden mesh or a mesh of a hidden part); written only when there is one, so other files are unchanged |
+| `0x9B` | `warp_bezier` | `u32` | 4 | optional: ascending indices of the warps evaluated with the bicubic surface (evaluation.md); written only when there is one, so other files are unchanged. A reader that does not know it evaluates every warp bilinearly |
 
 IDs from `0x2A` up to `0x7F` other than those listed are reserved for later minor versions; `0x80` and up are optional content. The texture sections are written together or not at all; texture `i` of a mesh (`texture` field) is entry `i` of the table, in the order of `textures/*.png` in the project.
 
