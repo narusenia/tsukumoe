@@ -1045,12 +1045,6 @@ mod tests {
                     name: "Scalp".into(),
                 },
             },
-            Command::SetAxisOrder {
-                element: ElementRef::Mesh {
-                    name: "Skin".into(),
-                },
-                parameters: vec!["ParamAngleY".into(), "ParamAngleX".into()],
-            },
             Command::SetMeshKeyform {
                 name: "Scalp".into(),
                 key: vec![2],
@@ -1083,6 +1077,19 @@ mod tests {
             Command::RenameParameter {
                 name: "ParamAngleX".into(),
                 new_name: "AngleX".into(),
+            },
+            add_param("ParamAngleY"),
+            Command::BindParameter {
+                parameter: "ParamAngleY".into(),
+                elements: vec![ElementRef::Mesh {
+                    name: "Scalp".into(),
+                }],
+            },
+            Command::SetAxisOrder {
+                element: ElementRef::Mesh {
+                    name: "Scalp".into(),
+                },
+                parameters: vec!["ParamAngleY".into(), "AngleX".into()],
             },
             Command::UnbindParameter {
                 parameter: "AngleX".into(),
