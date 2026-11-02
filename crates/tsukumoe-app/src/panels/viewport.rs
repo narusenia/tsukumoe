@@ -285,6 +285,11 @@ impl Viewport {
             ui.ctx().request_repaint();
         }
         self.last_frame = now;
+        paint_background(
+            &ui.painter_at(rect),
+            rect,
+            crate::options::tuning().background,
+        );
         if let Some(target) = &self.target {
             ui.painter().image(
                 target.id,
@@ -1003,6 +1008,39 @@ pub fn placeholder(ui: &mut Ui, has_doc: bool) {
         "app-no-project"
     };
     hint(ui, tr(ui.ctx(), key));
+}
+
+/// What is behind the picture: nothing (the theme's surface), a flat colour, or a checker.
+fn paint_background(painter: &egui::Painter, rect: Rect, background: crate::options::Background) {
+    use crate::options::Background;
+    match background {
+        Background::Theme => {}
+        Background::White => {
+            painter.rect_filled(rect, 0.0, egui::Color32::WHITE);
+        }
+        Background::Black => {
+            painter.rect_filled(rect, 0.0, egui::Color32::BLACK);
+        }
+        Background::Checker => {
+            const TILE: f32 = 16.0;
+            painter.rect_filled(rect, 0.0, egui::Color32::from_gray(204));
+            let dark = egui::Color32::from_gray(153);
+            let (cols, rows) = (
+                (rect.width() / TILE).ceil() as i32,
+                (rect.height() / TILE).ceil() as i32,
+            );
+            let tiles: Vec<egui::Shape> = (0..rows)
+                .flat_map(|r| (0..cols).map(move |c| (r, c)))
+                .filter(|(r, c)| (r + c) % 2 == 0)
+                .map(|(r, c)| {
+                    let min = rect.min + egui::vec2(c as f32 * TILE, r as f32 * TILE);
+                    let tile = Rect::from_min_size(min, egui::vec2(TILE, TILE)).intersect(rect);
+                    egui::Shape::rect_filled(tile, 0.0, dark)
+                })
+                .collect();
+            painter.extend(tiles);
+        }
+    }
 }
 
 #[cfg(test)]

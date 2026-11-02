@@ -19,10 +19,6 @@ use crate::keyed;
 use crate::mesh_tool::Op;
 use crate::view::ViewState;
 
-/// Vertices pair when the nearest mirrored one is within this fraction of the
-/// diagonal of the target mesh (in the drawing space).
-pub const PAIR_TOLERANCE: f32 = 0.02;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MirrorError {
     /// An element is not in the model.
@@ -286,7 +282,7 @@ pub fn mirror_copy(
 
 /// For each vertex of `dst` (base shape, in the target's space), the index of
 /// the vertex of `src` whose mirror image is nearest to it. Fails unless the
-/// pairing is one to one and every pair is within [`PAIR_TOLERANCE`].
+/// pairing is one to one and every pair is within the mirror tolerance of the options.
 fn pair(mv: &Move, src: &[Point], dst: &[Point]) -> Result<Vec<usize>, MirrorError> {
     let mirrored: Vec<Point> = src.iter().map(|&p| mv.world(p)).collect();
     let world: Vec<Point> = dst.iter().map(|&p| mv.to.point_to_world(p)).collect();
@@ -297,7 +293,8 @@ fn pair(mv: &Move, src: &[Point], dst: &[Point]) -> Result<Vec<usize>, MirrorErr
             hi[k] = hi[k].max(p[k]);
         }
     }
-    let tolerance = (hi[0] - lo[0]).hypot(hi[1] - lo[1]) * PAIR_TOLERANCE;
+    let tolerance =
+        (hi[0] - lo[0]).hypot(hi[1] - lo[1]) * crate::options::tuning().mirror_tolerance;
     let mut taken = vec![false; src.len()];
     let mut pairs = Vec::with_capacity(dst.len());
     for w in &world {

@@ -23,6 +23,23 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(base.join("tsukumoe"))
 }
 
+/// Shows `dir` in the system's file manager.
+pub fn reveal(dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(dir)
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("{opener}: {e}"))
+}
+
 /// The editor's folder inside `config`.
 pub fn editor_dir(config: &Path) -> PathBuf {
     config.join("editor")

@@ -7,6 +7,8 @@
 //! a missing, broken or out-of-range value falls back to its default or is
 //! clamped, so the editor always runs on usable numbers.
 
+use std::cell::Cell;
+
 use serde::{Deserialize, Serialize};
 
 /// What the viewport is cleared to.
@@ -99,6 +101,45 @@ impl Options {
     }
 }
 
+/// The thresholds the edit tools read, and the viewport background. Set by the editor once a frame on the
+/// UI thread; a thread-local so that the many tool functions that read them
+/// need no extra parameter, and a test thread always sees the defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tuning {
+    pub weld_ratio: f32,
+    pub mirror_tolerance: f32,
+    pub vertex_radius: f32,
+    pub edge_radius: f32,
+    pub background: Background,
+}
+
+impl From<&Options> for Tuning {
+    fn from(o: &Options) -> Self {
+        Self {
+            weld_ratio: o.weld_ratio,
+            mirror_tolerance: o.mirror_tolerance,
+            vertex_radius: o.vertex_radius,
+            edge_radius: o.edge_radius,
+            background: o.background,
+        }
+    }
+}
+
+thread_local! {
+    static TUNING: Cell<Option<Tuning>> = const { Cell::new(None) };
+}
+
+/// The thresholds in force on this thread: the options' last set, else the defaults.
+pub fn tuning() -> Tuning {
+    TUNING
+        .with(Cell::get)
+        .unwrap_or_else(|| (&Options::default()).into())
+}
+
+pub fn set_tuning(options: &Options) {
+    TUNING.with(|t| t.set(Some(options.into())));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +170,17 @@ mod tests {
             Options::from_json(r#"{"history_limit":0}"#).history_limit,
             0
         );
+    }
+
+    #[test]
+    fn the_tuning_follows_the_options_set_on_this_thread() {
+        assert_eq!(tuning(), (&Options::default()).into());
+        let wide = Options {
+            vertex_radius: 12.0,
+            ..Options::default()
+        };
+        set_tuning(&wide);
+        assert_eq!(tuning().vertex_radius, 12.0);
     }
 
     #[test]

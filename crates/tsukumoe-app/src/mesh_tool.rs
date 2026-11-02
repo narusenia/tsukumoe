@@ -20,18 +20,10 @@ use tsukumoe_core::rig::ArtMesh;
 
 use crate::proportional::{Proportional, Snapshot};
 
-/// A vertex is picked within this many points of the pointer.
-pub const VERTEX_RADIUS: f32 = 8.0;
-/// An edge is picked within this many points of the pointer.
-pub const EDGE_RADIUS: f32 = 5.0;
 /// A press that moves less than this many points is a click.
 const DRAG_THRESHOLD: f32 = 3.0;
 /// A lasso takes a new point once the pointer is this far (screen points) from the last.
 const LASSO_STEP: f32 = 2.0;
-/// `mesh.weld-near` joins vertices closer than this share of the mesh's diagonal.
-const WELD_NEAR_RATIO: f32 = 0.01;
-/// A vertex and its mirror image may be off by this share of the mesh's width.
-const MIRROR_TOLERANCE: f32 = 0.02;
 
 /// Model space (y up) to the viewport's screen rectangle (points, y down).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -256,7 +248,7 @@ pub fn hit_test(positions: &[Point], indices: &[u32], m: &Mapper, at: [f32; 2]) 
     let dist = |i: usize| (screen[i][0] - at[0]).hypot(screen[i][1] - at[1]);
     let vertex = (0..screen.len())
         .map(|i| (i, dist(i)))
-        .filter(|&(_, d)| d <= VERTEX_RADIUS)
+        .filter(|&(_, d)| d <= crate::options::tuning().vertex_radius)
         .min_by(|a, b| a.1.total_cmp(&b.1));
     if let Some((i, _)) = vertex {
         return Hit::Vertex(i as u32);
@@ -268,7 +260,7 @@ pub fn hit_test(positions: &[Point], indices: &[u32], m: &Mapper, at: [f32; 2]) 
             let d = dist_to_segment(at, screen[e.0 as usize], screen[e.1 as usize]);
             (e, d)
         })
-        .filter(|&(_, d)| d <= EDGE_RADIUS)
+        .filter(|&(_, d)| d <= crate::options::tuning().edge_radius)
         .min_by(|a, b| a.1.total_cmp(&b.1));
     edge.map_or(Hit::Nothing, |((a, b), _)| Hit::Edge(a, b))
 }
@@ -756,7 +748,7 @@ impl MeshTool {
         let (lo, hi) = world
             .iter()
             .fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p[0]), h.max(p[0])));
-        let tolerance = ((hi - lo) * MIRROR_TOLERANCE).max(1e-4);
+        let tolerance = ((hi - lo) * crate::options::tuning().mirror_tolerance).max(1e-4);
         let c = self.center;
         let mut done = BTreeSet::new();
         for &(i, _) in moved {
@@ -1097,7 +1089,7 @@ impl MeshTool {
                 hi[k] = hi[k].max(p[k]);
             }
         }
-        let tolerance = (hi[0] - lo[0]).hypot(hi[1] - lo[1]) * WELD_NEAR_RATIO;
+        let tolerance = (hi[0] - lo[0]).hypot(hi[1] - lo[1]) * crate::options::tuning().weld_ratio;
         let out = mesh_edit::weld_near(g, tolerance)?.ok_or(ToolError::NoChange)?;
         self.clear_selection();
         Ok(geometry_op(name, "mesh_weld_near", out))

@@ -149,6 +149,11 @@ impl Model {
     pub fn history(&self) -> &History {
         &self.history
     }
+
+    /// Drops the `n` oldest undo steps; they cannot be undone afterwards.
+    pub fn forget_oldest_steps(&mut self, n: usize) {
+        self.history.forget_oldest(n);
+    }
 }
 
 impl PartialEq for Model {

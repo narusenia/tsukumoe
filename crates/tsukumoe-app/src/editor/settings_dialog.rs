@@ -6,6 +6,7 @@
 //! deletion confirmations, shortcuts) and the look of the editor (language,
 //! theme, density, tab style). A change is applied and saved at once.
 
+use crate::options::{self, Background, Options};
 use egui::ScrollArea;
 use tsukumoe_ui::{Density, Language, Mode, Preferences, builtin_themes, section_header};
 
@@ -16,16 +17,29 @@ pub enum SettingsTab {
     General,
     Controls,
     Shortcuts,
+    View,
+    Edit,
+    Files,
 }
 
 impl SettingsTab {
-    const ALL: [Self; 3] = [Self::General, Self::Controls, Self::Shortcuts];
+    const ALL: [Self; 6] = [
+        Self::General,
+        Self::Controls,
+        Self::Shortcuts,
+        Self::View,
+        Self::Edit,
+        Self::Files,
+    ];
 
     fn key(self) -> &'static str {
         match self {
             Self::General => "settings-tab-general",
             Self::Controls => "settings-tab-controls",
             Self::Shortcuts => "settings-tab-shortcuts",
+            Self::View => "settings-tab-view",
+            Self::Edit => "settings-tab-edit",
+            Self::Files => "settings-tab-files",
         }
     }
 }
@@ -115,6 +129,9 @@ impl Editor {
                                         &mut state.error,
                                     );
                                 }
+                                SettingsTab::View => self.view_contents(ctx, ui),
+                                SettingsTab::Edit => self.edit_contents(ctx, ui),
+                                SettingsTab::Files => self.files_contents(ctx, ui),
                             });
                     });
                 });
@@ -421,5 +438,178 @@ impl Editor {
         if changed {
             self.save_keymap(ctx);
         }
+    }
+
+    /// Writes the autosave file when it is due: switched on, something unsaved
+    /// that was not in the last autosave, and the interval passed.
+    pub(super) fn autosave_tick(&mut self, ctx: &Context) {
+        if !self.options.autosave {
+            return;
+        }
+        // Wake up now and then even when nothing else repaints.
+        ctx.request_repaint_after(std::time::Duration::from_secs(30));
+        let Some(doc) = &mut self.doc else { return };
+        if !doc.dirty() || !autosave_due(self.autosave.0.elapsed(), self.options.autosave_minutes) {
+            return;
+        }
+        let revision = doc.dispatcher.revision();
+        self.autosave.0 = std::time::Instant::now();
+        if self.autosave.1 == Some(revision) {
+            return;
+        }
+        match doc.autosave() {
+            Ok(_) => self.autosave.1 = Some(revision),
+            Err(e) => self.toasts.push(ctx, Tone::Error, e),
+        }
+    }
+
+    fn save_options(&mut self, ctx: &Context) {
+        if let Some(dir) = &self.settings_dir
+            && let Err(e) = settings::write(dir, OPTIONS_FILE, &self.options.to_json())
+        {
+            self.toasts.push(ctx, Tone::Error, e);
+        }
+    }
+
+    /// Runs `draw` on the options; when it changed them, puts them in range and saves.
+    fn edit_options(&mut self, ctx: &Context, draw: impl FnOnce(&mut Options)) {
+        let before = self.options.clone();
+        draw(&mut self.options);
+        if self.options != before {
+            self.options = self.options.clone().clamped();
+            self.save_options(ctx);
+        }
+    }
+
+    fn view_contents(&mut self, ctx: &Context, ui: &mut Ui) {
+        let t = |key: &str| tr(ctx, key);
+        let names = [
+            (Background::Theme, t("background-theme")),
+            (Background::White, t("background-white")),
+            (Background::Black, t("background-black")),
+            (Background::Checker, t("background-checker")),
+        ];
+        let choices: Vec<(Background, &str)> =
+            names.iter().map(|(b, n)| (*b, n.as_str())).collect();
+        self.edit_options(ctx, |o| {
+            tsukumoe_ui::select(
+                ui,
+                "settings-background",
+                &t("settings-background"),
+                &mut o.background,
+                &choices,
+            );
+            hint(ui, t("settings-radius-hint"));
+            for (key, value) in [
+                ("settings-vertex-radius", &mut o.vertex_radius),
+                ("settings-edge-radius", &mut o.edge_radius),
+            ] {
+                ui.horizontal(|ui| {
+                    label(ui, t(key));
+                    let range = options::RADIUS;
+                    tsukumoe_ui::number(ui, value, range.0..=range.1, 0.25, &t(key));
+                });
+            }
+            ui.add_space(8.0);
+            if button(ui, &t("settings-reset"), Variant::Secondary).clicked() {
+                let d = Options::default();
+                (o.background, o.vertex_radius, o.edge_radius) =
+                    (d.background, d.vertex_radius, d.edge_radius);
+            }
+        });
+    }
+
+    fn edit_contents(&mut self, ctx: &Context, ui: &mut Ui) {
+        let t = |key: &str| tr(ctx, key);
+        self.edit_options(ctx, |o| {
+            hint(ui, t("settings-history-hint"));
+            let mut limit = o.history_limit as f32;
+            ui.horizontal(|ui| {
+                label(ui, t("settings-history-limit"));
+                tsukumoe_ui::number(
+                    ui,
+                    &mut limit,
+                    0.0..=options::HISTORY_LIMIT.1 as f32,
+                    1.0,
+                    &t("settings-history-limit"),
+                );
+            });
+            o.history_limit = limit.round() as u32;
+            hint(ui, t("settings-threshold-hint"));
+            for (key, value, range) in [
+                (
+                    "settings-weld-ratio",
+                    &mut o.weld_ratio,
+                    options::WELD_RATIO,
+                ),
+                (
+                    "settings-mirror-tolerance",
+                    &mut o.mirror_tolerance,
+                    options::MIRROR_TOLERANCE,
+                ),
+            ] {
+                ui.horizontal(|ui| {
+                    label(ui, t(key));
+                    tsukumoe_ui::number(ui, value, range.0..=range.1, 0.0005, &t(key));
+                });
+            }
+            ui.add_space(8.0);
+            if button(ui, &t("settings-reset"), Variant::Secondary).clicked() {
+                let d = Options::default();
+                (o.history_limit, o.weld_ratio, o.mirror_tolerance) =
+                    (d.history_limit, d.weld_ratio, d.mirror_tolerance);
+            }
+        });
+    }
+
+    fn files_contents(&mut self, ctx: &Context, ui: &mut Ui) {
+        let t = |key: &str| tr(ctx, key);
+        self.edit_options(ctx, |o| {
+            hint(ui, t("settings-autosave-hint"));
+            checkbox(ui, &mut o.autosave, &t("settings-autosave"));
+            let mut minutes = o.autosave_minutes as f32;
+            ui.horizontal(|ui| {
+                label(ui, t("settings-autosave-minutes"));
+                tsukumoe_ui::number(
+                    ui,
+                    &mut minutes,
+                    options::AUTOSAVE_MINUTES.0 as f32..=options::AUTOSAVE_MINUTES.1 as f32,
+                    1.0,
+                    &t("settings-autosave-minutes"),
+                );
+            });
+            o.autosave_minutes = minutes.round() as u32;
+            ui.add_space(8.0);
+            if button(ui, &t("settings-reset"), Variant::Secondary).clicked() {
+                let d = Options::default();
+                (o.autosave, o.autosave_minutes) = (d.autosave, d.autosave_minutes);
+            }
+        });
+        if let Some(dir) = self.config_dir.clone() {
+            ui.add_space(8.0);
+            if button(ui, &t("settings-open-folder"), Variant::Secondary).clicked()
+                && let Err(e) = settings::reveal(&dir)
+            {
+                self.toasts.push(ctx, Tone::Error, e);
+            }
+        }
+    }
+}
+
+/// Whether `elapsed` since the last auto-save is at least the interval.
+fn autosave_due(elapsed: std::time::Duration, minutes: u32) -> bool {
+    elapsed >= std::time::Duration::from_secs(u64::from(minutes) * 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn an_autosave_is_due_once_the_interval_has_passed() {
+        assert!(!autosave_due(Duration::from_secs(299), 5));
+        assert!(autosave_due(Duration::from_secs(300), 5));
+        assert!(autosave_due(Duration::from_secs(3600), 1));
     }
 }

@@ -239,6 +239,29 @@ impl Document {
         self.write_to(path, true)
     }
 
+    /// Where [`Self::autosave`] writes: the project's path with `.autosave` added.
+    pub fn autosave_path(&self) -> PathBuf {
+        let mut name = self.path.as_os_str().to_owned();
+        name.push(".autosave");
+        PathBuf::from(name)
+    }
+
+    /// Writes the project beside its file, as a folder or a zip like [`Self::save_to`].
+    /// The project's own file, its path and its unsaved state are left alone.
+    pub fn autosave(&mut self) -> Result<PathBuf, String> {
+        let target = self.autosave_path();
+        let err = |e: &dyn std::fmt::Display| format!("{}: {e}", target.display());
+        self.sync_names();
+        write_model(self.dispatcher.model(), &mut self.project).map_err(|e| err(&e))?;
+        if self.path.is_dir() || self.path.extension().is_none() {
+            self.project.write_dir(&target).map_err(|e| err(&e))?;
+        } else {
+            let bytes = self.project.write_zip().map_err(|e| err(&e))?;
+            fs::write(&target, bytes).map_err(|e| err(&e))?;
+        }
+        Ok(target)
+    }
+
     fn write_to(&mut self, path: &Path, folder: bool) -> Result<(), String> {
         let err = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
         self.sync_names();
@@ -401,6 +424,35 @@ mod tests {
                 again.dispatcher.model().parameters().find("New").is_some(),
                 "{tag}"
             );
+            fs::remove_dir_all(&out).unwrap();
+        }
+    }
+
+    #[test]
+    fn an_autosave_goes_beside_the_project_and_leaves_it_unsaved() {
+        for (tag, file) in [("auto-dir", "proj"), ("auto-zip", "proj.tsukumoe")] {
+            let out = scratch(tag);
+            fs::create_dir_all(&out).unwrap();
+            let target = out.join(file);
+            let mut doc = Document::open(&fixture()).unwrap();
+            doc.save_to(&target).unwrap();
+            doc.dispatcher
+                .submit(Command::AddParameter {
+                    name: "Auto".into(),
+                    min: 0.0,
+                    max: 1.0,
+                    default: 0.5,
+                    repeat: false,
+                })
+                .unwrap();
+            let written = doc.autosave().unwrap();
+            assert_eq!(written, doc.autosave_path());
+            assert!(doc.dirty() && doc.path == target, "{tag}");
+            // The saved file did not get the edit; the autosave did.
+            let saved = Document::open(&target).unwrap();
+            assert!(saved.dispatcher.model().parameters().find("Auto").is_none());
+            let auto = Document::open(&written).unwrap();
+            assert!(auto.dispatcher.model().parameters().find("Auto").is_some());
             fs::remove_dir_all(&out).unwrap();
         }
     }

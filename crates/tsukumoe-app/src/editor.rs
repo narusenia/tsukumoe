@@ -103,6 +103,8 @@ pub struct Editor {
     pub drag: DragAssignment,
     pub confirm: Confirm,
     pub options: Options,
+    /// When the project was last auto-saved (or opened), and the dispatcher revision then.
+    autosave: (std::time::Instant, Option<u64>),
     /// Language, theme and density, shared with the host's `preferences.json`.
     pub prefs: tsukumoe_ui::Preferences,
     /// The per-user settings folder (`preferences.json` lives here); `None` in tests.
@@ -179,6 +181,7 @@ impl Editor {
             drag,
             confirm,
             options,
+            autosave: (std::time::Instant::now(), None),
             prefs: Default::default(),
             config_dir: None,
             trees: Default::default(),
@@ -1154,6 +1157,12 @@ impl Editor {
     /// `rs` is the wgpu state for the viewport; without it the viewport says so.
     pub fn ui(&mut self, ui: &mut Ui, rs: Option<&RenderState>) {
         let ctx = ui.ctx().clone();
+        crate::options::set_tuning(&self.options);
+        self.autosave_tick(&ctx);
+        if let Some(doc) = &mut self.doc {
+            doc.dispatcher
+                .set_history_limit(self.options.history_limit as usize);
+        }
         let active: &[&str] = if self.viewport_hovered {
             &["viewport"]
         } else {
