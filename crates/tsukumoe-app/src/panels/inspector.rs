@@ -191,6 +191,39 @@ fn mask_rows(ui: &mut Ui, ctx: &egui::Context, model: &Model, mesh: &str) -> Opt
 }
 
 /// The icon button that puts a deformer's base shape back to its initial state.
+/// The blend mode of a mesh, chosen from a list; a change is one `SetMeshBlendMode`.
+fn blend_row(
+    ui: &mut Ui,
+    ctx: &egui::Context,
+    mesh: &str,
+    current: tsukumoe_core::rig::BlendMode,
+) -> Option<Command> {
+    use tsukumoe_core::rig::BlendMode;
+    let key = |m: BlendMode| match m {
+        BlendMode::Normal => "blend-normal",
+        BlendMode::Additive => "blend-additive",
+        BlendMode::Multiply => "blend-multiply",
+    };
+    let mut chosen = None;
+    let name = tr(ctx, "inspector-blend-mode");
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_label(name)
+            .selected_text(tr(ctx, key(current)))
+            .show_ui(ui, |ui| {
+                for m in [BlendMode::Normal, BlendMode::Additive, BlendMode::Multiply] {
+                    if ui.selectable_label(m == current, tr(ctx, key(m))).clicked() && m != current
+                    {
+                        chosen = Some(m);
+                    }
+                }
+            });
+    });
+    chosen.map(|blend_mode| Command::SetMeshBlendMode {
+        name: mesh.to_owned(),
+        blend_mode,
+    })
+}
+
 fn reset_button(ui: &mut Ui, ctx: &egui::Context) -> bool {
     tsukumoe_ui::icon_button(
         ui,
@@ -479,6 +512,9 @@ pub fn show_at(
                     }
                 }
             }
+            if let Some(c) = blend_row(ui, &ctx, name, mesh.blend_mode) {
+                command = Some(c);
+            }
             if let Some(c) = mask_rows(ui, &ctx, model, name) {
                 command = Some(c);
             }
@@ -726,6 +762,54 @@ mod tests {
             m.apply(command).unwrap();
         }
         m
+    }
+
+    #[test]
+    fn choosing_a_blend_mode_sends_set_mesh_blend_mode() {
+        use egui_kittest::kittest::Queryable;
+        let mut m = Model::new();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        m.apply(Command::AddPart {
+            name: "P".into(),
+            parent: None,
+        })
+        .unwrap();
+        m.apply(Command::AddMesh {
+            name: "A".into(),
+            part: "P".into(),
+            positions: tri.clone(),
+            uvs: tri,
+            indices: vec![0, 1, 2],
+        })
+        .unwrap();
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(300.0, 400.0))
+            .build_ui_state(
+                |ui, state: &mut (Model, Selection, Vec<Command>)| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    if let Some(c) = show(ui, &state.0, Some(&state.1), None) {
+                        state.2.push(c);
+                    }
+                },
+                (m, Selection::Mesh("A".into()), Vec::new()),
+            );
+        h.run();
+        h.get_by_label("Blend mode").click();
+        h.run();
+        h.get_by_label("Multiply").click();
+        h.run();
+        assert!(
+            matches!(
+                h.state().2.as_slice(),
+                [Command::SetMeshBlendMode {
+                    blend_mode: tsukumoe_core::rig::BlendMode::Multiply,
+                    ..
+                }]
+            ),
+            "{:?}",
+            h.state().2
+        );
     }
 
     #[test]

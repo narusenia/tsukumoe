@@ -420,3 +420,7 @@ menu-group-vertices = Vertices
 menu-group-edges = Edges
 param-move-to-group = Move to group
 tree-children = Children...
+inspector-blend-mode = Blend mode
+blend-normal = Normal
+blend-additive = Additive
+blend-multiply = Multiply

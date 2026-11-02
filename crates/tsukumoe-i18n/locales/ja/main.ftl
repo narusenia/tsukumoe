@@ -416,3 +416,7 @@ menu-group-vertices = 頂点
 menu-group-edges = 辺
 param-move-to-group = グループへ移動
 tree-children = 配下を…
+inspector-blend-mode = ブレンドモード
+blend-normal = 通常
+blend-additive = 加算
+blend-multiply = 乗算
