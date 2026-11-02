@@ -2426,7 +2426,12 @@ mod tests {
                 parent: None,
                 rows: 1,
                 columns: 1,
-                base_points: vec![[0.0, 0.0], [2.0, 0.3], [0.0, 2.0], [2.0, 2.0]],
+                base_points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
+            },
+            // Bent after it was made: a reset goes back to the made grid.
+            Command::SetWarpBasePoints {
+                name: "ResetWarp".into(),
+                points: vec![[0.0, 0.0], [2.0, 0.3], [0.0, 2.0], [2.0, 2.0]],
             },
             Command::AddRotationDeformer {
                 name: "ResetTurn".into(),
