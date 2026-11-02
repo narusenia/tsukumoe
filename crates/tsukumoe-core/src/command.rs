@@ -304,6 +304,8 @@ pub enum Command {
     RenameWarp { name: String, new_name: String },
     /// Renames a rotation deformer.
     RenameRotation { name: String, new_name: String },
+    /// Renames a glue.
+    RenameGlue { name: String, new_name: String },
     /// Moves a mesh to another part.
     SetMeshPart { name: String, part: String },
     /// Moves a deformer (warp or rotation) to another part.
@@ -729,6 +731,10 @@ impl Model {
                 self.check_deformer_name(new_name)?;
                 self.rename(changes, id, new_name)?;
             }
+            Command::RenameGlue { name, new_name } => {
+                let id = self.resolve::<Glue>(name)?;
+                self.rename(changes, id, new_name)?;
+            }
             Command::SetMeshPart { name, part } => {
                 let part = self.resolve::<Part>(part)?;
                 let id = self.resolve::<ArtMesh>(name)?;
@@ -1095,6 +1101,10 @@ mod tests {
             Command::RenameRotation {
                 name: "Spin".into(),
                 new_name: "Turn".into(),
+            },
+            Command::RenameGlue {
+                name: "Seam".into(),
+                new_name: "Stitch".into(),
             },
             Command::SetDeformerPart {
                 name: "Turn".into(),

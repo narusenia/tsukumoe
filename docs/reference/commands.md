@@ -721,6 +721,20 @@ Renames a rotation deformer.
 {"type":"rename_rotation","name":"HeadRotation","new_name":"Turn"}
 ```
 
+### `rename_glue`
+
+Renames a glue.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_glue"` | yes |  |
+
+```json
+{"type":"rename_glue","name":"Seam","new_name":"Stitch"}
+```
+
 ### `set_mesh_part`
 
 Moves a mesh to another part.

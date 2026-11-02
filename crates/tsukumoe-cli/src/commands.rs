@@ -309,6 +309,10 @@ pub fn examples() -> Vec<Command> {
             name: "HeadRotation".into(),
             new_name: "Turn".into(),
         },
+        Command::RenameGlue {
+            name: "Seam".into(),
+            new_name: "Stitch".into(),
+        },
         Command::SetMeshPart {
             name: "Skin".into(),
             part: "Head".into(),
@@ -417,6 +421,7 @@ pub fn tag(command: &Command) -> &'static str {
         Command::RenameMesh { .. } => "rename_mesh",
         Command::RenameWarp { .. } => "rename_warp",
         Command::RenameRotation { .. } => "rename_rotation",
+        Command::RenameGlue { .. } => "rename_glue",
         Command::SetMeshPart { .. } => "set_mesh_part",
         Command::SetDeformerPart { .. } => "set_deformer_part",
         Command::SetPartParent { .. } => "set_part_parent",
