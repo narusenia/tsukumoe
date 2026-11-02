@@ -170,7 +170,9 @@ impl Keymap {
     /// one with fewer. While a text field has the keyboard, only bindings with
     /// a Ctrl, Alt or Command modifier can fire.
     pub fn triggered(&self, ctx: &Context, active: &[&str]) -> Vec<String> {
-        let typing = ctx.egui_wants_keyboard_input();
+        // A panel may hold the keyboard for its own keys (the tree does); only a
+        // text field being typed into blocks plain keys such as Q.
+        let typing = ctx.text_edit_focused();
         let mut candidates: Vec<&Binding> = self
             .bindings
             .iter()
@@ -249,6 +251,46 @@ mod tests {
         k.bind("tool.pan", Some("viewport"), "Space").unwrap();
         k.bind("list.select-all", Some("list"), "Mod+Z").unwrap();
         k
+    }
+
+    /// Runs two frames: the first gives the keyboard to a widget (`text` makes it a
+    /// text field), the second presses `key` and returns what fired.
+    fn press_with_focus(keymap: &Keymap, key: Key, text: bool) -> Vec<String> {
+        let ctx = Context::default();
+        let mut value = String::new();
+        let mut frame = |input: RawInput| {
+            let mut fired = Vec::new();
+            let mut output = ctx.run_ui(input, |ui| {
+                if text {
+                    let r = ui.text_edit_singleline(&mut value);
+                    ui.memory_mut(|m| m.request_focus(r.id));
+                } else {
+                    let r = ui.allocate_response(egui::vec2(20.0, 20.0), egui::Sense::click());
+                    ui.memory_mut(|m| m.request_focus(r.id));
+                }
+                fired = keymap.triggered(ui.ctx(), &[]);
+            });
+            output.textures_delta.clear();
+            fired
+        };
+        frame(RawInput::default());
+        let mut input = RawInput::default();
+        input.events.push(Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        });
+        frame(input)
+    }
+
+    #[test]
+    fn a_focused_panel_does_not_block_plain_keys_but_a_text_field_does() {
+        let mut k = Keymap::new();
+        k.bind("view.pie-menu", None, "Q").unwrap();
+        assert_eq!(press_with_focus(&k, Key::Q, false), ["view.pie-menu"]);
+        assert!(press_with_focus(&k, Key::Q, true).is_empty());
     }
 
     #[test]
