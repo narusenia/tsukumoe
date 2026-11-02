@@ -16,7 +16,8 @@
 use std::fmt;
 
 use crate::command::RotationBase;
-use crate::elements::Point;
+use crate::elements::{ParameterId, Point};
+use crate::keyform_edit::sample_at;
 use crate::model::Model;
 use crate::rig::DeformerRef;
 
@@ -171,12 +172,29 @@ pub enum Space {
 }
 
 impl Space {
-    /// The space the children of `parent` live in, at the base shape.
+    /// The space the children of `parent` live in, with every parameter at its
+    /// default (a deformer with keyforms gives the shape they interpolate there).
     pub fn of(model: &Model, parent: Option<DeformerRef>) -> Result<Self, SpaceError> {
-        Self::build(model, parent, 0)
+        let defaults = |id: ParameterId| model.parameters().get(id).map_or(0.0, |p| p.default);
+        Self::build(model, parent, 0, &defaults)
     }
 
-    fn build(model: &Model, parent: Option<DeformerRef>, depth: usize) -> Result<Self, SpaceError> {
+    /// The space of `parent` when each parameter has the value `at` says: what
+    /// the picture shows, so a point can be placed or picked where it is drawn.
+    pub fn of_at(
+        model: &Model,
+        parent: Option<DeformerRef>,
+        at: &dyn Fn(ParameterId) -> f32,
+    ) -> Result<Self, SpaceError> {
+        Self::build(model, parent, 0, at)
+    }
+
+    fn build(
+        model: &Model,
+        parent: Option<DeformerRef>,
+        depth: usize,
+        at: &dyn Fn(ParameterId) -> f32,
+    ) -> Result<Self, SpaceError> {
         if depth > 64 {
             return Err(SpaceError::TooDeep);
         }
@@ -186,10 +204,15 @@ impl Space {
                 let Some(warp) = model.warps().get(id) else {
                     return Ok(Self::Drawing);
                 };
-                let up = Self::build(model, warp.parent, depth + 1)?;
+                let up = Self::build(model, warp.parent, depth + 1, at)?;
+                let sampled = warp.keyforms.as_ref().and_then(|g| {
+                    let binding = model.bindings().get(g.binding)?;
+                    Some(sample_at(binding, &g.keyforms, at).points)
+                });
                 Ok(Self::Warp {
-                    grid: warp
-                        .base_points
+                    grid: sampled
+                        .as_ref()
+                        .unwrap_or(&warp.base_points)
                         .iter()
                         .map(|&p| up.to_world(p64(p)))
                         .collect(),
@@ -201,8 +224,15 @@ impl Space {
                 let Some(rot) = model.rotations().get(id) else {
                     return Ok(Self::Drawing);
                 };
-                let up = Self::build(model, rot.parent, depth + 1)?;
-                Ok(Self::rotation(&up, &RotationBase::of(&rot.base)))
+                let up = Self::build(model, rot.parent, depth + 1, at)?;
+                let sampled = rot.keyforms.as_ref().and_then(|g| {
+                    let binding = model.bindings().get(g.binding)?;
+                    Some(sample_at(binding, &g.keyforms, at))
+                });
+                Ok(Self::rotation(
+                    &up,
+                    &RotationBase::of(sampled.as_ref().unwrap_or(&rot.base)),
+                ))
             }
         }
     }
