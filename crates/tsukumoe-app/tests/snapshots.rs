@@ -705,3 +705,90 @@ fn toolbar_in_the_dark_theme() {
 fn toolbar_in_the_light_theme() {
     toolbar_snapshot(Mode::Light, "toolbar_light");
 }
+
+/// The parameter panel with a bound mesh selected: the key ticks on the
+/// slider, the edit section of the focused parameter and the key buttons.
+fn parameters_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::panels::parameters;
+    use tsukumoe_app::view::{Selection, ViewState};
+    use tsukumoe_core::command::{Command, ElementRef};
+    use tsukumoe_core::model::Model;
+
+    let mut model = Model::new();
+    let pts = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    for command in [
+        Command::AddParameter {
+            name: "ParamAngleX".into(),
+            min: -30.0,
+            max: 30.0,
+            default: 0.0,
+            repeat: false,
+        },
+        Command::AddParameter {
+            name: "ParamEyeOpen".into(),
+            min: 0.0,
+            max: 1.0,
+            default: 1.0,
+            repeat: false,
+        },
+        Command::AddPart {
+            name: "Part".into(),
+            parent: None,
+        },
+        Command::AddMesh {
+            name: "Skin".into(),
+            part: "Part".into(),
+            positions: pts.clone(),
+            uvs: pts,
+            indices: vec![0, 1, 2],
+        },
+        Command::BindParameter {
+            parameter: "ParamAngleX".into(),
+            elements: vec![ElementRef::Mesh {
+                name: "Skin".into(),
+            }],
+        },
+        Command::AddParameterKey {
+            parameter: "ParamAngleX".into(),
+            value: 12.0,
+            element: ElementRef::Mesh {
+                name: "Skin".into(),
+            },
+        },
+    ] {
+        model.apply(command).unwrap();
+    }
+    let mut view = ViewState::default();
+    view.select_only(Selection::Mesh("Skin".into()));
+    view.param_focus = Some("ParamAngleX".into());
+    let id = model.parameters().find("ParamAngleX").unwrap();
+    let p = model.parameters().get(id).unwrap().clone();
+    view.set_param("ParamAngleX", &p, 12.0);
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(420.0, 300.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, state: &mut (Model, ViewState)| {
+                let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::En);
+                set_mode(&ctx, mode);
+                let (model, view) = state;
+                parameters::show(ui, model, view);
+            },
+            (model, view),
+        );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn parameters_panel_in_the_dark_theme() {
+    parameters_snapshot(Mode::Dark, "parameters_dark");
+}
+
+#[test]
+fn parameters_panel_in_the_light_theme() {
+    parameters_snapshot(Mode::Light, "parameters_light");
+}

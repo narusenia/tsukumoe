@@ -383,6 +383,45 @@ impl Editor {
         }
     }
 
+    /// What the parameter panel asked for, sent through the one door. A
+    /// rename carries the slider value and the focus to the new name.
+    pub fn apply_parameter_out(&mut self, ctx: &Context, out: parameters::Out) {
+        match out {
+            parameters::Out::Op((command, label)) => {
+                let deleted = match &command {
+                    tsukumoe_core::command::Command::Batch { commands } => {
+                        commands.iter().find_map(|c| match c {
+                            tsukumoe_core::command::Command::RemoveParameter { name } => {
+                                Some(name.clone())
+                            }
+                            _ => None,
+                        })
+                    }
+                    _ => None,
+                };
+                if self.submit_labeled(ctx, command, Some(label))
+                    && let Some(name) = deleted
+                {
+                    self.view.forget_param(&name);
+                }
+            }
+            parameters::Out::Rename { from, to } => {
+                let command = tsukumoe_core::command::Command::RenameParameter {
+                    name: from.clone(),
+                    new_name: to.clone(),
+                };
+                if self.submit_labeled(ctx, command, Some(format!("param_rename: {from} -> {to}")))
+                {
+                    self.view.rename_param(&from, &to);
+                    // Drivers' expressions were rewritten; anything outside the editor was not.
+                    let text = tr(ctx, "tree-rename-external");
+                    self.toasts.push(ctx, Tone::Neutral, text);
+                }
+            }
+            parameters::Out::Error(key) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
+        }
+    }
+
     /// What a tree panel asked for, sent through the one door.
     pub fn apply_tree_out(&mut self, ctx: &Context, out: tree::Out) {
         match out {
@@ -1658,7 +1697,11 @@ impl PanelHost for Panels<'_> {
                     editor.apply_tree_out(&ctx, out);
                 }
             }
-            "parameters" => parameters::show(ui, doc.dispatcher.model(), &mut editor.view),
+            "parameters" => {
+                for out in parameters::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    editor.apply_parameter_out(&ctx, out);
+                }
+            }
             "inspector" => {
                 let mut requests = inspector::Requests::default();
                 let command = inspector::show_with(
@@ -1839,6 +1882,71 @@ mod tests {
                 egui::Key::O
             ))
         );
+    }
+
+    #[test]
+    fn the_parameter_panel_renames_binds_and_deletes_through_the_one_door() {
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        let p = {
+            let m = editor.doc.as_ref().unwrap().dispatcher.model();
+            m.parameters()
+                .get(m.parameters().find("ParamAngle").unwrap())
+                .unwrap()
+                .clone()
+        };
+        editor.view.set_param("ParamAngle", &p, 0.5);
+        editor.view.param_focus = Some("ParamAngle".into());
+        // Rename: the model, the slider value and the focus follow.
+        editor.apply_parameter_out(
+            &ctx,
+            parameters::Out::Rename {
+                from: "ParamAngle".into(),
+                to: "Angle".into(),
+            },
+        );
+        let m = editor.doc.as_ref().unwrap().dispatcher.model();
+        assert!(
+            m.parameters().find("Angle").is_some() && m.parameters().find("ParamAngle").is_none()
+        );
+        assert_eq!(editor.view.param("Angle", &p), 0.5);
+        assert_eq!(editor.view.param_focus.as_deref(), Some("Angle"));
+        // An error becomes a toast and no step.
+        let steps = editor.doc.as_ref().unwrap().dispatcher.log().len();
+        editor.apply_parameter_out(&ctx, parameters::Out::Error("param-err-no-element"));
+        assert_eq!(editor.doc.as_ref().unwrap().dispatcher.log().len(), steps);
+        // A parameter a motion still names cannot be deleted: nothing changes.
+        let delete = |e: &Editor, name: &str| {
+            let m = e.doc.as_ref().unwrap().dispatcher.model();
+            crate::param_ops::delete_parameter(m, name).unwrap()
+        };
+        let op = delete(&editor, "Angle");
+        editor.apply_parameter_out(&ctx, parameters::Out::Op(op));
+        assert_eq!(editor.doc.as_ref().unwrap().dispatcher.log().len(), steps);
+        assert!(
+            editor
+                .doc
+                .as_ref()
+                .unwrap()
+                .dispatcher
+                .model()
+                .parameters()
+                .find("Angle")
+                .is_some()
+        );
+        assert_eq!(editor.view.param_focus.as_deref(), Some("Angle"));
+        // A fresh one can: one step, and the view forgets it.
+        let op =
+            crate::param_ops::create_parameter(editor.doc.as_ref().unwrap().dispatcher.model());
+        editor.apply_parameter_out(&ctx, parameters::Out::Op(op));
+        editor.view.param_focus = Some("Param".into());
+        let op = delete(&editor, "Param");
+        editor.apply_parameter_out(&ctx, parameters::Out::Op(op));
+        assert_eq!(
+            editor.doc.as_ref().unwrap().dispatcher.log().len(),
+            steps + 2
+        );
+        assert!(editor.view.param_focus.is_none());
     }
 
     #[test]
