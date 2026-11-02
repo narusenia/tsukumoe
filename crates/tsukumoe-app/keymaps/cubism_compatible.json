@@ -13,6 +13,8 @@
     { "action": "mesh.delete-vertices", "context": "viewport", "keys": "Backspace" },
     { "action": "mesh.connect", "context": "viewport", "keys": "E" },
     { "action": "mesh.flip-edge", "context": "viewport", "keys": "F" },
+    { "action": "mesh.edge-pen", "context": "viewport", "keys": "P" },
+    { "action": "mesh.delete-edge", "context": "viewport", "keys": "X" },
     { "action": "mesh.retriangulate", "context": "viewport", "keys": "D" },
     { "action": "mesh.fill-grid", "context": "viewport", "keys": "G" },
     { "action": "mesh.contour", "context": "viewport", "keys": "C" },

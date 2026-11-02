@@ -662,21 +662,45 @@ impl Viewport {
             if escape {
                 tool.cancel();
             }
-            if tool_input
-                && response.drag_started_by(primary)
-                && let Some(at) = pressed
-            {
-                tool.press(&shown, &mesh.indices, &mapper, at, modifiers.shift);
-            }
-            if response.dragged_by(primary)
-                && let Some(at) = now
-            {
-                tool.drag(at);
-            }
-            if response.drag_stopped_by(primary)
-                && let Some(op) = tool.release_in(name, &stored, &shown, &mapper, &space)
-            {
-                ops.push(Ok(op));
+            if tool.pen {
+                // The pen draws from the press vertex to the release point.
+                if tool_input
+                    && response.drag_started_by(primary)
+                    && let Some(at) = pressed
+                {
+                    tool.pen_press(&shown, &mesh.indices, &mapper, at);
+                }
+                if tool_input
+                    && response.drag_stopped_by(primary)
+                    && let Some(at) = arrow(ui.input(|i| i.pointer.latest_pos()))
+                    && let Some(g) = mesh_tool::geometry_of(model, name)
+                {
+                    match tool.pen_click(name, &g, &shown, &mapper, at, &space) {
+                        Ok(Some(op)) => ops.push(Ok(op)),
+                        Ok(None) => {}
+                        Err(e) => ops.push(Err(e)),
+                    }
+                }
+                if response.secondary_clicked() {
+                    tool.pen_end();
+                }
+            } else {
+                if tool_input
+                    && response.drag_started_by(primary)
+                    && let Some(at) = pressed
+                {
+                    tool.press(&shown, &mesh.indices, &mapper, at, modifiers.shift);
+                }
+                if response.dragged_by(primary)
+                    && let Some(at) = now
+                {
+                    tool.drag(at);
+                }
+                if response.drag_stopped_by(primary)
+                    && let Some(op) = tool.release_in(name, &stored, &shown, &mapper, &space)
+                {
+                    ops.push(Ok(op));
+                }
             }
         }
         if tool_input
@@ -686,7 +710,7 @@ impl Viewport {
             let positions = &shown[..];
             let indices = mesh.as_ref().map_or(&[][..], |(_, m)| &m.indices[..]);
             let empty = mesh_tool::hit_test(positions, indices, &mapper, at) == Hit::Nothing;
-            let picked = (empty && !modifiers.shift && !modifiers.command)
+            let picked = (empty && !modifiers.shift && !modifiers.command && !tool.pen)
                 .then(|| {
                     mesh_tool::pick_drawn(&scene.frame.draw_list(&scene.model), mapper.to_model(at))
                 })
@@ -697,6 +721,15 @@ impl Viewport {
                 }
                 (None, Some(p)) => {
                     view.select_only(Selection::Mesh(p));
+                }
+                (Some((name, _)), _) if tool.pen => {
+                    if let Some(g) = mesh_tool::geometry_of(model, name) {
+                        match tool.pen_click(name, &g, &shown, &mapper, at, &space) {
+                            Ok(Some(op)) => ops.push(Ok(op)),
+                            Ok(None) => {}
+                            Err(e) => ops.push(Err(e)),
+                        }
+                    }
                 }
                 (Some((name, _)), _) if modifiers.command => {
                     if let Some(g) = mesh_tool::geometry_of(model, name) {
@@ -716,12 +749,18 @@ impl Viewport {
         // first, so the menu acts on it. Right click is not used for panning.
         if let Some((_, m)) = &mesh {
             if response.secondary_clicked()
+                && !tool.pen
                 && let Some(at) = arrow(response.interact_pointer_pos())
             {
                 tool.context_select(&shown, &m.indices, &mapper, at);
             }
             let ctx = ui.ctx().clone();
             response.context_menu(|ui| {
+                // The pen ends a chain with a right click instead.
+                if tool.pen {
+                    ui.close();
+                    return;
+                }
                 let shortcut = |a: &str| keymap.shortcut_text(&ctx, a);
                 if let Some(action) =
                     mesh_overlay::menu_ui(ui, &MENU_ACTIONS, &|a| tool.menu_enabled(a), &shortcut)
@@ -758,7 +797,23 @@ impl Viewport {
                         weights.as_deref().map(|w| (&screen[..], w)),
                     );
                 }
-                mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-hint"));
+                if tool.pen {
+                    mesh_overlay::pen_preview(
+                        &painter,
+                        &theme,
+                        &mapper,
+                        &shown,
+                        tool,
+                        response.hover_pos(),
+                    );
+                    ui.ctx().request_repaint();
+                }
+                let hint = if tool.pen {
+                    "mesh-edit-pen-hint"
+                } else {
+                    "mesh-edit-hint"
+                };
+                mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), hint));
                 if let Some(place) = &place {
                     mesh_overlay::key_caption(&painter, &theme, rect, ui.ctx(), place);
                 }

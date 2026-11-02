@@ -84,6 +84,7 @@ icons! {
     RotateCcw => "rotate-ccw",
     Sparkles => "sparkles",
     MousePointer => "mouse-pointer-2",
+    PenLine => "pen-line",
 }
 
 impl Icon {
