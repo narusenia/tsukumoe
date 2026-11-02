@@ -180,8 +180,8 @@ impl Theme {
                 border_strong: rgb(0x484848),
                 text: rgb(0xe8e8e8),
                 text_muted: rgb(0x9a9a9a),
-                accent: rgb(0x6c7ae0),
-                accent_text: rgb(0xffffff),
+                accent: rgb(0x7a88f0),
+                accent_text: rgb(0x0e0e0e),
                 control: rgb(0x2a2a2a),
                 control_hover: rgb(0x353535),
                 control_active: rgb(0x404040),
@@ -205,16 +205,16 @@ impl Theme {
                 border: rgb(0xdcdcdc),
                 border_strong: rgb(0xbdbdbd),
                 text: rgb(0x1a1a1a),
-                text_muted: rgb(0x6b6b6b),
+                text_muted: rgb(0x5c5c5c),
                 accent: rgb(0x4f5bd5),
                 accent_text: rgb(0xffffff),
                 control: rgb(0xe6e6e6),
                 control_hover: rgb(0xdadada),
                 control_active: rgb(0xcecece),
                 disabled: rgb(0x9e9e9e),
-                error: rgb(0xd6303f),
-                warning: rgb(0xb7791f),
-                success: rgb(0x1f8f5f),
+                error: rgb(0xc0202e),
+                warning: rgb(0x8a5a0c),
+                success: rgb(0x127048),
             },
         }
     }
@@ -467,6 +467,83 @@ mod tests {
         };
         let (x, y) = (lum(a), lum(b));
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    /// Every pairing the interface actually draws, with the contrast it needs
+    /// (WCAG: 4.5 for text, 3 for icons and meaningful lines, ~1.2 for a fill
+    /// that only has to be told apart from what is behind it).
+    fn contrast_problems(theme: &Theme) -> Vec<String> {
+        {
+            let c = theme.colors;
+            let surfaces = [
+                ("background", c.background),
+                ("surface", c.surface),
+                ("surface_raised", c.surface_raised),
+                ("control", c.control),
+                ("control_hover", c.control_hover),
+                ("control_active", c.control_active),
+            ];
+            let mut bad = Vec::new();
+            let mut need = |name: String, a: Color32, b: Color32, min: f32| {
+                let got = contrast(a, b);
+                if got < min {
+                    bad.push(format!(
+                        "{} {name}: {got:.2} < {min}",
+                        if theme.dark { "dark" } else { "light" }
+                    ));
+                }
+            };
+            for (n, bg) in surfaces {
+                // Hover and pressed fills last a moment: a little less is enough.
+                let brief = n == "control_hover" || n == "control_active";
+                let (muted, status, quiet) = if brief {
+                    (3.5, 3.0, 1.5)
+                } else {
+                    (4.5, 4.5, 2.0)
+                };
+                need(format!("text on {n}"), c.text, bg, 7.0);
+                need(format!("text_muted on {n}"), c.text_muted, bg, muted);
+                need(format!("accent on {n}"), c.accent, bg, 3.0);
+                need(format!("error on {n}"), c.error, bg, status);
+                need(format!("warning on {n}"), c.warning, bg, status);
+                need(format!("success on {n}"), c.success, bg, status);
+                // Disabled is allowed to be quiet, but not to vanish.
+                need(format!("disabled on {n}"), c.disabled, bg, quiet);
+            }
+            for (n, bg) in [
+                ("background", c.background),
+                ("surface", c.surface),
+                ("surface_raised", c.surface_raised),
+            ] {
+                need(format!("border_strong on {n}"), c.border_strong, bg, 1.5);
+                need(format!("control on {n}"), c.control, bg, 1.15);
+            }
+            // The only fill text and icons of this color sit on.
+            need("accent_text on accent".into(), c.accent_text, c.accent, 4.5);
+            bad
+        }
+    }
+
+    #[test]
+    fn every_drawn_pairing_has_enough_contrast() {
+        for theme in [Theme::dark(), Theme::light()] {
+            let bad = contrast_problems(&theme);
+            assert!(bad.is_empty(), "{}", bad.join("\n"));
+        }
+    }
+
+    /// Reported, not enforced: a built-in theme is somebody else's palette.
+    #[test]
+    fn the_built_in_themes_contrast_report() {
+        for named in builtin_themes() {
+            let bad = contrast_problems(&named.theme);
+            eprintln!(
+                "{}: {} pairings below target\n{}",
+                named.name,
+                bad.len(),
+                bad.join("\n")
+            );
+        }
     }
 
     #[test]

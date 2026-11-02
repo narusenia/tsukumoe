@@ -12,7 +12,7 @@
 
 use std::f32::consts::TAU;
 
-use egui::{Color32, Context, FontId, Id, Order, Pos2, Stroke, vec2};
+use egui::{Context, FontId, Id, Order, Pos2, Stroke, vec2};
 
 use crate::theme::Theme;
 
@@ -183,7 +183,11 @@ impl PieMenu {
             if !item.children.is_empty() {
                 text.push_str(" ›");
             }
-            let color = if on { Color32::WHITE } else { t.colors.text };
+            let color = if on {
+                t.colors.accent_text
+            } else {
+                t.colors.text
+            };
             let galley = painter.layout_no_wrap(text, FontId::proportional(t.metrics.text), color);
             let size = galley.size();
             let anchor = self.center + dir * (OUTER_RADIUS + LABEL_GAP);
