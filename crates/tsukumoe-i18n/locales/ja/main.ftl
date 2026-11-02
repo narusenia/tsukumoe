@@ -281,3 +281,7 @@ proportional-falloff-constant = 一定
 proportional-distance = 距離
 proportional-distance-path = 辺に沿う距離
 proportional-distance-straight = 直線距離
+window-minimize = 最小化
+window-maximize = 最大化
+window-restore = 元に戻す
+window-close = 閉じる

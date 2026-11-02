@@ -14,7 +14,7 @@ use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::menu;
 use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::panels::palette::Palette;
-use crate::panels::{history, inspector, parameters, tree, viewport};
+use crate::panels::{history, inspector, parameters, titlebar, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
 use crate::tree_model::{self, TreeView};
@@ -94,6 +94,8 @@ pub struct Editor {
     pie: Option<tsukumoe_ui::PieMenu>,
     /// Whether the pointer was over the viewport last frame (a keymap context).
     viewport_hovered: bool,
+    /// The window title last sent to the OS.
+    window_title: String,
     viewport: Option<Viewport>,
     layouts_dirty: bool,
     /// How files and folders are chosen; replaced by a scripted one in tests.
@@ -155,6 +157,7 @@ impl Editor {
             native_menu: false,
             pie: None,
             viewport_hovered: false,
+            window_title: String::new(),
             viewport: None,
             layouts_dirty: false,
             picker: crate::picker::default_picker(),
@@ -934,7 +937,12 @@ impl Editor {
             self.run_action(&ctx, &action);
         }
         self.pie_frame(&ctx);
-        egui::Panel::top("tsukumoe-menu").show(ui, |ui| self.menu_bar(ui));
+        let maximized = titlebar::is_maximized(&ctx);
+        egui::Panel::top("tsukumoe-menu").show(ui, |ui| self.menu_bar(ui, maximized));
+        if let Some(op) = titlebar::frame(&ctx, maximized) {
+            ctx.send_viewport_cmd(titlebar::command(op, maximized));
+        }
+        self.sync_window_title(&ctx);
         egui::Panel::bottom("tsukumoe-status").show(ui, |ui| self.status_bar(ui));
         egui::CentralPanel::default().show(ui, |ui| {
             let mut layout = self.layouts.current(self.workspace).clone();
@@ -989,33 +997,72 @@ impl Editor {
         })
     }
 
-    fn menu_bar(&mut self, ui: &mut Ui) {
+    /// The title bar row: names, the menu (not with the system menu bar) and
+    /// the workspace tabs, with the window buttons at their side.
+    fn menu_bar(&mut self, ui: &mut Ui, maximized: bool) {
         let ctx = ui.ctx().clone();
         let t = |key: &str| tr(&ctx, key);
         let entries = self.menu_entries(&ctx);
         let mut chosen = None;
-        egui::MenuBar::new().ui(ui, |ui| {
-            for entry in entries.iter().filter(|_| !self.native_menu) {
-                if let menu::Entry::Sub { label, entries } = entry {
-                    ui.menu_button(label, |ui| show_entries(ui, entries, &mut chosen));
-                }
+        let mut switch = None;
+        let name = self.doc.as_ref().map(|d| (d.name().to_owned(), d.dirty()));
+        let native = self.native_menu;
+        let workspace = self.workspace;
+        let op = titlebar::show(ui, maximized, |ui| {
+            ui.label(egui::RichText::new("Tsukumoe").strong());
+            ui.add_space(4.0);
+            if let Some((name, dirty)) = &name {
+                hint(
+                    ui,
+                    format!("{name}{}", if *dirty { " \u{25cf}" } else { "" }),
+                );
             }
             ui.separator();
-            let mut selected = Workspace::ALL
-                .iter()
-                .position(|w| *w == self.workspace)
-                .unwrap_or(0);
-            let names: Vec<String> = Workspace::ALL
-                .iter()
-                .map(|w| t(&format!("workspace-{}", w.key())))
-                .collect();
-            let names_ref: Vec<&str> = names.iter().map(String::as_str).collect();
-            if tsukumoe_ui::tabs(ui, &mut selected, &names_ref).changed() {
-                self.switch_workspace(Workspace::ALL[selected]);
-            }
+            egui::MenuBar::new().ui(ui, |ui| {
+                for entry in entries.iter().filter(|_| !native) {
+                    if let menu::Entry::Sub { label, entries } = entry {
+                        ui.menu_button(label, |ui| show_entries(ui, entries, &mut chosen));
+                    }
+                }
+                ui.separator();
+                let mut selected = Workspace::ALL
+                    .iter()
+                    .position(|w| *w == workspace)
+                    .unwrap_or(0);
+                let names: Vec<String> = Workspace::ALL
+                    .iter()
+                    .map(|w| t(&format!("workspace-{}", w.key())))
+                    .collect();
+                let names_ref: Vec<&str> = names.iter().map(String::as_str).collect();
+                if tsukumoe_ui::tabs(ui, &mut selected, &names_ref).changed() {
+                    switch = Some(Workspace::ALL[selected]);
+                }
+            });
         });
+        if let Some(op) = op {
+            ctx.send_viewport_cmd(titlebar::command(op, maximized));
+        }
+        if let Some(w) = switch {
+            self.switch_workspace(w);
+        }
         if let Some(action) = chosen {
             self.run_action(&ctx, &action);
+        }
+    }
+
+    /// The OS title (task bar, Mission Control) follows the project.
+    fn sync_window_title(&mut self, ctx: &Context) {
+        let title = match &self.doc {
+            Some(d) => format!(
+                "{}{} - Tsukumoe",
+                d.name(),
+                if d.dirty() { " *" } else { "" }
+            ),
+            None => "Tsukumoe".to_owned(),
+        };
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
         }
     }
 

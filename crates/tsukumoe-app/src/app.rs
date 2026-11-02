@@ -42,6 +42,8 @@ pub fn run(project: Option<PathBuf>) -> Result<(), String> {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title("Tsukumoe")
+            .with_decorations(false)
+            .with_min_inner_size([640.0, 400.0])
             .with_inner_size([1400.0, 900.0]),
         ..Default::default()
     };
