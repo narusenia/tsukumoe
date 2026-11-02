@@ -717,6 +717,8 @@ impl Editor {
                 };
             }
             "mesh.connect" => self.mesh_tool.connect_selected(&name, &g),
+            "mesh.weld" => self.mesh_tool.weld_selected(&name, &g),
+            "mesh.weld-near" => self.mesh_tool.weld_near(&name, &g),
             "mesh.retriangulate" => self.mesh_tool.retriangulate(&name, &g),
             "mesh.fill-grid" => self.mesh_tool.fill_grid(&name, &g),
             "mesh.contour" => {
@@ -818,6 +820,8 @@ impl Editor {
             | "mesh.flip-edge"
             | "mesh.edge-pen"
             | "mesh.delete-edge"
+            | "mesh.weld"
+            | "mesh.weld-near"
             | "mesh.retriangulate"
             | "mesh.fill-grid"
             | "mesh.contour" => {
@@ -825,6 +829,9 @@ impl Editor {
             }
             "deformer.create-warp" | "deformer.create-rotation" => {
                 self.run_deformer_action(ctx, action);
+            }
+            "mesh.symmetry" => {
+                self.mesh_tool.symmetry = !self.mesh_tool.symmetry;
             }
             "proportional.toggle" => {
                 self.view.proportional.on = !self.view.proportional.on;

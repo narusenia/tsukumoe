@@ -678,6 +678,98 @@ pub fn remove_vertices(g: &Geometry, ids: &[u32]) -> Result<Geometry, EditError>
     Ok(out)
 }
 
+/// Merges each group of vertices into one at the group's centroid (position
+/// and UV). Triangles that collapse are dropped, vertices left over in no
+/// triangle go too. Groups must not overlap; a group of one is ignored.
+// shortcut: the merge can fold or pinch the surface, nothing checks it; add a
+// flip check when a merge is seen to break a mesh.
+pub fn weld(g: &Geometry, groups: &[Vec<u32>]) -> Result<Geometry, EditError> {
+    let n = g.positions.len();
+    let mut to = (0..n as u32).collect::<Vec<_>>();
+    let mut out = g.clone();
+    for group in groups.iter().filter(|v| v.len() > 1) {
+        check_vertices(g, group)?;
+        let mut group = group.clone();
+        group.sort_unstable();
+        group.dedup();
+        let keep = group[0];
+        let mean = |pts: &[Point]| {
+            let k = group.len() as f32;
+            let sum = group.iter().fold([0.0; 2], |s, &i| {
+                [s[0] + pts[i as usize][0], s[1] + pts[i as usize][1]]
+            });
+            [sum[0] / k, sum[1] / k]
+        };
+        out.positions[keep as usize] = mean(&g.positions);
+        out.uvs[keep as usize] = mean(&g.uvs);
+        for &i in &group {
+            to[i as usize] = keep;
+        }
+    }
+    let mut indices = Vec::with_capacity(g.indices.len());
+    for t in g.indices.as_chunks::<3>().0 {
+        let v = [to[t[0] as usize], to[t[1] as usize], to[t[2] as usize]];
+        if v[0] != v[1] && v[1] != v[2] && v[0] != v[2] {
+            indices.extend_from_slice(&v);
+        }
+    }
+    if indices.is_empty() {
+        return Err(EditError::NothingLeft);
+    }
+    let mut used = vec![false; n];
+    for &i in &indices {
+        used[i as usize] = true;
+    }
+    let mut remap = vec![0u32; n];
+    let (mut positions, mut uvs) = (Vec::new(), Vec::new());
+    for i in (0..n).filter(|&i| used[i]) {
+        remap[i] = positions.len() as u32;
+        positions.push(out.positions[i]);
+        uvs.push(out.uvs[i]);
+    }
+    for i in &mut indices {
+        *i = remap[*i as usize];
+    }
+    Ok(Geometry {
+        positions,
+        uvs,
+        indices,
+    })
+}
+
+/// Welds every cluster of vertices that lie within `tolerance` of each other
+/// (chained: a vertex near any member joins). `None` if nothing is that close.
+pub fn weld_near(g: &Geometry, tolerance: f32) -> Result<Option<Geometry>, EditError> {
+    let n = g.positions.len();
+    let mut root: Vec<usize> = (0..n).collect();
+    fn find(root: &mut [usize], mut i: usize) -> usize {
+        while root[i] != i {
+            root[i] = root[root[i]];
+            i = root[i];
+        }
+        i
+    }
+    for i in 0..n {
+        for j in i + 1..n {
+            let (a, b) = (g.positions[i], g.positions[j]);
+            if (a[0] - b[0]).hypot(a[1] - b[1]) <= tolerance {
+                let (ri, rj) = (find(&mut root, i), find(&mut root, j));
+                root[ri.max(rj)] = ri.min(rj);
+            }
+        }
+    }
+    let mut clusters: HashMap<usize, Vec<u32>> = HashMap::new();
+    for i in 0..n {
+        let r = find(&mut root, i);
+        clusters.entry(r).or_default().push(i as u32);
+    }
+    let groups: Vec<Vec<u32>> = clusters.into_values().filter(|v| v.len() > 1).collect();
+    if groups.is_empty() {
+        return Ok(None);
+    }
+    weld(g, &groups).map(Some)
+}
+
 /// Quality of the ear `p q r`: 4 sqrt(3) area over the sum of squared edge lengths.
 fn ear_quality(p: [f64; 2], q: [f64; 2], r: [f64; 2]) -> f64 {
     let sq = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2);
@@ -1360,5 +1452,36 @@ mod tests {
             }
         }
         assert!(successes.iter().all(|&n| n >= 20), "{successes:?}");
+    }
+
+    #[test]
+    fn weld_merges_a_group_at_its_centroid_and_drops_collapsed_triangles() {
+        let g = grid(2, 1, false, &mut 1);
+        // Vertices 0..=2 are the bottom row, 3..=5 the top row.
+        let out = weld(&g, &[vec![0, 1]]).unwrap();
+        assert_eq!(out.positions.len(), g.positions.len() - 1);
+        assert_eq!(out.positions[0], [0.5, 0.0]);
+        assert_eq!(out.uvs[0], [0.25, 0.0]);
+        assert!(out.indices.len() < g.indices.len());
+        assert!(
+            out.indices
+                .iter()
+                .all(|&i| (i as usize) < out.positions.len())
+        );
+        assert_eq!(weld(&g, &[vec![0, 99]]), Err(EditError::BadVertex));
+        // Everything into one point leaves no triangle.
+        assert_eq!(weld(&g, &[(0..6).collect()]), Err(EditError::NothingLeft));
+    }
+
+    #[test]
+    fn weld_near_joins_chained_neighbours_and_reports_none_when_apart() {
+        let mut g = grid(2, 1, false, &mut 1);
+        assert_eq!(weld_near(&g, 0.1).unwrap(), None);
+        // A twin of vertex 3 (a sliver apart) welds back into it.
+        g.positions.push([0.0, 1.05]);
+        g.uvs.push([0.0, 1.0]);
+        g.indices.extend([6, 4, 3]);
+        let out = weld_near(&g, 0.1).unwrap().unwrap();
+        assert_eq!(out.positions.len(), 6);
     }
 }
