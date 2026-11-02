@@ -8,7 +8,7 @@
 
 use egui::{Align2, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
 use tsukumoe_core::elements::Point;
-use tsukumoe_ui::Theme;
+use tsukumoe_ui::{Theme, Variant};
 
 use crate::mesh_tool::{self, MeshTool};
 
@@ -158,8 +158,27 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                 .corner_radius(m.radius)
                 .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
                 .show(ui, |ui| {
-                    tsukumoe_ui::checkbox(ui, &mut tool.pen, &t("mesh-edit-pen"))
-                        .on_hover_text(t("mesh-edit-pen-hint"));
+                    // The sub-tools of the mesh tool: the active one is filled.
+                    ui.horizontal(|ui| {
+                        for (pen, key, hint) in [
+                            (false, "mesh-edit-select", "mesh-edit-hint"),
+                            (true, "mesh-edit-pen", "mesh-edit-pen-hint"),
+                        ] {
+                            let variant = if tool.pen == pen {
+                                Variant::Primary
+                            } else {
+                                Variant::Secondary
+                            };
+                            if tsukumoe_ui::button(ui, &t(key), variant)
+                                .on_hover_text(t(hint))
+                                .clicked()
+                                && tool.pen != pen
+                            {
+                                tool.pen = pen;
+                                tool.cancel();
+                            }
+                        }
+                    });
                     ui.horizontal(|ui| {
                         ui.label(t("mesh-edit-grid"));
                         let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;

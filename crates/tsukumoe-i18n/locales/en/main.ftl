@@ -147,6 +147,7 @@ action-mesh-fill-grid = Fill the mesh with a grid of vertices
 action-mesh-contour = Rebuild the mesh from the texture outline
 action-mesh-edge-pen = Edge pen
 action-mesh-delete-edge = Delete the selected edge (makes a hole)
+mesh-edit-select = Select
 mesh-edit-pen = Edge pen
 mesh-edit-pen-hint = Edge pen: click from vertex to vertex; empty space adds a vertex and joins it. Esc or right click ends the chain.
 action-deformer-create-warp = Make a warp deformer around the selection

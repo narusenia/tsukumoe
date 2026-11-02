@@ -142,6 +142,7 @@ action-mesh-fill-grid = メッシュにグリッド状に頂点を敷く
 action-mesh-contour = テクスチャの輪郭からメッシュを作り直す
 action-mesh-edge-pen = 辺ペン
 action-mesh-delete-edge = 選択した辺を削除（穴をあける）
+mesh-edit-select = 選択
 mesh-edit-pen = 辺ペン
 mesh-edit-pen-hint = 辺ペン: 頂点から頂点へクリック。空きは頂点を足してつなぐ。Esc か右クリックで連鎖を終えます。
 action-deformer-create-warp = 選択を囲むワープデフォーマを作る
