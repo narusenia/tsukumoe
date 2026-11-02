@@ -103,6 +103,10 @@ pub struct Editor {
     pub drag: DragAssignment,
     pub confirm: Confirm,
     pub options: Options,
+    /// The live edit under way in the inspector (its key and the dispatcher revision after its last step).
+    live_edit: Option<(String, u64)>,
+    /// The key of a live edit the model refused: the rest of that drag is skipped.
+    live_blocked: Option<String>,
     /// When the project was last auto-saved (or opened), and the dispatcher revision then.
     autosave: (std::time::Instant, Option<u64>),
     /// Language, theme and density, shared with the host's `preferences.json`.
@@ -181,6 +185,8 @@ impl Editor {
             drag,
             confirm,
             options,
+            live_edit: None,
+            live_blocked: None,
             autosave: (std::time::Instant::now(), None),
             prefs: Default::default(),
             config_dir: None,
@@ -351,6 +357,52 @@ impl Editor {
         command: tsukumoe_core::command::Command,
         label: Option<String>,
     ) -> bool {
+        self.submit_inner(ctx, command, label, false)
+    }
+
+    /// One moment of an inspector edit that goes on while a field is dragged
+    /// or typed into. `key` names the field. Each change is applied at once; it
+    /// replaces the previous step of the same edit, so the edit is one undo
+    /// step. `command` is `None` when the edit ended without a further change.
+    pub fn submit_live(
+        &mut self,
+        ctx: &Context,
+        command: Option<tsukumoe_core::command::Command>,
+        key: String,
+        ended: bool,
+    ) {
+        let blocked = self.live_blocked.as_deref() == Some(key.as_str());
+        let revision = self.doc.as_ref().map(|d| d.dispatcher.revision());
+        let amend = self
+            .live_edit
+            .as_ref()
+            .is_some_and(|(k, r)| *k == key && Some(*r) == revision);
+        if ended {
+            self.live_edit = None;
+            self.live_blocked = None;
+        }
+        let Some(command) = command else { return };
+        if blocked {
+            return;
+        }
+        if self.submit_inner(ctx, command, None, amend) {
+            self.live_edit = (!ended)
+                .then(|| self.doc.as_ref().map(|d| (key, d.dispatcher.revision())))
+                .flatten();
+        } else if !ended {
+            // The model refused it (off a key, say): say so once, not on every frame.
+            self.live_edit = None;
+            self.live_blocked = Some(key);
+        }
+    }
+
+    fn submit_inner(
+        &mut self,
+        ctx: &Context,
+        command: tsukumoe_core::command::Command,
+        label: Option<String>,
+        amend: bool,
+    ) -> bool {
         let Some(doc) = self.doc.as_mut() else {
             return false;
         };
@@ -374,7 +426,12 @@ impl Editor {
                 }
             }
         };
-        match doc.dispatcher.submit_labeled(command, label) {
+        let applied = if amend {
+            doc.dispatcher.amend_labeled(command, label)
+        } else {
+            doc.dispatcher.submit_labeled(command, label)
+        };
+        match applied {
             Ok(()) => true,
             Err(e) => {
                 self.toasts.push(ctx, Tone::Error, e);
@@ -1763,8 +1820,14 @@ impl PanelHost for Panels<'_> {
                     let items = editor.view.selected();
                     editor.reset_deformers(&ctx, &items);
                 }
-                if let Some(command) = command {
-                    editor.submit(&ctx, command);
+                match requests.live.take() {
+                    Some(live) => editor.submit_live(&ctx, command, live.key, live.ended),
+                    None => {
+                        editor.live_edit = None;
+                        if let Some(command) = command {
+                            editor.submit(&ctx, command);
+                        }
+                    }
                 }
             }
             "palette" => {
@@ -2136,6 +2199,76 @@ mod tests {
         assert!(matches!(editor.dialog, Some(Dialog::SaveLayout(_))));
         assert!(!editor.run_action(&ctx, "layout.preset.nope"));
         assert!(!editor.run_action(&ctx, "nonsense.action"));
+    }
+
+    #[test]
+    fn a_live_inspector_edit_is_one_undo_step() {
+        use tsukumoe_core::command::Command;
+        let ctx = Context::default();
+        let mut editor = open_minimal();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        assert!(editor.submit(
+            &ctx,
+            Command::AddMesh {
+                name: "A".into(),
+                part: "Face".into(),
+                positions: tri.clone(),
+                uvs: tri,
+                indices: vec![0, 1, 2],
+            }
+        ));
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let opacity = |e: &Editor| {
+            let m = e.doc.as_ref().unwrap().dispatcher.model();
+            m.meshes()
+                .get(m.meshes().find("A").unwrap())
+                .unwrap()
+                .opacity
+        };
+        let before = steps(&editor);
+        for (value, ended) in [(0.9, false), (0.6, false), (0.3, true)] {
+            editor.submit_live(
+                &ctx,
+                Some(Command::SetMeshOpacity {
+                    name: "A".into(),
+                    opacity: value,
+                }),
+                "A/mesh-opacity".into(),
+                ended,
+            );
+        }
+        assert_eq!(steps(&editor), before + 1);
+        assert_eq!(opacity(&editor), 0.3);
+        assert!(editor.undo());
+        assert_eq!(opacity(&editor), 1.0);
+        // Another edit in between ends the merging: the next change is a new step.
+        editor.submit_live(
+            &ctx,
+            Some(Command::SetMeshOpacity {
+                name: "A".into(),
+                opacity: 0.5,
+            }),
+            "A/mesh-opacity".into(),
+            false,
+        );
+        assert!(editor.submit(
+            &ctx,
+            Command::SetMeshDrawOrder {
+                name: "A".into(),
+                draw_order: 700.0
+            }
+        ));
+        let count = steps(&editor);
+        editor.submit_live(
+            &ctx,
+            Some(Command::SetMeshOpacity {
+                name: "A".into(),
+                opacity: 0.4,
+            }),
+            "A/mesh-opacity".into(),
+            true,
+        );
+        assert_eq!(steps(&editor), count + 1);
     }
 
     #[test]

@@ -109,6 +109,17 @@ impl Dispatcher {
         }
     }
 
+    /// Replaces the last applied step with `command`: undoes it, then applies
+    /// the new one as the step in its place. For an edit whose value changes
+    /// continuously (a drag), so that the whole edit is one undo step. The
+    /// caller makes sure the last step is its own.
+    pub fn amend_labeled(&mut self, command: Command, label: Option<String>) -> Result<(), String> {
+        if self.cursor > 0 {
+            self.undo();
+        }
+        self.submit_labeled(command, label)
+    }
+
     pub fn undo(&mut self) -> bool {
         if self.cursor == 0 || !self.model.undo() {
             return false;
@@ -253,6 +264,20 @@ mod tests {
         assert_eq!(d.log().len(), 2);
         assert!(!d.can_redo());
         assert_eq!(names(&d), ["a", "c"]);
+    }
+
+    #[test]
+    fn an_amended_step_replaces_the_last_one_and_stays_one_undo_step() {
+        let mut d = Dispatcher::new(Model::new());
+        d.submit(add("a")).unwrap();
+        d.submit_labeled(add("b"), None).unwrap();
+        d.amend_labeled(add("c"), None).unwrap();
+        d.amend_labeled(add("d"), None).unwrap();
+        assert_eq!(names(&d), ["a", "d"]);
+        assert_eq!((d.log().len(), d.cursor()), (2, 2));
+        assert!(d.undo());
+        assert_eq!(names(&d), ["a"]);
+        assert!(d.dirty());
     }
 
     #[test]
