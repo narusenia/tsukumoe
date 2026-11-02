@@ -15,7 +15,7 @@ use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::menu;
 use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::panels::palette::Palette;
-use crate::panels::{history, inspector, parameters, titlebar, tree, viewport};
+use crate::panels::{history, inspector, keys, parameters, titlebar, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
 use crate::tree_model::{self, TreeView};
@@ -1894,6 +1894,7 @@ impl PanelHost for Panels<'_> {
             "tree" => Icon::ListTree,
             "deformers" => Icon::Grid,
             "parameters" => Icon::Sliders,
+            "keys" => Icon::Grid,
             "inspector" => Icon::Info,
             "history" => Icon::History,
             "palette" => Icon::Search,
@@ -1928,6 +1929,11 @@ impl PanelHost for Panels<'_> {
             }
             "parameters" => {
                 for out in parameters::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    editor.apply_parameter_out(&ctx, out);
+                }
+            }
+            "keys" => {
+                for out in keys::show(ui, doc.dispatcher.model(), &mut editor.view) {
                     editor.apply_parameter_out(&ctx, out);
                 }
             }

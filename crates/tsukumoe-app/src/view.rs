@@ -97,6 +97,8 @@ pub struct ViewState {
     pub param_filter: String,
     /// The parameter the panel's edit section and the key buttons work on.
     pub param_focus: Option<String>,
+    /// The parameter whose settings window is open. Not saved.
+    pub param_dialog: Option<String>,
     /// The keyform a mirror copy takes its shape from: the element and its key
     /// (one index per axis). Not saved.
     pub mirror_source: Option<(tsukumoe_core::command::ElementRef, Vec<usize>)>,
@@ -279,6 +281,9 @@ impl ViewState {
         if let Some(v) = self.params.remove(from) {
             self.params.insert(to.to_owned(), v);
         }
+        if self.param_dialog.as_deref() == Some(from) {
+            self.param_dialog = Some(to.to_owned());
+        }
         if self.param_focus.as_deref() == Some(from) {
             self.param_focus = Some(to.to_owned());
         }
@@ -291,6 +296,9 @@ impl ViewState {
     /// Drops the value, the focus and the selection of a deleted parameter.
     pub fn forget_param(&mut self, name: &str) {
         self.params.remove(name);
+        if self.param_dialog.as_deref() == Some(name) {
+            self.param_dialog = None;
+        }
         if self.param_focus.as_deref() == Some(name) {
             self.param_focus = None;
         }

@@ -6,17 +6,16 @@
 //! model data: moving one never creates an undo step.
 
 use egui::{Ui, Vec2};
-use tsukumoe_core::command::{Command, ElementRef};
+use tsukumoe_core::command::Command;
 use tsukumoe_core::elements::Parameter;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{Icon, Variant, button, hint, icon_button, number, slider, text_input, tr};
+use tsukumoe_ui::{Icon, Variant, button, icon_button, number, slider, text_input, tr};
 
 use crate::confirm::Kind;
 use crate::mesh_tool::Op;
-use crate::mirror;
 use crate::param_ops;
 use crate::tree_model::matches;
-use crate::view::{Selection, ViewState};
+use crate::view::ViewState;
 
 /// Names of the parameters matching the filter (name or display name).
 pub fn names(model: &Model, filter: &str) -> Vec<String> {
@@ -86,12 +85,6 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         }
     });
     text_input(ui, &mut view.param_filter, &name, &name);
-    if let Some(focus) = view.param_focus.clone()
-        && let Some(id) = model.parameters().find(&focus)
-        && let Some(p) = model.parameters().get(id)
-    {
-        edit_section(ui, model, view, &focus, p, &selection, &mut outs);
-    }
     let shown = names(model, &view.param_filter);
     let shift = ui.input(|i| i.modifiers.shift);
     egui::ScrollArea::vertical()
@@ -126,6 +119,15 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                             if r.clicked() {
                                 view.param_focus = Some(name.clone());
                             }
+                            if r.double_clicked() {
+                                view.param_dialog = Some(name.clone());
+                            }
+                            r.context_menu(|ui| {
+                                if ui.button(tr(&ctx, "param-settings")).clicked() {
+                                    view.param_dialog = Some(name.clone());
+                                    ui.close();
+                                }
+                            });
                         },
                     );
                     let width = (ui.available_width() - 72.0).max(40.0);
@@ -153,23 +155,34 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                 }
             }
         });
+    // The settings window of one parameter (name, range, repeat, delete).
+    if let Some(name) = view.param_dialog.clone() {
+        let mut open = true;
+        let target = model
+            .parameters()
+            .find(&name)
+            .and_then(|id| model.parameters().get(id));
+        match target {
+            Some(p) => {
+                egui::Window::new(format!("{}: {name}", tr(&ctx, "param-settings")))
+                    .id(ui.make_persistent_id(("param-settings", &name)))
+                    .open(&mut open)
+                    .collapsible(false)
+                    .show(&ctx, |ui| settings_section(ui, model, &name, p, &mut outs));
+            }
+            None => open = false,
+        }
+        if !open {
+            view.param_dialog = None;
+        }
+    }
     outs
 }
 
-/// The section for the focused parameter: its name and range, and the keys of
-/// the selected element.
-fn edit_section(
-    ui: &mut Ui,
-    model: &Model,
-    view: &mut ViewState,
-    name: &str,
-    p: &Parameter,
-    selection: &[Selection],
-    outs: &mut Vec<Out>,
-) {
+/// The settings of one parameter: its name and range, repeat and delete.
+fn settings_section(ui: &mut Ui, model: &Model, name: &str, p: &Parameter, outs: &mut Vec<Out>) {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    ui.separator();
     // The name: edited in a buffer, sent when the field is left.
     let buffer_id = ui.make_persistent_id(("param-name", name));
     let mut text: String = ui
@@ -247,254 +260,12 @@ fn edit_section(
             d.insert_temp(range_id, vals);
         }
     });
-    // The keys of the selected element.
-    let value = view.param(name, p);
-    let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
-    let range = p.max - p.min;
-    ui.horizontal(|ui| {
-        let step = |dir: i32, view: &mut ViewState| {
-            if let Some(k) = keys
-                .as_deref()
-                .and_then(|k| param_ops::neighbour(k, value, range, dir))
-            {
-                view.set_param(name, p, k);
-            }
-        };
-        if icon_button(ui, Icon::ChevronLeft, &t("param-key-prev"), Variant::Ghost).clicked() {
-            step(-1, view);
-        }
-        if icon_button(ui, Icon::ChevronRight, &t("param-key-next"), Variant::Ghost).clicked() {
-            step(1, view);
-        }
-        if icon_button(ui, Icon::Plus, &t("param-key-add"), Variant::Ghost).clicked() {
-            outs.push(match param_ops::add_key(model, name, value, selection) {
-                Ok(op) => Out::Op(op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if icon_button(ui, Icon::Minus, &t("param-key-remove"), Variant::Ghost).clicked() {
-            outs.push(match param_ops::remove_key(model, name, value, selection) {
-                Ok(op) => Out::Confirm(Kind::Key, name.to_owned(), op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if button(ui, &t("param-bind"), Variant::Secondary).clicked() {
-            outs.push(match param_ops::bind(model, name, selection) {
-                Ok(op) => Out::Op(op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if keys.is_some() && button(ui, &t("param-unbind"), Variant::Secondary).clicked() {
-            outs.push(match param_ops::unbind(model, name, selection) {
-                Ok(op) => Out::Confirm(Kind::Unbind, name.to_owned(), op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-    });
-    if let Some(keys) = &keys {
-        let on = param_ops::on_key(keys, value, range).is_some();
-        let text = keys
-            .iter()
-            .map(|k| format!("{k:.2}"))
-            .collect::<Vec<_>>()
-            .join("  ");
-        hint(ui, format!("{}{}", if on { "\u{25c6} " } else { "" }, text));
-    }
-    if let Some(element) = param_ops::elements(selection).pop()
-        && let Some(binding) = param_ops::binding_of(model, &element)
-    {
-        // With several axes: which combination the sliders are on.
-        if binding.axes().len() > 1 {
-            let at = crate::keyed::values(model, view);
-            let place = crate::keyed::element_place(model, &element, &at);
-            let (mark, label) = match place {
-                Some(crate::keyed::Place::Key { label, .. }) => ("\u{25c6} ", label),
-                Some(crate::keyed::Place::Off { label }) => ("", label),
-                None => ("", String::new()),
-            };
-            hint(ui, format!("{mark}{label}"));
-            grid_section(ui, model, view, &element, outs);
-        }
-        mirror_row(ui, model, view, &element, outs);
-    }
-    ui.separator();
-}
-
-/// The key grid of an element with two or more axes: rows and columns are the
-/// keys of two axes (the others stay at the key the sliders are nearest to),
-/// a cell is one keyform. A click moves the sliders onto that key.
-fn grid_section(
-    ui: &mut Ui,
-    model: &Model,
-    view: &mut ViewState,
-    element: &ElementRef,
-    outs: &mut Vec<Out>,
-) {
-    let ctx = ui.ctx().clone();
-    let t = |k: &str| tr(&ctx, k);
-    let Some(binding) = param_ops::binding_of(model, element) else {
-        return;
-    };
-    let n = binding.axes().len();
-    let (mut r, mut c) = view.grid_axes;
-    if r >= n || c >= n || r == c {
-        (r, c) = (0, 1);
-    }
-    let name_of = |i: usize| {
-        model
-            .parameters()
-            .name(binding.axes()[i].parameter)
-            .unwrap_or("?")
-            .to_owned()
-    };
-    let next = |from: usize, other: usize| {
-        (1..=n)
-            .map(|d| (from + d) % n)
-            .find(|&i| i != other)
-            .unwrap_or(from)
-    };
-    ui.horizontal(|ui| {
-        if button(ui, &format!("\u{2195} {}", name_of(r)), Variant::Ghost).clicked() {
-            r = next(r, c);
-        }
-        if button(ui, &format!("\u{2194} {}", name_of(c)), Variant::Ghost).clicked() {
-            c = next(c, r);
-        }
-        if icon_button(ui, Icon::ArrowUpDown, &t("param-axes-swap"), Variant::Ghost).clicked() {
-            let mut order: Vec<String> = (0..n).map(name_of).collect();
-            order.swap(r, c);
-            outs.push(Out::Op((
-                Command::SetAxisOrder {
-                    element: element.clone(),
-                    parameters: order,
-                },
-                "param_axis_order".to_owned(),
-            )));
-        }
-    });
-    view.grid_axes = (r, c);
-    let at = crate::keyed::values(model, view);
-    let here = param_ops::nearest_key(binding, &at);
-    let on = matches!(
-        crate::keyed::element_place(model, element, &at),
-        Some(crate::keyed::Place::Key { .. })
-    );
-    let edited = param_ops::edited(model, element).unwrap_or_default();
-    let theme = tsukumoe_ui::Theme::get(&ctx);
-    let keys = |i: usize| binding.axes()[i].keys.clone();
-    let cell_key = |ri: usize, ci: usize| {
-        let mut key = here.clone();
-        key[r] = ri;
-        key[c] = ci;
-        key
-    };
-    let mut jump = None;
-    egui::Grid::new(("key-grid", &name_of(r), &name_of(c)))
-        .spacing(Vec2::splat(2.0))
-        .show(ui, |ui| {
-            ui.label("");
-            for k in keys(c) {
-                ui.label(format!("{k:.2}"));
-            }
-            ui.end_row();
-            for (ri, rk) in keys(r).into_iter().enumerate() {
-                ui.label(format!("{rk:.2}"));
-                for ci in 0..keys(c).len() {
-                    let key = cell_key(ri, ci);
-                    let flat = binding.index(&key).unwrap_or(0);
-                    let current = on && key == here;
-                    let done = edited.get(flat).copied().unwrap_or(false);
-                    let (text, fill) = if done {
-                        ("\u{25cf}", theme.colors.surface_raised)
-                    } else {
-                        ("\u{00b7}", theme.colors.surface)
-                    };
-                    let stroke = if current {
-                        egui::Stroke::new(2.0, theme.colors.accent)
-                    } else {
-                        egui::Stroke::new(1.0, theme.colors.border)
-                    };
-                    let response = ui.add(
-                        egui::Button::new(text)
-                            .fill(fill)
-                            .stroke(stroke)
-                            .min_size(Vec2::splat(24.0)),
-                    );
-                    if response.clicked() {
-                        jump = Some(key.clone());
-                    }
-                    response.context_menu(|ui| {
-                        if ui.button(t("mirror-source")).clicked() {
-                            view.mirror_source = Some((element.clone(), key.clone()));
-                            ui.close();
-                        }
-                        if ui.button(t("mirror-paste")).clicked() {
-                            outs.push(paste_at(model, view, element, &key));
-                            ui.close();
-                        }
-                    });
-                }
-                ui.end_row();
-            }
-        });
-    if let Some(key) = jump {
-        for (axis, &k) in binding.axes().iter().zip(&key) {
-            if let Some(p) = model.parameters().get(axis.parameter)
-                && let Some(name) = model.parameters().name(axis.parameter)
-            {
-                view.set_param(name, p, axis.keys[k]);
-            }
-        }
-    }
-}
-
-/// A mirror paste onto the keyform `key` of `element` (a cell of the grid).
-fn paste_at(model: &Model, view: &ViewState, element: &ElementRef, key: &[usize]) -> Out {
-    let Some((source, from)) = &view.mirror_source else {
-        return Out::Error("mirror-err-no-source");
-    };
-    let center = mirror::center(model, &view.mirror_center);
-    match mirror::mirror_copy(model, source, from, element, key, center) {
-        Ok(op) => Out::Op(op),
-        Err(e) => Out::Error(e.key()),
-    }
-}
-
-/// Mirror copy: pick the keyform under the sliders as the source, then paste
-/// it, mirrored, onto the keyform of the selected element under the sliders.
-fn mirror_row(
-    ui: &mut Ui,
-    model: &Model,
-    view: &mut ViewState,
-    element: &ElementRef,
-    outs: &mut Vec<Out>,
-) {
-    let ctx = ui.ctx().clone();
-    let t = |k: &str| tr(&ctx, k);
-    ui.horizontal(|ui| {
-        if button(ui, &t("mirror-source"), Variant::Secondary).clicked()
-            && let Err(key) = mirror::set_source(model, view, element)
-        {
-            outs.push(Out::Error(key));
-        }
-        if button(ui, &t("mirror-paste"), Variant::Secondary).clicked() {
-            outs.push(match mirror::paste(model, view, element) {
-                Ok(op) => Out::Op(op),
-                Err(key) => Out::Error(key),
-            });
-        }
-    });
-    let hint_text = t("mirror-center");
-    text_input(ui, &mut view.mirror_center, &hint_text, &hint_text);
-    if let Some((source, key)) = &view.mirror_source {
-        let (ElementRef::Mesh { name } | ElementRef::Deformer { name }) = source;
-        hint(ui, format!("{}: {name} {key:?}", t("mirror-source")));
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::view::Selection;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use tsukumoe_core::command::Command;
@@ -584,96 +355,14 @@ mod tests {
     }
 
     #[test]
-    fn the_buttons_send_bind_keys_and_a_new_parameter_through_the_param_ops() {
+    fn the_new_button_sends_an_add_parameter() {
         let mut h = harness(panel());
         h.run();
-        // Unbound: bind it.
-        h.get_by_label("Bind").click();
-        h.run();
-        let Out::Op((command, label)) = h.state().outs.last().unwrap().clone() else {
-            panic!("an op");
-        };
-        assert_eq!(label, "param_bind: ParamAngleX");
-        h.state_mut().model.apply(command).unwrap();
-        h.state_mut().outs.clear();
-        h.run();
-        // Bound: add a key at the slider (the default 0 is a key: refused with a message).
-        h.get_by_label("Add a key here").click();
-        h.run();
-        assert_eq!(
-            h.state().outs.last(),
-            Some(&Out::Error("param-err-key-exists"))
-        );
-        // Move off the keys and add.
-        let p = h
-            .state()
-            .model
-            .parameters()
-            .get(h.state().model.parameters().find("ParamAngleX").unwrap())
-            .unwrap()
-            .clone();
-        h.state_mut().view.set_param("ParamAngleX", &p, 0.5);
-        h.run();
-        h.get_by_label("Add a key here").click();
-        h.run();
-        assert!(matches!(
-            h.state().outs.last(),
-            Some(Out::Op((Command::AddParameterKey { value, .. }, _))) if (*value - 0.5).abs() < 1e-6
-        ));
-        // A new parameter.
         h.get_by_label("New parameter").click();
         h.run();
         assert!(matches!(
             h.state().outs.last(),
             Some(Out::Op((Command::AddParameter { .. }, _)))
         ));
-    }
-
-    #[test]
-    fn previous_and_next_key_move_the_slider_to_the_neighbouring_key() {
-        let mut h = harness(panel());
-        h.run();
-        h.get_by_label("Bind").click();
-        h.run();
-        let Out::Op((command, _)) = h.state().outs.last().unwrap().clone() else {
-            panic!("an op");
-        };
-        h.state_mut().model.apply(command).unwrap();
-        h.run();
-        let value = |h: &Harness<Panel>| {
-            let m = &h.state().model;
-            let p = m
-                .parameters()
-                .get(m.parameters().find("ParamAngleX").unwrap())
-                .unwrap();
-            h.state().view.param("ParamAngleX", p)
-        };
-        h.get_by_label("Next key").click();
-        h.run();
-        assert_eq!(value(&h), 1.0);
-        h.get_by_label("Previous key").click();
-        h.run();
-        assert_eq!(value(&h), 0.0);
-    }
-
-    #[test]
-    fn two_axes_show_a_grid_and_the_swap_button_reorders_them() {
-        let mut p = panel();
-        for name in ["ParamAngleX", "ParamAngleY"] {
-            let command = param_ops::bind(&p.model, name, &p.view.selected())
-                .unwrap()
-                .0;
-            p.model.apply(command).unwrap();
-        }
-        let mut h = harness(p);
-        h.run();
-        h.get_by_label("Swap the two axes (changes the grid order)")
-            .click();
-        h.run();
-        let Some(Out::Op((Command::SetAxisOrder { parameters, .. }, _))) = h.state().outs.last()
-        else {
-            panic!("an axis order");
-        };
-        assert_eq!(parameters, &["ParamAngleY", "ParamAngleX"]);
     }
 }
