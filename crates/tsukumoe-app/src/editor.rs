@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::actions::{self, ACTIONS, Tool};
+use crate::atlas::Atlas;
 use crate::confirm::{Confirm, KINDS, Kind};
 use crate::deformer_ops::{self, Target};
 use crate::deformer_tool::DeformerTool;
@@ -1797,6 +1798,9 @@ impl PanelHost for Panels<'_> {
                 } else {
                     tree_model::Panel::Deformers
                 };
+                if editor.view.atlas.is_empty() {
+                    editor.view.atlas = Atlas::load(&ctx, &doc.project().files);
+                }
                 for out in tree::show(ui, doc.dispatcher.model(), &mut editor.view, panel) {
                     editor.apply_tree_out(&ctx, out);
                 }

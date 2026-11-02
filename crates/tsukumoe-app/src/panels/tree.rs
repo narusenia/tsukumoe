@@ -319,9 +319,19 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                     view.tree_mut(panel).set_open(&key, open);
                 }
             }
-            kind_icon(row.kind)
-                .image(tone(ui, row, selected), icon_size)
-                .paint_at(ui, cols.icon);
+            let picture = (row.kind == Kind::Mesh)
+                .then(|| view.atlas.picture(model, &row.name))
+                .flatten();
+            if let Some((page, uv)) = picture {
+                // The mesh's own pixels, 16 points square, instead of the kind icon.
+                let at = Rect::from_center_size(cols.icon.center(), vec2(16.0, 16.0));
+                painter.rect_filled(at, 2.0, theme.colors.control);
+                painter.image(page.id(), at, uv, Color32::WHITE);
+            } else {
+                kind_icon(row.kind)
+                    .image(tone(ui, row, selected), icon_size)
+                    .paint_at(ui, cols.icon);
+            }
             // The name, cut short before the right edge (and before the "..." button);
             // deformer rows also show their part. While renamed, a field takes its place.
             let more_rect = Rect::from_min_size(

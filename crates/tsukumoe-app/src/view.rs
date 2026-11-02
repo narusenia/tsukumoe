@@ -92,6 +92,8 @@ pub struct ViewState {
     /// What the pointer rests on in the viewport or a tree row, with the UI
     /// pass it was set in; see `set_hover`. Not saved.
     hover: Option<(Selection, u64)>,
+    /// The texture pages for the mesh pictures; loaded by the editor. Not saved.
+    pub atlas: crate::atlas::Atlas,
     /// The parts panel and the deformers panel.
     pub parts: TreeView,
     pub deformers: TreeView,

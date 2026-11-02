@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod app;
+pub mod atlas;
 pub mod commands;
 pub mod confirm;
 pub mod deformer_ops;
