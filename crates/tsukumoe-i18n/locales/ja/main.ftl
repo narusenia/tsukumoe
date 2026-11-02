@@ -424,3 +424,5 @@ inspector-blend-mode = ブレンドモード
 blend-normal = 通常
 blend-additive = 加算
 blend-multiply = 乗算
+mesh-edit-contour-precise = 高精度（サブピクセル）
+mesh-edit-contour-precise-hint = アンチエイリアスされた縁の位置を、画素の被覆から 1 画素未満の精度で求める。滑らかな絵ほど輪郭が正確になる。

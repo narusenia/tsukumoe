@@ -42,6 +42,10 @@ pub struct ContourParams {
     pub offset: f32,
     /// Spacing of the inner lattice in pixels; 0 adds no inner points.
     pub spacing: f32,
+    /// Place the outline between pixels by how much of them the alpha covers,
+    /// instead of at pixel edge midpoints: follows anti-aliased edges to a
+    /// fraction of a pixel.
+    pub precise: bool,
 }
 
 impl Default for ContourParams {
@@ -52,6 +56,7 @@ impl Default for ContourParams {
             simplify: 2.0,
             offset: 2.0,
             spacing: 64.0,
+            precise: false,
         }
     }
 }
@@ -145,7 +150,7 @@ type Edge = (i32, i32, bool);
 /// Directed outlines of the opaque region, the opaque side on the left (so
 /// outer outlines have positive area and holes negative). The image is
 /// padded with transparent pixels, so every outline is closed.
-fn trace(alpha: &Alpha, threshold: u8) -> Vec<Vec<P>> {
+fn trace(alpha: &Alpha, threshold: u8, precise: bool) -> Vec<Vec<P>> {
     let (w, h) = (alpha.width as i32, alpha.height as i32);
     let opaque = |x: i32, y: i32| {
         (0..w).contains(&x)
@@ -209,13 +214,34 @@ fn trace(alpha: &Alpha, threshold: u8) -> Vec<Vec<P>> {
             }
         }
     }
+    let value = |x: i32, y: i32| {
+        if (0..w).contains(&x) && (0..h).contains(&y) {
+            f64::from(alpha.data[(y as usize) * w as usize + x as usize])
+        } else {
+            0.0
+        }
+    };
     let point = |e: Edge| -> P {
         let (x, y) = (f64::from(e.0), f64::from(e.1));
-        if e.2 {
-            [x + 1.0, y + 0.5]
+        // Between the centres of the two pixels the edge joins: the midpoint, or
+        // where an edge one pixel wide puts it, from how much of the two pixels
+        // is covered (the coverage of both, less the half pixel from a centre to
+        // the shared border). A wider soft edge gets its halfway position.
+        let (b, along) = if e.2 {
+            (value(e.0 + 1, e.1), [1.0, 0.0])
         } else {
-            [x + 0.5, y + 1.0]
-        }
+            (value(e.0, e.1 + 1), [0.0, 1.0])
+        };
+        let a = value(e.0, e.1);
+        let from_opaque = ((a + b) / 255.0 - 0.5).clamp(0.0, 1.0);
+        let t = if !precise {
+            0.5
+        } else if a >= f64::from(threshold) {
+            from_opaque
+        } else {
+            1.0 - from_opaque
+        };
+        [x + 0.5 + along[0] * t, y + 0.5 + along[1] * t]
     };
     let mut loops = Vec::new();
     while let Some((&start, _)) = next.iter().next() {
@@ -365,7 +391,7 @@ fn check(alpha: &Alpha, params: &ContourParams) -> Result<(), ContourError> {
 pub fn islands(alpha: &Alpha, params: &ContourParams) -> Result<Vec<Island>, ContourError> {
     check(alpha, params)?;
     let min_area = f64::from(params.min_island) * f64::from(alpha.width) * f64::from(alpha.height);
-    let mut outer: Vec<Vec<P>> = trace(alpha, params.threshold)
+    let mut outer: Vec<Vec<P>> = trace(alpha, params.threshold, params.precise)
         .into_iter()
         .filter(|r| area(r) > 0.0 && area(r) >= min_area)
         .collect();
@@ -856,9 +882,38 @@ mod tests {
     }
 
     #[test]
+    fn precise_tracing_follows_a_soft_edge_closer_than_pixel_midpoints() {
+        // A disc with a one-pixel soft edge: alpha is the coverage of the pixel.
+        let (n, r) = (128usize, 40.3f64);
+        let mut data = vec![0u8; n * n];
+        for y in 0..n {
+            for x in 0..n {
+                let d = ((x as f64 + 0.5 - 64.0).hypot(y as f64 + 0.5 - 64.0)) - r;
+                data[y * n + x] = (255.0 * (0.5 - d).clamp(0.0, 1.0)) as u8;
+            }
+        }
+        let a = alpha(n as u32, n as u32, &data);
+        let truth = r;
+        let error = |precise: bool| {
+            let ring = trace(&a, 16, precise)
+                .into_iter()
+                .find(|r| area(r) > 0.0)
+                .unwrap();
+            let sum: f64 = ring
+                .iter()
+                .map(|p| ((p[0] - 64.0).hypot(p[1] - 64.0) - truth).abs())
+                .sum();
+            sum / ring.len() as f64
+        };
+        let (plain, precise) = (error(false), error(true));
+        assert!(precise < plain / 2.0, "{precise} vs {plain}");
+        assert!(precise < 0.2, "{precise}");
+    }
+
+    #[test]
     fn simplifying_stays_within_the_tolerance_and_zero_keeps_every_vertex() {
         let data = circle(256, 256);
-        let raw = trace(&alpha(256, 256, &data), 16)
+        let raw = trace(&alpha(256, 256, &data), 16, false)
             .into_iter()
             .find(|r| area(r) > 0.0)
             .unwrap();

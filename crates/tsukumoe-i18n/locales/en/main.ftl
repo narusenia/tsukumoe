@@ -428,3 +428,5 @@ inspector-blend-mode = Blend mode
 blend-normal = Normal
 blend-additive = Additive
 blend-multiply = Multiply
+mesh-edit-contour-precise = High precision (sub-pixel)
+mesh-edit-contour-precise-hint = Finds an anti-aliased edge to a fraction of a pixel from how much each pixel is covered. Smooth art gets a more exact outline.
