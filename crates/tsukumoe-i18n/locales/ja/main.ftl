@@ -345,3 +345,4 @@ keys-pick = パラメータ名をクリックすると、そのキーを編集�
 param-settings = パラメータの設定
 param-link = リンクする相手
 param-unlink = リンクを解除
+param-reset = 既定値に戻す

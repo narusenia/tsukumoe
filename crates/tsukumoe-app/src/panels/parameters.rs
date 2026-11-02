@@ -34,6 +34,8 @@ const LABEL_WIDTH: f32 = 120.0;
 const NUMBER_WIDTH: f32 = 64.0;
 /// The width of the link button at the start of a row.
 const LINK_WIDTH: f32 = 24.0;
+/// The width of the reset button at the end of a row.
+const RESET_WIDTH: f32 = 24.0;
 /// A slider snaps to a key within this many points.
 const SNAP_POINTS: f32 = 6.0;
 
@@ -131,7 +133,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                             name_label(ui, model, view, &name, &mut outs);
                         },
                     );
-                    let width = (ui.available_width() - 72.0).max(40.0);
+                    let width = (ui.available_width() - 72.0 - RESET_WIDTH).max(40.0);
                     let slider_rect = ui
                         .allocate_ui(Vec2::new(width, m.control), |ui| {
                             let r = slider(ui, &mut value, p.min..=p.max, &name);
@@ -150,6 +152,10 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     let speed = f64::from((p.max - p.min).abs()) / 200.0;
                     changed |=
                         number(ui, &mut value, p.min..=p.max, speed.max(1e-4), &name).changed();
+                    if reset_button(ui, value == p.default) {
+                        value = p.default;
+                        changed = true;
+                    }
                 });
                 highlight(
                     ui,
@@ -184,6 +190,16 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         }
     }
     outs
+}
+
+/// The button that puts a value back to its default; dimmed, and inert, when
+/// it is there already. True when it was clicked.
+fn reset_button(ui: &mut Ui, at_default: bool) -> bool {
+    let name = tr(ui.ctx(), "param-reset");
+    ui.add_enabled_ui(!at_default, |ui| {
+        icon_button(ui, Icon::RotateCcw, &name, Variant::Ghost).clicked()
+    })
+    .inner
 }
 
 /// A tint behind the row of the parameter the keys panel works on.
@@ -357,7 +373,9 @@ fn link_row(
                 );
             }
         });
-        let width = (ui.available_width() - NUMBER_WIDTH - ui.spacing().item_spacing.x).max(60.0);
+        let width =
+            (ui.available_width() - NUMBER_WIDTH - RESET_WIDTH - 2.0 * ui.spacing().item_spacing.x)
+                .max(60.0);
         let (rect, response) = ui.allocate_exact_size(
             Vec2::new(width, 3.0 * m.control + 2.0 * gap),
             egui::Sense::click_and_drag(),
@@ -424,6 +442,18 @@ fn link_row(
                 );
             }
         });
+        // One button puts both back.
+        ui.allocate_ui_with_layout(
+            Vec2::new(RESET_WIDTH, 3.0 * m.control + 2.0 * gap),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                ui.add_space(m.control + gap);
+                if reset_button(ui, va == pa.default && vb == pb.default) {
+                    (va, vb) = (pa.default, pb.default);
+                    changed = true;
+                }
+            },
+        );
     });
     highlight(ui, bg, whole.response.rect, focused);
     if changed {
@@ -519,7 +549,7 @@ fn settings_section(ui: &mut Ui, model: &Model, name: &str, p: &Parameter, outs:
 mod tests {
     use super::*;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use tsukumoe_core::command::Command;
 
     fn model() -> Model {
@@ -616,5 +646,23 @@ mod tests {
             h.state().outs.last(),
             Some(Out::Op((Command::AddParameter { .. }, _)))
         ));
+    }
+
+    #[test]
+    fn the_reset_button_puts_one_parameter_back_and_is_inert_at_the_default() {
+        let mut p = panel();
+        let id = p.model.parameters().find("ParamAngleX").unwrap();
+        let param = p.model.parameters().get(id).unwrap().clone();
+        p.view.set_param("ParamAngleX", &param, 0.5);
+        let mut h = harness(p);
+        h.run();
+        let enabled: Vec<_> = h
+            .get_all_by_label("Reset to the default")
+            .filter(|n| !n.accesskit_node().is_disabled())
+            .collect();
+        assert_eq!(enabled.len(), 1, "only the moved parameter can be reset");
+        enabled[0].click();
+        h.run();
+        assert_eq!(h.state().view.param("ParamAngleX", &param), param.default);
     }
 }

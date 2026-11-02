@@ -349,3 +349,4 @@ keys-pick = Click a parameter name to edit its keys.
 param-settings = Parameter settings
 param-link = Link with
 param-unlink = Unlink
+param-reset = Reset to the default
