@@ -13,7 +13,7 @@
 
 use tsukumoe_core::command::{Command, ElementRef};
 use tsukumoe_core::elements::ParameterId;
-use tsukumoe_core::keyform::Binding;
+use tsukumoe_core::keyform::{Binding, KeyformGrid};
 use tsukumoe_core::model::Model;
 
 use crate::mesh_tool::Op;
@@ -87,6 +87,51 @@ pub fn binding_of<'a>(model: &'a Model, element: &ElementRef) -> Option<&'a Bind
         }
     };
     model.bindings().get(id)
+}
+
+/// The key index on every axis nearest to the slider values `at`.
+pub fn nearest_key(binding: &Binding, at: &dyn Fn(ParameterId) -> f32) -> Vec<usize> {
+    binding
+        .axes()
+        .iter()
+        .map(|a| {
+            let v = at(a.parameter);
+            (0..a.keys.len())
+                .min_by(|&i, &j| (a.keys[i] - v).abs().total_cmp(&(a.keys[j] - v).abs()))
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// For each keyform of `element` (dense order), whether it differs from the
+/// keyform at the parameters' defaults (the nearest keys): what an untouched
+/// bind leaves equal. `None` if the element has no keyforms.
+pub fn edited(model: &Model, element: &ElementRef) -> Option<Vec<bool>> {
+    fn flags<T: PartialEq>(model: &Model, grid: &KeyformGrid<T>) -> Option<Vec<bool>> {
+        let binding = model.bindings().get(grid.binding)?;
+        let default = |p| model.parameters().get(p).map_or(0.0, |p| p.default);
+        let reference = binding.index(&nearest_key(binding, &default))?;
+        let base = grid.keyforms.get(reference)?;
+        Some(grid.keyforms.iter().map(|k| k != base).collect())
+    }
+    match element {
+        ElementRef::Mesh { name } => flags(
+            model,
+            model
+                .meshes()
+                .get(model.meshes().find(name)?)?
+                .keyforms
+                .as_ref()?,
+        ),
+        ElementRef::Deformer { name } => {
+            if let Some(w) = model.warps().find(name) {
+                flags(model, model.warps().get(w)?.keyforms.as_ref()?)
+            } else {
+                let r = model.rotations().find(name)?;
+                flags(model, model.rotations().get(r)?.keyforms.as_ref()?)
+            }
+        }
+    }
 }
 
 /// The keys of the axis of `parameter` in `element`'s binding.
@@ -367,6 +412,28 @@ mod tests {
         let a = ElementRef::Mesh { name: "A".into() };
         assert_eq!(binding_of(&m, &a).unwrap().axes().len(), 2);
         assert_eq!(bind(&m, "Q", &sel(&["A"])), Err(ParamError::AlreadyBound));
+    }
+
+    #[test]
+    fn edited_cells_are_those_that_differ_from_the_default_keyform() {
+        let mut m = model();
+        let op = bind(&m, "P", &sel(&["A"]));
+        apply(&mut m, op);
+        let a = ElementRef::Mesh { name: "A".into() };
+        assert_eq!(edited(&m, &a), Some(vec![false; 3]));
+        m.apply(Command::SetMeshKeyform {
+            name: "A".into(),
+            key: vec![2],
+            positions: vec![[5.0, 5.0], [6.0, 5.0], [5.0, 6.0]],
+            opacity: 1.0,
+            draw_order: 500.0,
+        })
+        .unwrap();
+        assert_eq!(edited(&m, &a), Some(vec![false, false, true]));
+        let b = ElementRef::Mesh { name: "B".into() };
+        assert_eq!(edited(&m, &b), None);
+        let binding = binding_of(&m, &a).unwrap();
+        assert_eq!(nearest_key(binding, &|_| 0.9), vec![2]);
     }
 
     #[test]

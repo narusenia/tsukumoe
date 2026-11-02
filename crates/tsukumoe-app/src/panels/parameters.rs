@@ -313,10 +313,151 @@ fn edit_section(
                 None => ("", String::new()),
             };
             hint(ui, format!("{mark}{label}"));
+            grid_section(ui, model, view, &element, outs);
         }
         mirror_row(ui, model, view, &element, outs);
     }
     ui.separator();
+}
+
+/// The key grid of an element with two or more axes: rows and columns are the
+/// keys of two axes (the others stay at the key the sliders are nearest to),
+/// a cell is one keyform. A click moves the sliders onto that key.
+fn grid_section(
+    ui: &mut Ui,
+    model: &Model,
+    view: &mut ViewState,
+    element: &ElementRef,
+    outs: &mut Vec<Out>,
+) {
+    let ctx = ui.ctx().clone();
+    let t = |k: &str| tr(&ctx, k);
+    let Some(binding) = param_ops::binding_of(model, element) else {
+        return;
+    };
+    let n = binding.axes().len();
+    let (mut r, mut c) = view.grid_axes;
+    if r >= n || c >= n || r == c {
+        (r, c) = (0, 1);
+    }
+    let name_of = |i: usize| {
+        model
+            .parameters()
+            .name(binding.axes()[i].parameter)
+            .unwrap_or("?")
+            .to_owned()
+    };
+    let next = |from: usize, other: usize| {
+        (1..=n)
+            .map(|d| (from + d) % n)
+            .find(|&i| i != other)
+            .unwrap_or(from)
+    };
+    ui.horizontal(|ui| {
+        if button(ui, &format!("\u{2195} {}", name_of(r)), Variant::Ghost).clicked() {
+            r = next(r, c);
+        }
+        if button(ui, &format!("\u{2194} {}", name_of(c)), Variant::Ghost).clicked() {
+            c = next(c, r);
+        }
+        if icon_button(ui, Icon::ArrowUpDown, &t("param-axes-swap"), Variant::Ghost).clicked() {
+            let mut order: Vec<String> = (0..n).map(name_of).collect();
+            order.swap(r, c);
+            outs.push(Out::Op((
+                Command::SetAxisOrder {
+                    element: element.clone(),
+                    parameters: order,
+                },
+                "param_axis_order".to_owned(),
+            )));
+        }
+    });
+    view.grid_axes = (r, c);
+    let at = crate::keyed::values(model, view);
+    let here = param_ops::nearest_key(binding, &at);
+    let on = matches!(
+        crate::keyed::element_place(model, element, &at),
+        Some(crate::keyed::Place::Key { .. })
+    );
+    let edited = param_ops::edited(model, element).unwrap_or_default();
+    let theme = tsukumoe_ui::Theme::get(&ctx);
+    let keys = |i: usize| binding.axes()[i].keys.clone();
+    let cell_key = |ri: usize, ci: usize| {
+        let mut key = here.clone();
+        key[r] = ri;
+        key[c] = ci;
+        key
+    };
+    let mut jump = None;
+    egui::Grid::new(("key-grid", &name_of(r), &name_of(c)))
+        .spacing(Vec2::splat(2.0))
+        .show(ui, |ui| {
+            ui.label("");
+            for k in keys(c) {
+                ui.label(format!("{k:.2}"));
+            }
+            ui.end_row();
+            for (ri, rk) in keys(r).into_iter().enumerate() {
+                ui.label(format!("{rk:.2}"));
+                for ci in 0..keys(c).len() {
+                    let key = cell_key(ri, ci);
+                    let flat = binding.index(&key).unwrap_or(0);
+                    let current = on && key == here;
+                    let done = edited.get(flat).copied().unwrap_or(false);
+                    let (text, fill) = if done {
+                        ("\u{25cf}", theme.colors.surface_raised)
+                    } else {
+                        ("\u{00b7}", theme.colors.surface)
+                    };
+                    let stroke = if current {
+                        egui::Stroke::new(2.0, theme.colors.accent)
+                    } else {
+                        egui::Stroke::new(1.0, theme.colors.border)
+                    };
+                    let response = ui.add(
+                        egui::Button::new(text)
+                            .fill(fill)
+                            .stroke(stroke)
+                            .min_size(Vec2::splat(24.0)),
+                    );
+                    if response.clicked() {
+                        jump = Some(key.clone());
+                    }
+                    response.context_menu(|ui| {
+                        if ui.button(t("mirror-source")).clicked() {
+                            view.mirror_source = Some((element.clone(), key.clone()));
+                            ui.close();
+                        }
+                        if ui.button(t("mirror-paste")).clicked() {
+                            outs.push(paste_at(model, view, element, &key));
+                            ui.close();
+                        }
+                    });
+                }
+                ui.end_row();
+            }
+        });
+    if let Some(key) = jump {
+        for (axis, &k) in binding.axes().iter().zip(&key) {
+            if let Some(p) = model.parameters().get(axis.parameter)
+                && let Some(name) = model.parameters().name(axis.parameter)
+            {
+                view.set_param(name, p, axis.keys[k]);
+            }
+        }
+    }
+}
+
+/// A mirror paste onto the keyform `key` of `element` (a cell of the grid).
+fn paste_at(model: &Model, view: &ViewState, element: &ElementRef, key: &[usize]) -> Out {
+    let Some((source, from)) = &view.mirror_source else {
+        return Out::Error("mirror-err-no-source");
+    };
+    let center = mirror::center(model, &view.mirror_center);
+    match mirror::mirror_copy(model, source, from, element, key, center) {
+        Ok(op) => Out::Op(op),
+        Err(e) => Out::Error(e.key()),
+    }
 }
 
 /// Mirror copy: pick the keyform under the sliders as the source, then paste
@@ -513,5 +654,26 @@ mod tests {
         h.get_by_label("Previous key").click();
         h.run();
         assert_eq!(value(&h), 0.0);
+    }
+
+    #[test]
+    fn two_axes_show_a_grid_and_the_swap_button_reorders_them() {
+        let mut p = panel();
+        for name in ["ParamAngleX", "ParamAngleY"] {
+            let command = param_ops::bind(&p.model, name, &p.view.selected())
+                .unwrap()
+                .0;
+            p.model.apply(command).unwrap();
+        }
+        let mut h = harness(p);
+        h.run();
+        h.get_by_label("Swap the two axes (changes the grid order)")
+            .click();
+        h.run();
+        let Some(Out::Op((Command::SetAxisOrder { parameters, .. }, _))) = h.state().outs.last()
+        else {
+            panic!("an axis order");
+        };
+        assert_eq!(parameters, &["ParamAngleY", "ParamAngleX"]);
     }
 }

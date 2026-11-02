@@ -102,6 +102,9 @@ pub struct ViewState {
     pub mirror_source: Option<(tsukumoe_core::command::ElementRef, Vec<usize>)>,
     /// The mirror line's x as typed; empty means the centre of the model.
     pub mirror_center: String,
+    /// The two axes (by position in the binding) the key grid shows as rows and
+    /// columns; clamped to the element's axes when drawn. Not saved.
+    pub grid_axes: (usize, usize),
     /// Proportional edit options; not saved with the project or the layout.
     pub proportional: crate::proportional::Proportional,
 }

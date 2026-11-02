@@ -338,3 +338,4 @@ mirror-err-kind = 反転コピーは同じ種類の要素どうしでのみで�
 mirror-err-shape = 2 つの形の大きさが違います。
 mirror-err-unpaired = 反対側のメッシュに、対になる頂点がない頂点があります。
 inspector-draw-order = 描画順
+param-axes-swap = 2 つの軸を入れ替え（格子の並びが変わります）

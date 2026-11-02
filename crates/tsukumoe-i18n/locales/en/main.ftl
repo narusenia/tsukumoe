@@ -342,3 +342,4 @@ mirror-err-kind = Mirror copy needs two elements of the same kind.
 mirror-err-shape = The two shapes have different sizes.
 mirror-err-unpaired = Some vertices have no mirror partner on the other mesh.
 inspector-draw-order = Draw order
+param-axes-swap = Swap the two axes (changes the grid order)
