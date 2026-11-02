@@ -674,3 +674,34 @@ fn proportional_edit_in_the_dark_theme() {
 fn proportional_edit_in_the_light_theme() {
     proportional_snapshot(Mode::Light, "proportional_light");
 }
+
+/// The tool bar with the mesh tool and proportional edit pressed.
+fn toolbar_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::actions::{Tool, cubism_compatible};
+    use tsukumoe_app::panels::toolbar;
+
+    let keymap = cubism_compatible();
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(120.0, 260.0))
+        .wgpu()
+        .build_ui(move |ui| {
+            let ctx = ui.ctx().clone();
+            egui_extras::install_image_loaders(&ctx);
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            toolbar::show(&ctx, ui.max_rect(), Tool::Mesh, true, &keymap);
+        });
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn toolbar_in_the_dark_theme() {
+    toolbar_snapshot(Mode::Dark, "toolbar_dark");
+}
+
+#[test]
+fn toolbar_in_the_light_theme() {
+    toolbar_snapshot(Mode::Light, "toolbar_light");
+}
