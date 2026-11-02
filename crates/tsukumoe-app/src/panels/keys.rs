@@ -40,6 +40,12 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
     ui.label(egui::RichText::new(name).strong());
+    // Rename, range, repeat and delete of the parameter, where its keys are.
+    egui::CollapsingHeader::new(t("param-settings"))
+        .id_salt(("keys-settings", name))
+        .show(ui, |ui| {
+            super::parameters::settings_section(ui, model, name, p, &mut outs);
+        });
     // The keys of the selected element.
     let value = view.param(name, p);
     let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
