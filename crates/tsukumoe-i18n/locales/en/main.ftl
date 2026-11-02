@@ -333,4 +333,12 @@ keyform-off-key = This shape has keyforms: move the sliders onto a key to edit i
 keyform-shape-change = A mesh with keyforms keeps its vertices: unbind it before adding, deleting or reconnecting vertices.
 keyform-editing = Editing key
 keyform-off = Not on a key
+mirror-source = Mirror source
+mirror-paste = Paste mirrored here
+mirror-center = Mirror line x (blank = model centre)
+mirror-err-no-source = Pick a mirror source first.
+mirror-err-no-key = The element has no keyform at this key.
+mirror-err-kind = Mirror copy needs two elements of the same kind.
+mirror-err-shape = The two shapes have different sizes.
+mirror-err-unpaired = Some vertices have no mirror partner on the other mesh.
 inspector-draw-order = Draw order

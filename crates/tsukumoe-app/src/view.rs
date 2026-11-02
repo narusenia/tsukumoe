@@ -97,6 +97,11 @@ pub struct ViewState {
     pub param_filter: String,
     /// The parameter the panel's edit section and the key buttons work on.
     pub param_focus: Option<String>,
+    /// The keyform a mirror copy takes its shape from: the element and its key
+    /// (one index per axis). Not saved.
+    pub mirror_source: Option<(tsukumoe_core::command::ElementRef, Vec<usize>)>,
+    /// The mirror line's x as typed; empty means the centre of the model.
+    pub mirror_center: String,
     /// Proportional edit options; not saved with the project or the layout.
     pub proportional: crate::proportional::Proportional,
 }

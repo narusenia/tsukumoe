@@ -6,13 +6,14 @@
 //! model data: moving one never creates an undo step.
 
 use egui::{Ui, Vec2};
-use tsukumoe_core::command::Command;
+use tsukumoe_core::command::{Command, ElementRef};
 use tsukumoe_core::elements::Parameter;
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{Icon, Variant, button, hint, icon_button, number, slider, text_input, tr};
 
 use crate::confirm::Kind;
 use crate::mesh_tool::Op;
+use crate::mirror;
 use crate::param_ops;
 use crate::tree_model::matches;
 use crate::view::{Selection, ViewState};
@@ -299,7 +300,54 @@ fn edit_section(
             .join("  ");
         hint(ui, format!("{}{}", if on { "\u{25c6} " } else { "" }, text));
     }
+    if let Some(element) = param_ops::elements(selection).pop()
+        && param_ops::binding_of(model, &element).is_some()
+    {
+        mirror_row(ui, model, view, &element, outs);
+    }
     ui.separator();
+}
+
+/// Mirror copy: pick the keyform under the sliders as the source, then paste
+/// it, mirrored, onto the keyform of the selected element under the sliders.
+fn mirror_row(
+    ui: &mut Ui,
+    model: &Model,
+    view: &mut ViewState,
+    element: &ElementRef,
+    outs: &mut Vec<Out>,
+) {
+    let ctx = ui.ctx().clone();
+    let t = |k: &str| tr(&ctx, k);
+    let at = crate::keyed::values(model, view);
+    let here = mirror::key_here(model, element, &at);
+    ui.horizontal(|ui| {
+        if button(ui, &t("mirror-source"), Variant::Secondary).clicked() {
+            match &here {
+                Some(key) => view.mirror_source = Some((element.clone(), key.clone())),
+                None => outs.push(Out::Error("param-err-not-on-key")),
+            }
+        }
+        if button(ui, &t("mirror-paste"), Variant::Secondary).clicked() {
+            outs.push(match (&view.mirror_source, &here) {
+                (None, _) => Out::Error("mirror-err-no-source"),
+                (_, None) => Out::Error("param-err-not-on-key"),
+                (Some((source, from)), Some(to)) => {
+                    let center = mirror::center(model, &view.mirror_center);
+                    match mirror::mirror_copy(model, source, from, element, to, center) {
+                        Ok(op) => Out::Op(op),
+                        Err(e) => Out::Error(e.key()),
+                    }
+                }
+            });
+        }
+    });
+    let hint_text = t("mirror-center");
+    text_input(ui, &mut view.mirror_center, &hint_text, &hint_text);
+    if let Some((source, key)) = &view.mirror_source {
+        let (ElementRef::Mesh { name } | ElementRef::Deformer { name }) = source;
+        hint(ui, format!("{}: {name} {key:?}", t("mirror-source")));
+    }
 }
 
 #[cfg(test)]

@@ -329,4 +329,12 @@ keyform-off-key = この形にはキーフォームがあります。スライ�
 keyform-shape-change = キーフォームを持つメッシュは頂点を変えられません。頂点の追加・削除・辺の付け替えは、バインドを解除してから行ってください。
 keyform-editing = 編集中のキー
 keyform-off = キー位置にいません
+mirror-source = 反転コピー元
+mirror-paste = ここへ反転して貼り付け
+mirror-center = 反転の中心線 x（空欄 = モデル中心）
+mirror-err-no-source = 先に反転コピー元を選んでください。
+mirror-err-no-key = この要素にはこのキーのキーフォームがありません。
+mirror-err-kind = 反転コピーは同じ種類の要素どうしでのみできます。
+mirror-err-shape = 2 つの形の大きさが違います。
+mirror-err-unpaired = 反対側のメッシュに、対になる頂点がない頂点があります。
 inspector-draw-order = 描画順
