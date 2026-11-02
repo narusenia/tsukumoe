@@ -939,7 +939,7 @@ impl Editor {
         self.pie_frame(&ctx);
         let maximized = titlebar::is_maximized(&ctx);
         egui::Panel::top("tsukumoe-menu").show(ui, |ui| self.menu_bar(ui, maximized));
-        if let Some(op) = titlebar::frame(&ctx, maximized) {
+        if let Some(op) = titlebar::frame(&ctx, titlebar::CHROME, maximized) {
             ctx.send_viewport_cmd(titlebar::command(op, maximized));
         }
         self.sync_window_title(&ctx);
@@ -1008,7 +1008,7 @@ impl Editor {
         let name = self.doc.as_ref().map(|d| (d.name().to_owned(), d.dirty()));
         let native = self.native_menu;
         let workspace = self.workspace;
-        let op = titlebar::show(ui, maximized, |ui| {
+        let op = titlebar::show(ui, titlebar::CHROME, maximized, |ui| {
             ui.label(egui::RichText::new("Tsukumoe").strong());
             ui.add_space(4.0);
             if let Some((name, dirty)) = &name {

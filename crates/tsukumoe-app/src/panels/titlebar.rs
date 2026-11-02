@@ -37,8 +37,25 @@ pub fn command(op: WindowOp, maximized: bool) -> ViewportCommand {
     }
 }
 
-/// The window buttons sit on the left on macOS and on the right elsewhere.
-pub const BUTTONS_LEFT: bool = cfg!(target_os = "macos");
+/// Who draws the window frame. macOS keeps its own (traffic lights, rounded
+/// corners, shadow, resize, full screen) and the content reaches under the
+/// title bar; elsewhere the OS frame is off and the app draws buttons and edges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chrome {
+    Native,
+    Custom,
+}
+
+pub const CHROME: Chrome = if cfg!(target_os = "macos") {
+    Chrome::Native
+} else {
+    Chrome::Custom
+};
+
+/// Room kept free on the left for the macOS traffic lights, in points.
+const TRAFFIC_LIGHTS: f32 = 76.0;
+/// Height of the bar with the native frame: the traffic lights' centre line.
+const NATIVE_HEIGHT: f32 = 28.0;
 
 /// The window's maximized or full-screen state, as the platform reports it.
 pub fn is_maximized(ctx: &Context) -> bool {
@@ -113,9 +130,7 @@ fn button(ui: &mut Ui, glyph: Glyph, name: &str) -> bool {
     response.on_hover_text(name).clicked()
 }
 
-/// The three window buttons in reading order for the platform (macOS: close,
-/// minimize, maximize on the left; elsewhere minimize, maximize, close). Call
-/// inside a horizontal layout of the right direction.
+/// The three window buttons: minimize, maximize, close.
 pub fn window_buttons(ui: &mut Ui, maximized: bool) -> Option<WindowOp> {
     let ctx = ui.ctx().clone();
     let max_glyph = if maximized {
@@ -140,14 +155,9 @@ pub fn window_buttons(ui: &mut Ui, maximized: bool) -> Option<WindowOp> {
         (max_glyph, max_name, WindowOp::ToggleMaximize),
         (Glyph::Close, tr(&ctx, "window-close"), WindowOp::Close),
     ];
-    let order: Vec<_> = if BUTTONS_LEFT {
-        vec![items[2].clone(), items[0].clone(), items[1].clone()]
-    } else {
-        items.to_vec()
-    };
     let mut chosen = None;
     ui.spacing_mut().item_spacing.x = 0.0;
-    for (glyph, name, op) in order {
+    for (glyph, name, op) in items {
         if button(ui, glyph, &name) {
             chosen = Some(op);
         }
@@ -166,20 +176,28 @@ pub fn drag_op(response: &egui::Response) -> Option<WindowOp> {
     }
 }
 
-/// The title bar row. `left` draws what comes after the macOS buttons (name,
-/// menu, tabs); window buttons go to their side. Returns the window op, if any.
-pub fn show(ui: &mut Ui, maximized: bool, left: impl FnOnce(&mut Ui)) -> Option<WindowOp> {
+/// The title bar row. `left` draws the names, menu and tabs; with the custom
+/// frame the window buttons go to the right, with the native one the traffic
+/// lights' room is left free. Returns the window op, if any.
+pub fn show(
+    ui: &mut Ui,
+    chrome: Chrome,
+    maximized: bool,
+    left: impl FnOnce(&mut Ui),
+) -> Option<WindowOp> {
     let rect = ui.max_rect();
     // Under everything: widgets added later take the click first.
     let bar = ui.interact(rect, ui.scope_id().with("bar"), Sense::click_and_drag());
     let mut op = drag_op(&bar);
+    if chrome == Chrome::Native {
+        ui.set_min_height(NATIVE_HEIGHT);
+    }
     ui.horizontal(|ui| {
-        if BUTTONS_LEFT {
-            op = window_buttons(ui, maximized).or(op);
-            ui.add_space(8.0);
+        if chrome == Chrome::Native {
+            ui.add_space(TRAFFIC_LIGHTS);
         }
         left(ui);
-        if !BUTTONS_LEFT {
+        if chrome == Chrome::Custom {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 // Right to left: reverse the reading order.
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -249,7 +267,10 @@ pub fn edges(screen: Rect) -> [(ResizeDirection, Rect, CursorIcon); 8] {
 
 /// The thin outline of the window and, unless maximized or full screen, the
 /// resize edges. Returns the resize to begin.
-pub fn frame(ctx: &Context, maximized: bool) -> Option<WindowOp> {
+pub fn frame(ctx: &Context, chrome: Chrome, maximized: bool) -> Option<WindowOp> {
+    if chrome == Chrome::Native {
+        return None;
+    }
     let theme = Theme::get(ctx);
     let screen = ctx.content_rect();
     ctx.layer_painter(egui::LayerId::new(
@@ -337,7 +358,7 @@ mod tests {
                 move |ui, op: &mut Option<WindowOp>| {
                     tsukumoe_ui::init(ui.ctx());
                     tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
-                    if let Some(o) = show(ui, maximized, |ui| {
+                    if let Some(o) = show(ui, Chrome::Custom, maximized, |ui| {
                         ui.label("Tsukumoe");
                     }) {
                         *op = Some(o);
@@ -345,6 +366,27 @@ mod tests {
                 },
                 None,
             )
+    }
+
+    #[test]
+    fn the_native_frame_has_no_buttons_or_edges_and_leaves_room_for_the_traffic_lights() {
+        let mut h = Harness::builder()
+            .with_size(vec2(500.0, 60.0))
+            .build_ui_state(
+                |ui, left: &mut f32| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    show(ui, Chrome::Native, false, |ui| {
+                        *left = ui.cursor().left();
+                    });
+                    assert!(frame(ui.ctx(), Chrome::Native, false).is_none());
+                },
+                0.0,
+            );
+        h.run();
+        assert!(h.query_by_label("Close").is_none());
+        assert!(h.query_by_label("Minimize").is_none());
+        assert!(*h.state() >= TRAFFIC_LIGHTS);
     }
 
     #[test]
