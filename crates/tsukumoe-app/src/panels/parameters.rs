@@ -83,7 +83,6 @@ const SETTINGS_WIDTH: f32 = 380.0;
 
 pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let ctx = ui.ctx().clone();
-    let m = tsukumoe_ui::Theme::get(&ctx).metrics;
     let mut outs = Vec::new();
     let selection = view.selected();
     let name = tr(&ctx, "filter-name");
@@ -109,68 +108,38 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                 })
                 .collect();
             let links: Vec<(String, String)> = links.into_iter().cloned().collect();
-            for name in shown {
-                if links.iter().any(|(_, b)| *b == name) {
-                    continue;
+            let ctx = &ctx;
+            let draw = |ui: &mut Ui, view: &mut ViewState, outs: &mut Vec<Out>, name: &str| {
+                if links.iter().any(|(_, b)| b == name) {
+                    return;
                 }
-                if let Some((_, b)) = links.iter().find(|(a, _)| *a == name) {
-                    link_row(ui, model, view, &name, b, &selection, &mut outs);
-                    continue;
+                // A linked pair is one pad: it is not a drag source or a drop target.
+                let rect = if let Some((_, b)) = links.iter().find(|(a, _)| a == name) {
+                    link_row(ui, model, view, name, b, &selection, outs);
+                    None
+                } else {
+                    row(ui, model, view, name, &selection, shift, outs)
+                };
+                if let Some(rect) = rect {
+                    drop_on_row(ctx, ui, rect, model, name, outs);
                 }
-                let Some(id) = model.parameters().find(&name) else {
+            };
+            for (group, rows) in sections(model, &shown) {
+                let Some(group) = group else {
+                    for name in &rows {
+                        draw(ui, view, &mut outs, name);
+                    }
                     continue;
                 };
-                let Some(p) = model.parameters().get(id) else {
-                    continue;
-                };
-                let keys = param_ops::primary(model, &name, &selection).map(|(_, k)| k);
-                let mut value = view.param(&name, p);
-                let mut changed = false;
-                let bg = ui.painter().add(egui::Shape::Noop);
-                let row = ui.horizontal(|ui| {
-                    link_button(ui, model, view, &name, &mut outs);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(LABEL_WIDTH, m.control),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            // The slider starts at the same x on every row, whatever the name.
-                            ui.set_min_width(LABEL_WIDTH);
-                            name_label(ui, model, view, &name, &mut outs);
-                        },
-                    );
-                    let width = (ui.available_width() - 72.0 - RESET_WIDTH).max(40.0);
-                    let slider_rect = ui
-                        .allocate_ui(Vec2::new(width, m.control), |ui| {
-                            let r = slider(ui, &mut value, p.min..=p.max, &name);
-                            changed |= r.changed();
-                            r.rect
-                        })
-                        .inner;
-                    if let Some(keys) = &keys {
-                        if changed && !shift {
-                            let threshold =
-                                (p.max - p.min) * SNAP_POINTS / slider_rect.width().max(1.0);
-                            value = param_ops::snap(keys, value, threshold);
+                let r = egui::CollapsingHeader::new(&group)
+                    .id_salt(("param-group", &group))
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for name in &rows {
+                            draw(ui, view, &mut outs, name);
                         }
-                        paint_keys(ui, slider_rect, keys, p.min, p.max, value);
-                    }
-                    let speed = f64::from((p.max - p.min).abs()) / 200.0;
-                    changed |=
-                        number(ui, &mut value, p.min..=p.max, speed.max(1e-4), &name).changed();
-                    if reset_button(ui, value == p.default) {
-                        value = p.default;
-                        changed = true;
-                    }
-                });
-                highlight(
-                    ui,
-                    bg,
-                    row.response.rect,
-                    view.param_focus.as_deref() == Some(&name),
-                );
-                if changed {
-                    view.set_param(&name, p, value);
-                }
+                    });
+                drop_on_header(ctx, &r.header_response, model, &group, &mut outs);
             }
         });
     // The settings window of one parameter (name, range, repeat, delete).
@@ -201,6 +170,162 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         }
     }
     outs
+}
+
+/// The parameters to show, by group: those without one first, then each group
+/// in the order it first appears. Rows keep the model order inside a group.
+fn sections(model: &Model, shown: &[String]) -> Vec<(Option<String>, Vec<String>)> {
+    let mut out: Vec<(Option<String>, Vec<String>)> = vec![(None, Vec::new())];
+    for name in shown {
+        let group = model
+            .parameters()
+            .find(name)
+            .and_then(|id| model.parameters().get(id))
+            .and_then(|p| p.group.clone());
+        match out.iter_mut().find(|(g, _)| *g == group) {
+            Some((_, rows)) => rows.push(name.clone()),
+            None => out.push((group, vec![name.clone()])),
+        }
+    }
+    out.retain(|(g, rows)| g.is_some() || !rows.is_empty());
+    out
+}
+
+/// One parameter: grip, link button, name, slider, number and reset. Returns the row's rectangle.
+fn row(
+    ui: &mut Ui,
+    model: &Model,
+    view: &mut ViewState,
+    name: &str,
+    selection: &[Selection],
+    shift: bool,
+    outs: &mut Vec<Out>,
+) -> Option<egui::Rect> {
+    let m = tsukumoe_ui::Theme::get(ui.ctx()).metrics;
+    let id = model.parameters().find(name)?;
+    let p = model.parameters().get(id)?;
+    let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
+    let mut value = view.param(name, p);
+    let mut changed = false;
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let row = ui.horizontal(|ui| {
+        grip(ui, name);
+        link_button(ui, model, view, name, outs);
+        ui.allocate_ui_with_layout(
+            Vec2::new(LABEL_WIDTH, m.control),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                // The slider starts at the same x on every row, whatever the name.
+                ui.set_min_width(LABEL_WIDTH);
+                name_label(ui, model, view, name, outs);
+            },
+        );
+        let width = (ui.available_width() - 72.0 - RESET_WIDTH).max(40.0);
+        let slider_rect = ui
+            .allocate_ui(Vec2::new(width, m.control), |ui| {
+                let r = slider(ui, &mut value, p.min..=p.max, name);
+                changed |= r.changed();
+                r.rect
+            })
+            .inner;
+        if let Some(keys) = &keys {
+            if changed && !shift {
+                let threshold = (p.max - p.min) * SNAP_POINTS / slider_rect.width().max(1.0);
+                value = param_ops::snap(keys, value, threshold);
+            }
+            paint_keys(ui, slider_rect, keys, p.min, p.max, value);
+        }
+        let speed = f64::from((p.max - p.min).abs()) / 200.0;
+        changed |= number(ui, &mut value, p.min..=p.max, speed.max(1e-4), name).changed();
+        if reset_button(ui, value == p.default) {
+            value = p.default;
+            changed = true;
+        }
+    });
+    highlight(
+        ui,
+        bg,
+        row.response.rect,
+        view.param_focus.as_deref() == Some(name),
+    );
+    if changed {
+        view.set_param(name, p, value);
+    }
+    Some(row.response.rect)
+}
+
+/// The handle at the start of a row: dragging it carries the parameter's name.
+fn grip(ui: &mut Ui, name: &str) {
+    let color = tsukumoe_ui::Theme::get(ui.ctx()).colors.text_muted;
+    let r = tsukumoe_ui::icon(ui, Icon::Grip, color);
+    let r = ui.interact(
+        r.rect,
+        ui.make_persistent_id(("param-grip", name)),
+        egui::Sense::drag(),
+    );
+    if r.drag_started() {
+        egui::DragAndDrop::set_payload(ui.ctx(), name.to_owned());
+    }
+    r.on_hover_cursor(egui::CursorIcon::Grab);
+}
+
+/// The parameter being dragged, taken when the pointer is released over `rect`.
+fn dropped(ctx: &egui::Context, rect: egui::Rect) -> Option<String> {
+    if !egui::DragAndDrop::has_payload_of_type::<String>(ctx)
+        || !ctx.input(|i| i.pointer.any_released())
+        || !ctx.pointer_interact_pos().is_some_and(|p| rect.contains(p))
+    {
+        return None;
+    }
+    egui::DragAndDrop::take_payload::<String>(ctx).map(|s| (*s).clone())
+}
+
+/// A drag over a row shows a line above or below it; the release moves the
+/// dragged parameter there.
+fn drop_on_row(
+    ctx: &egui::Context,
+    ui: &Ui,
+    rect: egui::Rect,
+    model: &Model,
+    name: &str,
+    outs: &mut Vec<Out>,
+) {
+    let Some(pos) = ctx.pointer_interact_pos().filter(|p| rect.contains(*p)) else {
+        return;
+    };
+    if !egui::DragAndDrop::has_payload_of_type::<String>(ctx) {
+        return;
+    }
+    let after = pos.y > rect.center().y;
+    let y = if after { rect.bottom() } else { rect.top() };
+    let color = tsukumoe_ui::Theme::get(ctx).colors.accent;
+    ui.painter()
+        .hline(rect.x_range(), y, egui::Stroke::new(2.0, color));
+    if let Some(dragged) = dropped(ctx, rect) {
+        outs.extend(param_ops::move_beside(model, &dragged, name, after).map(Out::Op));
+    }
+}
+
+/// Dropping on a group header puts the parameter into the group.
+fn drop_on_header(
+    ctx: &egui::Context,
+    header: &egui::Response,
+    model: &Model,
+    group: &str,
+    outs: &mut Vec<Out>,
+) {
+    if egui::DragAndDrop::has_payload_of_type::<String>(ctx) && header.contains_pointer() {
+        let color = tsukumoe_ui::Theme::get(ctx).colors.accent;
+        ctx.layer_painter(header.layer_id).rect_stroke(
+            header.rect,
+            3.0,
+            egui::Stroke::new(2.0, color),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if let Some(dragged) = dropped(ctx, header.rect) {
+        outs.extend(param_ops::move_to_group(model, &dragged, group).map(Out::Op));
+    }
 }
 
 /// The button that puts a value back to its default; dimmed, and inert, when
@@ -514,6 +639,26 @@ pub(super) fn settings_section(
         }
     });
     ui.data_mut(|d| d.insert_temp(buffer_id, text));
+    // The group: edited in a buffer like the name; empty takes the parameter out of it.
+    let group_id = ui.make_persistent_id(("param-group-name", name));
+    let current = p.group.clone().unwrap_or_default();
+    let mut group: String = ui
+        .data_mut(|d| d.get_temp(group_id))
+        .unwrap_or_else(|| current.clone());
+    let response = text_input(ui, &mut group, &t("param-group"), &t("param-group"));
+    if response.lost_focus() {
+        if group != current {
+            outs.push(Out::Op((
+                Command::SetParameterGroup {
+                    name: name.to_owned(),
+                    group: (!group.is_empty()).then(|| group.clone()),
+                },
+                format!("param_group: {name}"),
+            )));
+        }
+        group = current;
+    }
+    ui.data_mut(|d| d.insert_temp(group_id, group));
     // The range and the default: edited in a buffer, sent when a drag or an entry ends.
     let range_id = ui.make_persistent_id(("param-range", name));
     let mut vals: [f32; 3] = ui
@@ -708,5 +853,40 @@ mod tests {
         enabled[0].click();
         h.run();
         assert_eq!(h.state().view.param("ParamAngleX", &param), param.default);
+    }
+
+    #[test]
+    fn parameters_are_listed_by_group_with_the_ungrouped_first() {
+        let mut m = model();
+        let names: Vec<String> = m
+            .parameters()
+            .iter()
+            .map(|(_, n, _)| n.to_owned())
+            .collect();
+        m.apply(Command::SetParameterGroup {
+            name: names[0].clone(),
+            group: Some("Head".into()),
+        })
+        .unwrap();
+        let s = sections(&m, &names);
+        assert_eq!(s[0].0, None);
+        assert_eq!(s[1], (Some("Head".to_owned()), vec![names[0].clone()]));
+        assert_eq!(s[0].1, names[1..]);
+    }
+
+    #[test]
+    fn a_group_shows_as_a_header() {
+        use egui_kittest::kittest::Queryable;
+        let mut p = panel();
+        let first = p.model.parameters().iter().next().unwrap().1.to_owned();
+        p.model
+            .apply(Command::SetParameterGroup {
+                name: first,
+                group: Some("Head".into()),
+            })
+            .unwrap();
+        let mut h = harness(p);
+        h.run();
+        h.get_by_label("Head");
     }
 }

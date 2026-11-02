@@ -316,6 +316,7 @@ window-restore = 元に戻す
 window-close = 閉じる
 param-new = パラメータを追加
 param-name = 名前
+param-group = グループ（空: なし）
 param-delete = パラメータを削除
 param-min = 最小
 param-default = 既定

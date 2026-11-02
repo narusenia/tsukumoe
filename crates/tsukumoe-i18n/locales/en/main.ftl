@@ -320,6 +320,7 @@ window-restore = Restore
 window-close = Close
 param-new = New parameter
 param-name = Name
+param-group = Group (empty: none)
 param-delete = Delete the parameter
 param-min = Min
 param-default = Default
