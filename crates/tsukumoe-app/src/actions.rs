@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 41] = [
+pub const ACTIONS: [&str; 42] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -55,6 +55,7 @@ pub const ACTIONS: [&str; 41] = [
     "viewport.zoom-in",
     "viewport.zoom-out",
     "viewport.reset-camera",
+    "viewport.solo",
 ];
 
 /// The context a binding of `action` belongs to (`None` is global).

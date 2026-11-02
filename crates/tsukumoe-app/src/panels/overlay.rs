@@ -9,7 +9,7 @@
 use egui::{
     Align, Align2, Area, Color32, Frame, Id, Layout, Margin, Order, Rect, Stroke, Ui, vec2,
 };
-use tsukumoe_ui::{Theme, tr};
+use tsukumoe_ui::{Icon, Theme, tr};
 
 use crate::keyed::Place;
 
@@ -88,6 +88,45 @@ pub fn status(ctx: &egui::Context, rect: Rect, text: &str) {
     });
 }
 
+/// [`status`] with a close button at its right. True on the frame it is clicked.
+pub fn status_closable(ctx: &egui::Context, rect: Rect, text: &str, close_name: &str) -> bool {
+    let theme = Theme::get(ctx);
+    let mut closed = false;
+    area(
+        "tsukumoe-viewport-status",
+        rect.center_top() + vec2(0.0, MARGIN),
+        Align2::CENTER_TOP,
+    )
+    .show(ctx, |ui| {
+        Frame::new()
+            .fill(theme.colors.accent)
+            .corner_radius(theme.metrics.radius * 2.0)
+            .inner_margin(Margin::symmetric(8, 3))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(text).color(theme.colors.accent_text));
+                    let size = theme.metrics.icon;
+                    let (at, response) =
+                        ui.allocate_exact_size(vec2(size + 4.0, size + 4.0), egui::Sense::click());
+                    let shown = if response.hovered() {
+                        theme.colors.accent_text
+                    } else {
+                        theme.colors.accent_text.gamma_multiply(0.75)
+                    };
+                    Icon::Close
+                        .image(shown, size)
+                        .paint_at(ui, Rect::from_center_size(at.center(), vec2(size, size)));
+                    let response = response.on_hover_text(close_name);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, close_name)
+                    });
+                    closed = response.clicked();
+                });
+            });
+    });
+    closed
+}
+
 /// The line that says which key the sliders are on (or that they are on none).
 fn key_line(ctx: &egui::Context, theme: &Theme, place: &Place) -> (String, Color32) {
     match place {
@@ -154,5 +193,25 @@ mod tests {
         harness.run();
         harness.get_by_label("Click to select, Shift to add.");
         harness.get_by_label("Not on a key: ParamAngleX = 12.00");
+    }
+
+    #[test]
+    fn the_close_button_of_a_status_pill_reports_a_click() {
+        let mut harness = Harness::builder()
+            .with_size(vec2(300.0, 100.0))
+            .build_ui_state(
+                |ui, closed: &mut bool| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    *closed |=
+                        status_closable(ui.ctx(), ui.max_rect(), "Solo: Head", "End the solo");
+                },
+                false,
+            );
+        harness.run();
+        harness.get_by_label("Solo: Head");
+        harness.get_by_label("End the solo").click();
+        harness.run();
+        assert!(*harness.state());
     }
 }

@@ -1044,6 +1044,24 @@ impl Editor {
                 self.view.camera.zoom_at(f, [0.5, 0.5]);
                 self.view.touch();
             }
+            "viewport.solo" => {
+                // The selection alone, or the solo ended when it is already the one.
+                let item = self.view.selection.clone().filter(|s| {
+                    matches!(
+                        s,
+                        Selection::Part(_)
+                            | Selection::Mesh(_)
+                            | Selection::Warp(_)
+                            | Selection::Rotation(_)
+                    )
+                });
+                self.view.solo = match (&self.view.solo, item) {
+                    (Some(now), Some(sel)) if *now == sel => None,
+                    (_, Some(sel)) => Some(sel),
+                    (_, None) => None,
+                };
+                self.view.touch();
+            }
             "viewport.reset-camera" => {
                 self.view.camera.reset();
                 self.view.touch();
@@ -2117,6 +2135,28 @@ mod tests {
             &crate::workspace::builtin_layout(Preset::Cubism, Workspace::Modeling)
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_solo_action_isolates_the_selection_and_a_second_press_ends_it() {
+        use crate::view::Selection;
+        let mut editor = Editor::new(None);
+        let ctx = Context::default();
+        // Nothing selected: nothing to solo.
+        assert!(editor.run_action(&ctx, "viewport.solo"));
+        assert!(editor.view.solo.is_none());
+        editor.view.selection = Some(Selection::Part("Head".into()));
+        assert!(editor.run_action(&ctx, "viewport.solo"));
+        assert_eq!(editor.view.solo, Some(Selection::Part("Head".into())));
+        // The same selection again ends it; another one replaces it.
+        assert!(editor.run_action(&ctx, "viewport.solo"));
+        assert!(editor.view.solo.is_none());
+        editor.view.selection = Some(Selection::Mesh("Eye".into()));
+        assert!(editor.run_action(&ctx, "viewport.solo"));
+        editor.view.selection = Some(Selection::Part("Head".into()));
+        assert!(editor.run_action(&ctx, "viewport.solo"));
+        assert_eq!(editor.view.solo, Some(Selection::Part("Head".into())));
+        assert!(editor.keymap.shortcut("viewport.solo").is_some());
     }
 
     #[test]

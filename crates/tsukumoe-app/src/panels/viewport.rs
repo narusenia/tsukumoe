@@ -1144,18 +1144,18 @@ pub fn placeholder(ui: &mut Ui, has_doc: bool) {
 }
 
 /// A note in the corner that only part of the model is drawn.
-fn paint_solo_badge(ui: &Ui, rect: Rect, view: &ViewState) {
+fn paint_solo_badge(ui: &Ui, rect: Rect, view: &mut ViewState) {
     let name = match &view.solo {
         Some(
             Selection::Part(n) | Selection::Mesh(n) | Selection::Warp(n) | Selection::Rotation(n),
         ) => n.as_str(),
         _ => return,
     };
-    overlay::status(
-        ui.ctx(),
-        rect,
-        &format!("{}: {name}", tr(ui.ctx(), "viewport-solo")),
-    );
+    let text = format!("{}: {name}", tr(ui.ctx(), "viewport-solo"));
+    if overlay::status_closable(ui.ctx(), rect, &text, &tr(ui.ctx(), "viewport-solo-end")) {
+        view.solo = None;
+        view.touch();
+    }
 }
 
 /// What is behind the picture: nothing (the theme's surface), a flat colour, or a checker.

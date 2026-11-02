@@ -447,3 +447,5 @@ proportional-radius-screen = 半径: 画面（ズームで実際の範囲が変�
 proportional-radius-fixed = 半径: モデル空間で固定（ズームに依存しない）。押すと画面基準へ
 action-mesh-reset = メッシュを初期の形（UV の範囲を覆う四角形）に戻す
 mesh-edit-reset = 初期化
+viewport-solo-end = ソロ表示を解除
+action-viewport-solo = 選択をソロ表示（もう一度で解除）

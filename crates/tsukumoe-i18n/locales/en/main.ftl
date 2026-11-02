@@ -451,3 +451,5 @@ proportional-radius-screen = Radius: screen (the reach changes with the zoom). C
 proportional-radius-fixed = Radius: fixed in the model (independent of the zoom). Click to use the screen
 action-mesh-reset = Reset the mesh to its starting shape (a quad over its UV box)
 mesh-edit-reset = Reset
+viewport-solo-end = End the solo
+action-viewport-solo = Solo the selection (again to end)
