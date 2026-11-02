@@ -637,6 +637,9 @@ impl Editor {
             "deformer.create-warp" | "deformer.create-rotation" => {
                 self.run_deformer_action(ctx, action);
             }
+            "proportional.toggle" => {
+                self.view.proportional.on = !self.view.proportional.on;
+            }
             "deformer.reset" => {
                 let items = self.view.selected();
                 self.reset_deformers(ctx, &items);
@@ -1769,6 +1772,24 @@ mod tests {
             &crate::workspace::builtin_layout(Preset::Cubism, Workspace::Modeling)
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_proportional_action_flips_the_option_and_the_key_is_o() {
+        let mut editor = Editor::new(None);
+        let ctx = Context::default();
+        assert!(!editor.view.proportional.on);
+        assert!(editor.run_action(&ctx, "proportional.toggle"));
+        assert!(editor.view.proportional.on);
+        assert!(editor.run_action(&ctx, "proportional.toggle"));
+        assert!(!editor.view.proportional.on);
+        assert_eq!(
+            editor.keymap.shortcut("proportional.toggle"),
+            Some(egui::KeyboardShortcut::new(
+                egui::Modifiers::NONE,
+                egui::Key::O
+            ))
+        );
     }
 
     #[test]

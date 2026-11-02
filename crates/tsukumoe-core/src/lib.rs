@@ -24,6 +24,7 @@ pub mod mesh_edit;
 pub mod model;
 pub mod physics;
 pub mod playback;
+pub mod proportional;
 pub mod rig;
 pub mod simulate;
 pub mod table;

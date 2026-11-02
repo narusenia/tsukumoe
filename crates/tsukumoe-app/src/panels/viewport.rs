@@ -19,7 +19,7 @@ use crate::actions::Tool;
 use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
-use crate::panels::{deformer_overlay, mesh_overlay, selection_overlay};
+use crate::panels::{deformer_overlay, mesh_overlay, proportional_overlay, selection_overlay};
 use crate::project::Document;
 use crate::scene::{Preview, Scene, fit_view};
 use crate::view::{Selection, ViewState};
@@ -206,7 +206,16 @@ impl Viewport {
             self.view_revision = view.revision();
             self.wake();
         }
-        self.navigate(ui, &response, rect, view);
+        mesh.proportional = view.proportional;
+        deformer.proportional = view.proportional;
+        // The wheel sets the influence radius while proportional edit drags.
+        let radius_wheel = view.proportional.on
+            && match view.tool {
+                Tool::Mesh => mesh.is_moving(),
+                Tool::Deformer => deformer.is_moving_points(),
+                Tool::Select => false,
+            };
+        self.navigate(ui, &response, rect, view, radius_wheel);
         self.drag_parameters(ui, &response, doc, view, drag);
         // A shape being dragged is drawn as it will be committed, before it is.
         let live = self.live_preview(rect, doc, view, mesh, deformer, size);
@@ -525,10 +534,37 @@ impl Viewport {
                     tool,
                 );
                 deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-hint"));
+                if tool.proportional.on && matches!(shape, deformer_tool::Shape::Warp { .. }) {
+                    let screen: Vec<egui::Pos2> = preview
+                        .as_ref()
+                        .unwrap_or(shape)
+                        .world_points()
+                        .iter()
+                        .map(|&p| {
+                            let s = mapper.to_screen(p);
+                            pos2(s[0], s[1])
+                        })
+                        .collect();
+                    let moved: Vec<egui::Pos2> = tool
+                        .points()
+                        .iter()
+                        .filter_map(|&i| screen.get(i as usize).copied())
+                        .collect();
+                    let weights = tool.drag_weights(shape, &mapper);
+                    proportional_overlay::paint(
+                        &painter,
+                        &theme,
+                        &tool.proportional,
+                        &moved,
+                        weights.as_deref().map(|w| (&screen[..], w)),
+                    );
+                }
             }
             _ => deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-pick")),
         }
         deformer_overlay::options(ui.ctx(), rect, tool);
+        proportional_overlay::options(ui.ctx(), rect, &mut view.proportional);
+        tool.proportional = view.proportional;
         (ops, actions)
     }
 
@@ -643,6 +679,8 @@ impl Viewport {
         }
         if mesh.is_some() {
             mesh_overlay::grid_options(ui.ctx(), rect, tool);
+            proportional_overlay::options(ui.ctx(), rect, &mut view.proportional);
+            tool.proportional = view.proportional;
         }
         // The right-click menu: a vertex or edge under the pointer is selected
         // first, so the menu acts on it. Right click is not used for panning.
@@ -668,6 +706,28 @@ impl Viewport {
                 // The scene already shows the drag live, so `shown` is moved; the
                 // overlay needs no preview offset of its own.
                 mesh_overlay::paint(&painter, &theme, &mapper, &shown, &m.indices, tool, None);
+                if tool.proportional.on {
+                    let screen: Vec<egui::Pos2> = shown
+                        .iter()
+                        .map(|&p| {
+                            let s = mapper.to_screen(p);
+                            pos2(s[0], s[1])
+                        })
+                        .collect();
+                    let moved: Vec<egui::Pos2> = tool
+                        .vertices()
+                        .iter()
+                        .filter_map(|&v| screen.get(v as usize).copied())
+                        .collect();
+                    let weights = tool.drag_weights(&mapper);
+                    proportional_overlay::paint(
+                        &painter,
+                        &theme,
+                        &tool.proportional,
+                        &moved,
+                        weights.as_deref().map(|w| (&screen[..], w)),
+                    );
+                }
                 mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-hint"));
             }
             None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),
@@ -705,7 +765,14 @@ impl Viewport {
 
     /// Pan (trackpad scroll, middle drag, or Shift + drag) and zoom (mouse wheel,
     /// pinch) the camera.
-    fn navigate(&mut self, ui: &Ui, response: &egui::Response, rect: Rect, view: &mut ViewState) {
+    fn navigate(
+        &mut self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        view: &mut ViewState,
+        radius_wheel: bool,
+    ) {
         let size = [rect.width(), rect.height()];
         // The mesh tool takes Shift + drag for its box selection.
         let shift = ui.input(|i| i.modifiers.shift) && view.tool != Tool::Mesh;
@@ -717,7 +784,13 @@ impl Viewport {
             view.touch();
             self.wake();
         }
-        if response.hovered() {
+        if radius_wheel {
+            let wheel = ui.input(|i| i.smooth_scroll_delta.y);
+            if wheel != 0.0 {
+                view.proportional.scrolled(wheel);
+                self.wake();
+            }
+        } else if response.hovered() {
             self.scroll = ui.input(|i| scroll_mode(&i.events, self.scroll));
             let (scroll, pinch, hover) =
                 ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));

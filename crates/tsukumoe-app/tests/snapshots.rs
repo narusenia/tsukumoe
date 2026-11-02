@@ -586,3 +586,91 @@ fn multi_selection_in_the_dark_theme() {
 fn multi_selection_in_the_light_theme() {
     multi_selection_snapshot(Mode::Light, "selection_multi_light");
 }
+
+/// Proportional edit mid drag: the options box (on), the circle of influence
+/// around the dragged vertex and the weight dots on its neighbours, drawn
+/// over the moved mesh without the GPU picture behind it.
+fn proportional_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::mesh_tool::{Mapper, MeshTool};
+    use tsukumoe_app::panels::{mesh_overlay, proportional_overlay};
+    use tsukumoe_app::proportional::Proportional;
+    use tsukumoe_core::deformer_space::Space;
+    use tsukumoe_ui::Theme;
+
+    let mut positions = Vec::new();
+    for y in 0..4 {
+        for x in 0..5 {
+            positions.push([x as f32, y as f32]);
+        }
+    }
+    let mut indices = Vec::new();
+    for y in 0..3u32 {
+        for x in 0..4u32 {
+            let a = y * 5 + x;
+            indices.extend([a, a + 1, a + 6, a, a + 6, a + 5]);
+        }
+    }
+    let size = egui::vec2(480.0, 260.0);
+    let mapper = Mapper {
+        origin: [0.0, 0.0],
+        size: [size.x, size.y],
+        view: [-0.8, -0.4, 5.2, 3.4],
+    };
+    let mut tool = MeshTool::default();
+    tool.set_mesh(Some("Skin"));
+    tool.proportional = Proportional {
+        on: true,
+        radius: 90.0,
+        ..Proportional::default()
+    };
+    let start = mapper.to_screen(positions[7]);
+    tool.press(&positions, &indices, &mapper, start, false);
+    tool.drag([start[0] + 18.0, start[1] - 24.0]);
+    let shown = tool
+        .dragging_stored(&positions, &mapper, &Space::Drawing)
+        .unwrap();
+    let mut harness = Harness::builder().with_size(size).wgpu().build_ui_state(
+        move |ui, tool: &mut MeshTool| {
+            let ctx = ui.ctx().clone();
+            egui_extras::install_image_loaders(&ctx);
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let theme = Theme::get(&ctx);
+            let rect = ui.max_rect();
+            let painter = ui.painter_at(rect);
+            mesh_overlay::paint(&painter, &theme, &mapper, &shown, &indices, tool, None);
+            let screen: Vec<egui::Pos2> = shown
+                .iter()
+                .map(|&p| {
+                    let s = mapper.to_screen(p);
+                    egui::pos2(s[0], s[1])
+                })
+                .collect();
+            let weights = tool.drag_weights(&mapper).unwrap();
+            let moved = [screen[7]];
+            proportional_overlay::paint(
+                &painter,
+                &theme,
+                &tool.proportional,
+                &moved,
+                Some((&screen, &weights)),
+            );
+            let mut options = tool.proportional;
+            proportional_overlay::options(&ctx, rect, &mut options);
+        },
+        tool,
+    );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn proportional_edit_in_the_dark_theme() {
+    proportional_snapshot(Mode::Dark, "proportional_dark");
+}
+
+#[test]
+fn proportional_edit_in_the_light_theme() {
+    proportional_snapshot(Mode::Light, "proportional_light");
+}
