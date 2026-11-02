@@ -55,7 +55,7 @@ pub const CHROME: Chrome = if cfg!(target_os = "macos") {
 /// Room kept free on the left for the macOS traffic lights, in points.
 const TRAFFIC_LIGHTS: f32 = 76.0;
 /// Height of the bar with the native frame: the traffic lights' centre line.
-const NATIVE_HEIGHT: f32 = 28.0;
+const NATIVE_HEIGHT: f32 = 33.0;
 
 /// The window's maximized or full-screen state, as the platform reports it.
 pub fn is_maximized(ctx: &Context) -> bool {
