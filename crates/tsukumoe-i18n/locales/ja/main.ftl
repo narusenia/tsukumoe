@@ -120,6 +120,7 @@ action-file-open = プロジェクトを開く
 action-file-save = プロジェクトを保存
 action-edit-undo = 元に戻す
 action-edit-redo = やり直す
+action-edit-repeat = 直前の操作を繰り返す
 action-view-palette = コマンドパレット
 action-view-pie-menu = パイメニュー (押している間)
 menu-panels = パネル

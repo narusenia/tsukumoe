@@ -108,6 +108,8 @@ pub struct Editor {
     live_edit: Option<(String, u64)>,
     /// The key of a live edit the model refused: the rest of that drag is skipped.
     live_blocked: Option<String>,
+    /// The last mesh or deformer action run, for `edit.repeat`.
+    last_repeatable: Option<String>,
     /// The mesh a grid was just laid on and its shape before: +/- and the wheel re-lay it as one undo step.
     grid_live: Option<(String, tsukumoe_core::mesh_edit::Geometry)>,
     /// When the project was last auto-saved (or opened), and the dispatcher revision then.
@@ -190,6 +192,7 @@ impl Editor {
             options,
             live_edit: None,
             live_blocked: None,
+            last_repeatable: None,
             grid_live: None,
             autosave: (std::time::Instant::now(), None),
             prefs: Default::default(),
@@ -905,6 +908,15 @@ impl Editor {
     /// keymap, do nothing. `file.open-recent:<path>` and `layout.load:<name>`
     /// carry their argument after the colon.
     pub fn run_action(&mut self, ctx: &Context, action: &str) -> bool {
+        if action == "edit.repeat" {
+            return match self.last_repeatable.clone() {
+                Some(last) => self.run_action(ctx, &last),
+                None => true,
+            };
+        }
+        if action.starts_with("mesh.") || action.starts_with("deformer.") {
+            self.last_repeatable = Some(action.to_owned());
+        }
         match action {
             "file.open" | "file.open-folder" | "file.new" | "file.new-from-psd"
                 if self.picker.is_native() =>
@@ -2452,6 +2464,15 @@ mod tests {
         assert_eq!(count(d), laid);
         assert!(d.undo());
         assert_eq!(count(d), 9);
+        // Repeat runs the last mesh action again (here the grid fill, as one more step).
+        assert!(editor.run_action(&ctx, "edit.repeat"));
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.log().len(), steps + 1);
+        assert_eq!(
+            d.name_of(steps).as_deref(),
+            Some("mesh_fill_grid: MeshEditGrid")
+        );
+        assert!(d.undo());
         // Other tools ignore the keys.
         editor.view.tool = Tool::Select;
         editor

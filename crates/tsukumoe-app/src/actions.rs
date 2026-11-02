@@ -13,11 +13,12 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 39] = [
+pub const ACTIONS: [&str; 40] = [
     "file.open",
     "file.save",
     "edit.undo",
     "edit.redo",
+    "edit.repeat",
     "view.palette",
     "view.settings",
     "view.pie-menu",
@@ -57,7 +58,8 @@ pub const ACTIONS: [&str; 39] = [
 
 /// The context a binding of `action` belongs to (`None` is global).
 pub fn context_of(action: &str) -> Option<&'static str> {
-    (action.starts_with("viewport.")
+    (action == "edit.repeat"
+        || action.starts_with("viewport.")
         || action.starts_with("mesh.")
         || action.starts_with("deformer.")
         || action.starts_with("proportional."))

@@ -124,6 +124,7 @@ action-file-open = Open project
 action-file-save = Save project
 action-edit-undo = Undo
 action-edit-redo = Redo
+action-edit-repeat = Repeat the last operation
 action-view-palette = Command palette
 action-view-pie-menu = Pie menu (hold)
 menu-panels = Panels
