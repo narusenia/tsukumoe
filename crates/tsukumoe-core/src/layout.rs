@@ -151,6 +151,16 @@ impl CompiledModel<'_> {
             "one opacity per part",
         )?;
         ensure(
+            self.warp_bezier.windows(2).all(|w| w[0] < w[1])
+                && self
+                    .warp_bezier
+                    .iter()
+                    .all(|&w| (w as usize) < self.warps.len()),
+            "warp_bezier",
+            0,
+            "not ascending warp indices",
+        )?;
+        ensure(
             self.mesh_hidden.windows(2).all(|w| w[0] < w[1])
                 && self
                     .mesh_hidden

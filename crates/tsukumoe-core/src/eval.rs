@@ -442,21 +442,59 @@ impl World<'_> {
                 let def = &self.model.warps[i];
                 let start = def.point_start as usize;
                 let grid = &self.warp_world[start..start + def.point_count as usize * 2];
-                warp_point(grid, def.rows as usize, def.columns as usize, p)
+                let bezier = self.model.warp_bezier.binary_search(&(i as u32)).is_ok();
+                warp_point(grid, def.rows as usize, def.columns as usize, bezier, p)
             }
             ParentRef::Rotation(i) => self.rot_world[i].apply(p),
         }
     }
 }
 
-/// Bilinear lookup in a warp's world grid; points outside the unit square
+/// Catmull-Rom spline through `p1` and `p2` at `t` (0 at `p1`, 1 at `p2`).
+fn catmull_rom(p0: f32, p1: f32, p2: f32, p3: f32, t: f32) -> f32 {
+    0.5 * (2.0 * p1
+        + (p2 - p0) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
+        + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t * t * t)
+}
+
+/// One coordinate of the grid point at row `r`, column `c`; a point outside
+/// the grid continues the line through the two nearest ones.
+fn grid_coord(grid: &[f32], rows: usize, columns: usize, r: isize, c: isize, k: usize) -> f32 {
+    let at = |r: isize, c: isize| grid_coord(grid, rows, columns, r, c, k);
+    if r < 0 {
+        2.0 * at(0, c) - at(1, c)
+    } else if r > rows as isize {
+        2.0 * at(rows as isize, c) - at(rows as isize - 1, c)
+    } else if c < 0 {
+        2.0 * at(r, 0) - at(r, 1)
+    } else if c > columns as isize {
+        2.0 * at(r, columns as isize) - at(r, columns as isize - 1)
+    } else {
+        grid[(r as usize * (columns + 1) + c as usize) * 2 + k]
+    }
+}
+
+/// Lookup in a warp's world grid, bilinear or (`bezier`) through the grid
+/// points with a bicubic Catmull-Rom surface; points outside the unit square
 /// extend the nearest cell.
-fn warp_point(grid: &[f32], rows: usize, columns: usize, p: Point) -> Point {
+fn warp_point(grid: &[f32], rows: usize, columns: usize, bezier: bool, p: Point) -> Point {
     let fu = p[0] * columns as f32;
     let fv = p[1] * rows as f32;
     let i = (fu.floor().max(0.0) as usize).min(columns - 1);
     let j = (fv.floor().max(0.0) as usize).min(rows - 1);
     let (tu, tv) = (fu - i as f32, fv - j as f32);
+    if bezier {
+        let mix = |k: usize| {
+            let row = |dr: isize| {
+                let (r, c) = (j as isize + dr, i as isize);
+                let g = |dc: isize| grid_coord(grid, rows, columns, r, c + dc, k);
+                catmull_rom(g(-1), g(0), g(1), g(2), tu)
+            };
+            catmull_rom(row(-1), row(0), row(1), row(2), tv)
+        };
+        return [mix(0), mix(1)];
+    }
     let at = |r: usize, c: usize| (r * (columns + 1) + c) * 2;
     let (a, b, c, d) = (at(j, i), at(j, i + 1), at(j + 1, i), at(j + 1, i + 1));
     let mix = |k: usize| {
@@ -859,6 +897,65 @@ mod tests {
         m.meshes.insert("Skin", skin).unwrap();
         let (c, f) = run(&m, &[]);
         near(f.mesh_positions(&c, 0), &[5.0, 5.0, 0.0, 10.0, 15.0, 5.0]);
+    }
+
+    /// A 2 x 2 warp whose middle point is pulled up: the grid of 3 x 3 points.
+    fn bent_warp(bezier: bool) -> (Model, usize) {
+        let (mut m, part) = new_model();
+        let mut grid = Vec::new();
+        for r in 0..3 {
+            for c in 0..3 {
+                let up = if r == 1 && c == 1 { 4.0 } else { 0.0 };
+                grid.push([c as f32 * 5.0, r as f32 * 5.0 + up]);
+            }
+        }
+        let mut w = warp(part, None, &grid);
+        w.rows = 2;
+        w.columns = 2;
+        w.bezier = bezier;
+        let w = m.warps.insert("W", w).unwrap();
+        // The unit square's points: the grid points, and the middle of a cell.
+        let mut skin = mesh(part, &[[0.5, 0.5], [0.25, 0.25], [0.0, 0.0], [1.0, 1.0]]);
+        skin.parent = Some(DeformerRef::Warp(w));
+        m.meshes.insert("Skin", skin).unwrap();
+        (m, 0)
+    }
+
+    #[test]
+    fn a_bezier_warp_passes_through_its_grid_points_and_curves_between() {
+        let (flat, _) = bent_warp(false);
+        let (curved, _) = bent_warp(true);
+        let (c, f) = run(&flat, &[]);
+        let bilinear = f.mesh_positions(&c, 0).to_vec();
+        let (c, f) = run(&curved, &[]);
+        let smooth = f.mesh_positions(&c, 0).to_vec();
+        // The middle grid point (0.5, 0.5) and the corners are hit by both.
+        near(&smooth[0..2], &bilinear[0..2]);
+        near(&smooth[4..8], &bilinear[4..8]);
+        assert_eq!(&smooth[0..2], &[5.0, 9.0]);
+        // Inside a cell the surface is not the bilinear one.
+        assert!((smooth[2] - bilinear[2]).abs() + (smooth[3] - bilinear[3]).abs() > 1e-3);
+    }
+
+    #[test]
+    fn a_bezier_warp_on_an_even_lattice_is_the_same_as_bilinear() {
+        let (mut m, part) = new_model();
+        let mut grid = Vec::new();
+        for r in 0..3 {
+            for c in 0..3 {
+                grid.push([c as f32 * 5.0, r as f32 * 5.0]);
+            }
+        }
+        let mut w = warp(part, None, &grid);
+        w.rows = 2;
+        w.columns = 2;
+        w.bezier = true;
+        let w = m.warps.insert("W", w).unwrap();
+        let mut skin = mesh(part, &[[0.3, 0.8], [1.4, -0.2]]);
+        skin.parent = Some(DeformerRef::Warp(w));
+        m.meshes.insert("Skin", skin).unwrap();
+        let (c, f) = run(&m, &[]);
+        near(f.mesh_positions(&c, 0), &[3.0, 8.0, 14.0, -2.0]);
     }
 
     #[test]
