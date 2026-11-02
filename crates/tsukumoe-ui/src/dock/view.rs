@@ -22,9 +22,9 @@ use crate::theme::Theme;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TabStyle {
     /// Icon only, and the name too on the selected tab.
-    #[default]
     Compact,
     /// Icon and name on every tab.
+    #[default]
     Full,
 }
 

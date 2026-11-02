@@ -2718,16 +2718,16 @@ mod tests {
         let dir = scratch("tab-style");
         let ctx = Context::default();
         let mut editor = Editor::new(Some(dir.clone()));
-        assert_eq!(editor.tab_style, TabStyle::Compact);
-        assert!(editor.run_action(&ctx, "view.tab-style.full"));
         assert_eq!(editor.tab_style, TabStyle::Full);
-        // A new editor reads it back.
-        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Full);
         assert!(editor.run_action(&ctx, "view.tab-style.compact"));
+        assert_eq!(editor.tab_style, TabStyle::Compact);
+        // A new editor reads it back.
         assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Compact);
+        assert!(editor.run_action(&ctx, "view.tab-style.full"));
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Full);
         // A damaged setting gives the default.
         crate::settings::write(&dir, STATE_FILE, r#"{"tab_style":"wide"}"#).unwrap();
-        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Compact);
+        assert_eq!(Editor::new(Some(dir.clone())).tab_style, TabStyle::Full);
         assert!(!editor.run_action(&ctx, "view.tab-style.wide"));
         let _ = std::fs::remove_dir_all(dir);
     }
