@@ -52,6 +52,9 @@ pub struct ContourParams {
     /// instead of at pixel edge midpoints: follows anti-aliased edges to a
     /// fraction of a pixel.
     pub precise: bool,
+    /// Space the outline points evenly along the edge (corners stay), keeping
+    /// as many as the thinning left, instead of leaving them where it did.
+    pub even: bool,
     /// What the shape is: a filled area, or strokes (see [`ContourMode`]).
     pub mode: ContourMode,
     /// Line-art mode: the width of the strokes in pixels; 0 measures it from the image.
@@ -77,6 +80,7 @@ impl Default for ContourParams {
             offset: 2.0,
             spacing: 64.0,
             precise: false,
+            even: false,
             mode: ContourMode::Outline,
             stroke_width: 0.0,
         }
@@ -284,9 +288,17 @@ fn trace(alpha: &Alpha, threshold: u8, precise: bool) -> Vec<Vec<P>> {
 /// Douglas-Peucker on a closed ring; keeps the first vertex and the one
 /// farthest from it.
 fn simplify(ring: &[P], tolerance: f64) -> Vec<P> {
+    simplify_indices(ring, tolerance)
+        .into_iter()
+        .map(|i| ring[i])
+        .collect()
+}
+
+/// The vertices [`simplify`] keeps, as indices into `ring`, in order.
+fn simplify_indices(ring: &[P], tolerance: f64) -> Vec<usize> {
     let n = ring.len();
     if tolerance <= 0.0 || n < 4 {
-        return ring.to_vec();
+        return (0..n).collect();
     }
     let far = (1..n)
         .max_by(|&a, &b| {
@@ -311,7 +323,77 @@ fn simplify(ring: &[P], tolerance: f64) -> Vec<P> {
             stack.push((i, hi));
         }
     }
-    (0..n).filter(|&i| keep[i]).map(|i| ring[i]).collect()
+    (0..n).filter(|&i| keep[i]).collect()
+}
+
+/// A turn of at least this many degrees is a corner, which even spacing keeps.
+const CORNER_DEGREES: f64 = 35.0;
+
+/// The vertices of the closed `ring` where it turns by [`CORNER_DEGREES`] or more.
+fn corners(ring: &[P]) -> Vec<usize> {
+    let n = ring.len();
+    (0..n)
+        .filter(|&i| {
+            let (a, b, c) = (ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n]);
+            let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]);
+            let norm = u[0].hypot(u[1]) * v[0].hypot(v[1]);
+            norm > 0.0 && ((u[0] * v[0] + u[1] * v[1]) / norm).acos().to_degrees() >= CORNER_DEGREES
+        })
+        .collect()
+}
+
+/// Points evenly spaced along the closed `ring`, `spacing` apart, with each
+/// vertex in `anchors` kept (the first vertex if there is none). Each is a
+/// position on an edge: the edge's first vertex and how far along it, 0 to 1.
+fn even_samples(ring: &[P], anchors: &[usize], spacing: f64) -> Vec<(usize, f64)> {
+    let n = ring.len();
+    let length = |i: usize| {
+        let (a, b) = (ring[i % n], ring[(i + 1) % n]);
+        (b[0] - a[0]).hypot(b[1] - a[1])
+    };
+    let anchors = if anchors.is_empty() { &[0] } else { anchors };
+    let mut out = Vec::new();
+    for (k, &a) in anchors.iter().enumerate() {
+        let b = anchors[(k + 1) % anchors.len()];
+        let b = if b > a { b } else { b + n };
+        let total: f64 = (a..b).map(length).sum();
+        let parts = ((total / spacing).round() as usize).max(1);
+        out.push((a, 0.0));
+        let (mut i, mut walked) = (a, 0.0);
+        for j in 1..parts {
+            let target = total * j as f64 / parts as f64;
+            while i + 1 < b && walked + length(i) < target {
+                walked += length(i);
+                i += 1;
+            }
+            let l = length(i);
+            let t = if l > 0.0 {
+                ((target - walked) / l).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            out.push((i % n, t));
+        }
+    }
+    out
+}
+
+/// `ring` with its thinned vertices (`keep`) spaced evenly along the edge: as
+/// many points as `keep`, corners of the thinned outline in place.
+fn even_ring(ring: &[P], keep: &[usize]) -> Vec<P> {
+    let thin: Vec<P> = keep.iter().map(|&i| ring[i]).collect();
+    let anchors: Vec<usize> = corners(&thin).into_iter().map(|j| keep[j]).collect();
+    let n = ring.len();
+    let perimeter: f64 = (0..n)
+        .map(|i| (ring[(i + 1) % n][0] - ring[i][0]).hypot(ring[(i + 1) % n][1] - ring[i][1]))
+        .sum();
+    even_samples(ring, &anchors, perimeter / keep.len() as f64)
+        .into_iter()
+        .map(|(i, t)| {
+            let (a, b) = (ring[i], ring[(i + 1) % n]);
+            [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]
+        })
+        .collect()
 }
 
 fn properly_cross(a: P, b: P, c: P, d: P) -> bool {
@@ -434,7 +516,12 @@ pub fn islands(alpha: &Alpha, params: &ContourParams) -> Result<Vec<Island>, Con
     }
     let mut out = Vec::new();
     for ring in kept {
-        let thin = simplify(&ring, f64::from(params.simplify));
+        let keep = simplify_indices(&ring, f64::from(params.simplify));
+        let thin = if params.even {
+            even_ring(&ring, &keep)
+        } else {
+            keep.iter().map(|&i| ring[i]).collect()
+        };
         if thin.len() < 3 || area(&thin) <= 0.0 {
             continue;
         }
@@ -660,6 +747,130 @@ impl UvMap {
             w[0] * pos[0][1] + w[1] * pos[1][1] + w[2] * pos[2][1],
         ]
     }
+}
+
+/// `g` with the points of its outline spaced evenly along the edge: as many as
+/// there were, corners (turns of [`CORNER_DEGREES`] or more) in place, UVs
+/// interpolated along the old edge. The points inside stay where they are,
+/// except those the new outline leaves outside, and the whole is
+/// re-triangulated like [`contour_mesh`] does. A mesh with a hole or a pinched
+/// outline is refused.
+pub fn even_outline(g: &Geometry) -> Result<Geometry, ContourError> {
+    let n = g.positions.len();
+    let pos = |i: u32| {
+        let v = g.positions[i as usize];
+        [f64::from(v[0]), f64::from(v[1])]
+    };
+    let tris: Vec<[u32; 3]> = g
+        .indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .copied()
+        .filter(|t| t.iter().all(|&i| (i as usize) < n))
+        .collect();
+    let winding: f64 = tris
+        .iter()
+        .map(|t| cross(pos(t[0]), pos(t[1]), pos(t[2])))
+        .sum();
+    let directed: HashSet<(u32, u32)> = tris
+        .iter()
+        .flat_map(|t| [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])])
+        .collect();
+    let mut next: BTreeMap<u32, u32> = BTreeMap::new();
+    for &(a, b) in &directed {
+        if !directed.contains(&(b, a)) && next.insert(a, b).is_some() {
+            return Err(ContourError::CannotTriangulate);
+        }
+    }
+    let mut loops: Vec<Vec<u32>> = Vec::new();
+    let mut seen = HashSet::new();
+    for &start in next.keys() {
+        if seen.contains(&start) {
+            continue;
+        }
+        let mut ring = vec![start];
+        seen.insert(start);
+        let mut at = start;
+        loop {
+            let Some(&to) = next.get(&at) else {
+                return Err(ContourError::CannotTriangulate);
+            };
+            if to == start {
+                break;
+            }
+            if !seen.insert(to) {
+                return Err(ContourError::CannotTriangulate);
+            }
+            ring.push(to);
+            at = to;
+        }
+        loops.push(ring);
+    }
+    let mut rings: Vec<(Vec<P>, Vec<P>)> = Vec::new();
+    for ring in &loops {
+        let points: Vec<P> = ring.iter().map(|&i| pos(i)).collect();
+        if area(&points) * winding.signum() < 0.0 {
+            return Err(ContourError::CannotTriangulate);
+        }
+        let uvs = ring
+            .iter()
+            .map(|&i| {
+                let v = g.uvs[i as usize];
+                [f64::from(v[0]), f64::from(v[1])]
+            })
+            .collect();
+        rings.push((points, uvs));
+    }
+    if rings.is_empty() {
+        return Err(ContourError::CannotTriangulate);
+    }
+    let on_outline: HashSet<u32> = loops.iter().flatten().copied().collect();
+    let mut out = Geometry::default();
+    let mut used = vec![false; n];
+    for (points, uvs) in &rings {
+        let m = points.len();
+        let perimeter: f64 = (0..m)
+            .map(|i| {
+                (points[(i + 1) % m][0] - points[i][0]).hypot(points[(i + 1) % m][1] - points[i][1])
+            })
+            .sum();
+        let lerp = |v: &[P], (i, t): (usize, f64)| {
+            let (a, b) = (v[i], v[(i + 1) % m]);
+            [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]
+        };
+        let samples = even_samples(points, &corners(points), perimeter / m as f64);
+        let outline: Vec<P> = samples.iter().map(|&s| lerp(points, s)).collect();
+        let mut out_uvs: Vec<P> = samples.iter().map(|&s| lerp(uvs, s)).collect();
+        let mut inner = Vec::new();
+        for i in 0..n as u32 {
+            let q = pos(i);
+            if !on_outline.contains(&i)
+                && !used[i as usize]
+                && inside(points, q)
+                && inside(&outline, q)
+            {
+                used[i as usize] = true;
+                inner.push(g.positions[i as usize]);
+                let v = g.uvs[i as usize];
+                out_uvs.push([f64::from(v[0]), f64::from(v[1])]);
+            }
+        }
+        let outline: Vec<Point> = outline.iter().map(|&q| to_point(q)).collect();
+        let (positions, indices) = triangulate_polygon(&outline, &inner)?;
+        let base = out.positions.len() as u32;
+        out.positions.extend(positions);
+        out.uvs.extend(out_uvs.iter().map(|&uv| to_point(uv)));
+        for t in indices.as_chunks::<3>().0 {
+            let (b, c) = if winding < 0.0 {
+                (t[2], t[1])
+            } else {
+                (t[1], t[2])
+            };
+            out.indices.extend([base + t[0], base + b, base + c]);
+        }
+    }
+    Ok(out)
 }
 
 /// A new mesh for `original` from the alpha of its texture: one outline per
