@@ -72,7 +72,7 @@ impl From<SpaceError> for OpError {
     }
 }
 
-fn deformer_ref(model: &Model, name: &str) -> Option<DeformerRef> {
+pub fn deformer_ref(model: &Model, name: &str) -> Option<DeformerRef> {
     model
         .warps()
         .find(name)

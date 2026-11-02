@@ -178,10 +178,48 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
             glues.push(name.to_owned());
         }
     }
-    let mut commands: Vec<Command> = glues
-        .iter()
-        .map(|n| Command::RemoveGlue { name: n.clone() })
-        .collect();
+    // What hangs from a deformer that goes but stays itself is taken out from under
+    // it first, keeping where it is drawn: removing a deformer with children is
+    // otherwise refused.
+    let mut commands: Vec<Command> = Vec::new();
+    for &r in &deformers {
+        let stays = |t: &crate::deformer_ops::Target| match t {
+            crate::deformer_ops::Target::Mesh(n) => !meshes.contains(n),
+            crate::deformer_ops::Target::Deformer(n) => {
+                !crate::deformer_ops::deformer_ref(model, n).is_some_and(|d| deformers.contains(&d))
+            }
+        };
+        let children = model
+            .meshes()
+            .iter()
+            .filter(|(_, _, m)| m.parent == Some(r))
+            .map(|(_, n, _)| crate::deformer_ops::Target::Mesh(n.to_owned()))
+            .chain(
+                model
+                    .warps()
+                    .iter()
+                    .filter(|(_, _, d)| d.parent == Some(r))
+                    .map(|(_, n, _)| crate::deformer_ops::Target::Deformer(n.to_owned()))
+                    .chain(
+                        model
+                            .rotations()
+                            .iter()
+                            .filter(|(_, _, d)| d.parent == Some(r))
+                            .map(|(_, n, _)| crate::deformer_ops::Target::Deformer(n.to_owned())),
+                    ),
+            );
+        for child in children.filter(|c| stays(c)) {
+            if let Ok((command, _)) = crate::deformer_ops::set_parent(model, &child, None) {
+                commands.push(command);
+            }
+        }
+    }
+    let unparenting = commands.len();
+    commands.extend(
+        glues
+            .iter()
+            .map(|n| Command::RemoveGlue { name: n.clone() }),
+    );
     commands.extend(
         meshes
             .iter()
@@ -197,7 +235,8 @@ pub fn delete_plan(model: &Model, items: &[Selection]) -> DeletePlan {
             .map(|n| Command::RemovePart { name: n.clone() }),
     );
     DeletePlan {
-        count: commands.len(),
+        // The count is of what goes, not of the children set free.
+        count: commands.len() - unparenting,
         commands,
     }
 }
@@ -517,16 +556,21 @@ mod tests {
                 name: "Sleeve".into()
             }]
         );
-        // A deformer with children cannot go: the command fails and nothing changes.
+        // A deformer with children goes: they are taken out from under it first,
+        // as one undo step, and stay where they are drawn.
         let plan = delete_plan(d.model(), &[Selection::Warp("W".into())]);
+        assert_eq!(plan.count, 1, "the children set free are not counted");
         let steps = d.log().len();
-        assert!(
-            d.submit(Command::Batch {
-                commands: plan.commands
-            })
-            .is_err()
-        );
-        assert_eq!(d.log().len(), steps);
+        d.submit(Command::Batch {
+            commands: plan.commands,
+        })
+        .unwrap();
+        assert_eq!(d.log().len(), steps + 1);
+        assert!(d.model().warps().find("W").is_none());
+        assert!(d.model().validate().is_empty());
+        assert!(d.undo());
+        assert!(d.model().warps().find("W").is_some());
+        assert!(d.model().validate().is_empty());
         // A mesh used as a mask cannot go either.
         let plan = delete_plan(d.model(), &[Selection::Mesh("Skin".into())]);
         assert!(

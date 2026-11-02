@@ -596,16 +596,41 @@ impl Editor {
             tree::Out::Command(command) => {
                 self.submit(ctx, command);
             }
-            tree::Out::Reparent(target, parent) => {
-                let made = self.doc.as_ref().map(|d| {
-                    deformer_ops::set_parent(d.dispatcher.model(), &target, parent.as_deref())
-                });
-                match made {
-                    Some(Ok((command, label))) => {
+            tree::Out::Reparent(targets, parent) => {
+                let Some(doc) = &self.doc else { return };
+                let model = doc.dispatcher.model();
+                // One batch for all of them (one undo step). A target that is the new
+                // parent itself is left out; a loop is refused by the model.
+                let mut commands = Vec::new();
+                let mut label = String::new();
+                for target in targets.iter().filter(|t| {
+                    !matches!(t, deformer_ops::Target::Deformer(n) if Some(n.as_str()) == parent.as_deref())
+                }) {
+                    match deformer_ops::set_parent(model, target, parent.as_deref()) {
+                        Ok((command, l)) => {
+                            commands.push(command);
+                            label = l;
+                        }
+                        Err(e) => {
+                            self.toasts.push(ctx, Tone::Error, tr(ctx, e.key()));
+                            return;
+                        }
+                    }
+                }
+                match commands.len() {
+                    0 => {}
+                    1 => {
+                        let command = commands.remove(0);
                         self.submit_labeled(ctx, command, Some(label));
                     }
-                    Some(Err(e)) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
-                    None => {}
+                    n => {
+                        let to = parent.as_deref().unwrap_or("-");
+                        self.submit_labeled(
+                            ctx,
+                            tsukumoe_core::command::Command::Batch { commands },
+                            Some(format!("deformer_set_parent: {n} items -> {to}")),
+                        );
+                    }
                 }
             }
             tree::Out::Rename { kind, from, to } => {
@@ -2502,6 +2527,57 @@ mod tests {
         // D outside the mesh tool still picks the deformer tool.
         assert!(editor.run_action(&ctx, "mesh.retriangulate"));
         assert_eq!(editor.view.tool, Tool::Deformer);
+    }
+
+    #[test]
+    fn several_selected_meshes_get_a_parent_in_one_step_and_a_deformer_with_children_can_go() {
+        use crate::deformer_ops::Target;
+        use crate::view::Selection;
+        use tsukumoe_core::command::Command;
+        let mut editor = open_minimal();
+        let ctx = Context::default();
+        let tri = vec![[0.0, 0.0], [2.0, 0.0], [2.0, 3.0]];
+        let mut commands = vec![Command::AddPart {
+            name: "MP".into(),
+            parent: None,
+        }];
+        for name in ["MA", "MB"] {
+            commands.push(Command::AddMesh {
+                name: name.into(),
+                part: "MP".into(),
+                positions: tri.clone(),
+                uvs: vec![[0.0, 0.0]; 3],
+                indices: vec![0, 1, 2],
+            });
+        }
+        for command in commands {
+            assert!(editor.submit(&ctx, command));
+        }
+        // A warp around MA, then both meshes are put under it with one click.
+        editor.view.selection = Some(Selection::Mesh("MA".into()));
+        assert!(editor.run_action(&ctx, "deformer.create-warp"));
+        let steps = |e: &Editor| e.doc.as_ref().unwrap().dispatcher.log().len();
+        let base = steps(&editor);
+        editor.apply_tree_out(
+            &ctx,
+            tree::Out::Reparent(
+                vec![Target::Mesh("MA".into()), Target::Mesh("MB".into())],
+                Some("Warp".into()),
+            ),
+        );
+        assert_eq!(steps(&editor), base + 1, "one undo step for both");
+        let parent_of = |e: &Editor, n: &str| {
+            let m = e.doc.as_ref().unwrap().dispatcher.model();
+            m.meshes().get(m.meshes().find(n).unwrap()).unwrap().parent
+        };
+        assert!(parent_of(&editor, "MA").is_some() && parent_of(&editor, "MB").is_some());
+        // Deleting the warp frees the meshes instead of being refused.
+        let before = steps(&editor);
+        editor.delete_items(&ctx, &[Selection::Warp("Warp".into())]);
+        assert_eq!(steps(&editor), before + 1);
+        assert!(parent_of(&editor, "MA").is_none() && parent_of(&editor, "MB").is_none());
+        let model = editor.doc.as_ref().unwrap().dispatcher.model();
+        assert!(model.warps().find("Warp").is_none() && model.validate().is_empty());
     }
 
     #[test]

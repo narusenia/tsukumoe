@@ -28,7 +28,7 @@ pub const INDENT: f32 = 14.0;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Out {
     Command(Command),
-    Reparent(Target, Option<String>),
+    Reparent(Vec<Target>, Option<String>),
     /// Rename an element; an empty or unchanged name is dropped by the panel.
     Rename {
         kind: Kind,
@@ -45,6 +45,18 @@ pub enum Out {
     SetPart(Selection, Option<String>),
     /// A mirror paste: the op, or a translation key for why it cannot be made.
     Mirror(Result<crate::mesh_tool::Op, &'static str>),
+}
+
+/// The meshes and deformers among `items`, as command targets.
+pub fn targets_of(items: &[Selection]) -> Vec<Target> {
+    items
+        .iter()
+        .filter_map(|s| match s {
+            Selection::Mesh(n) => Some(Target::Mesh(n.clone())),
+            Selection::Warp(n) | Selection::Rotation(n) => Some(Target::Deformer(n.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The element a mesh or deformer row stands for.
@@ -544,14 +556,16 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
             {
                 match row.kind {
                     Kind::Warp | Kind::Rotation => {
-                        let target = match &*dragged {
-                            Selection::Mesh(n) => Some(Target::Mesh(n.clone())),
-                            Selection::Warp(n) | Selection::Rotation(n) => {
-                                Some(Target::Deformer(n.clone()))
-                            }
-                            _ => None,
+                        // Dragging a row that is part of the selection takes the whole selection.
+                        let items = if view.is_selected(&dragged) {
+                            view.selected()
+                        } else {
+                            vec![(*dragged).clone()]
                         };
-                        outs.extend(target.map(|t| Out::Reparent(t, Some(row.name.clone()))));
+                        let targets = targets_of(&items);
+                        if !targets.is_empty() {
+                            outs.push(Out::Reparent(targets, Some(row.name.clone())));
+                        }
                     }
                     _ => outs.push(Out::SetPart((*dragged).clone(), Some(row.name.clone()))),
                 }
@@ -792,7 +806,7 @@ pub fn row_menu(
         ))
         .clicked()
     {
-        outs.push(Out::Delete(targets));
+        outs.push(Out::Delete(targets.clone()));
         ui.close();
     }
     if let Some(element) = mirror_element(row) {
@@ -809,10 +823,19 @@ pub fn row_menu(
     }
     ui.separator();
     if let Some(target) = target {
+        // The parent goes to every selected mesh and deformer when this row is one of them.
+        let movers = {
+            let all = targets_of(&targets);
+            if all.is_empty() {
+                vec![target.clone()]
+            } else {
+                all
+            }
+        };
         ui.menu_button(tr(&ctx, "tree-set-parent"), |ui| {
             for parent in lists.deformers.iter().filter(|d| **d != row.name) {
                 if ui.button(parent).clicked() {
-                    outs.push(Out::Reparent(target.clone(), Some(parent.clone())));
+                    outs.push(Out::Reparent(movers.clone(), Some(parent.clone())));
                     ui.close();
                 }
             }
@@ -822,7 +845,7 @@ pub fn row_menu(
             egui::Button::new(tr(&ctx, "tree-unparent")),
         );
         if unparent.clicked() {
-            outs.push(Out::Reparent(target.clone(), None));
+            outs.push(Out::Reparent(movers.clone(), None));
             ui.close();
         }
     }
