@@ -8,11 +8,12 @@
 //! in view are built (`show_rows`).
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
-use tsukumoe_core::command::Command;
+use tsukumoe_core::command::{Command, ElementRef};
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{Icon, Theme, Variant, hint, icon_button, text_input, tr};
 
 use crate::deformer_ops::Target;
+use crate::mirror;
 use crate::tree_model::{
     self, Kind, Panel, Renaming, Row, Sort, accepted, range_selection, scroll_offset_for,
     scroll_row,
@@ -42,6 +43,8 @@ pub enum Out {
     Reset(Vec<Selection>),
     /// Move the element to a part (a part: to a parent part, or none).
     SetPart(Selection, Option<String>),
+    /// A mirror paste: the op, or a translation key for why it cannot be made.
+    Mirror(Result<crate::mesh_tool::Op, &'static str>),
 }
 
 /// The element a mesh or deformer row stands for.
@@ -636,6 +639,19 @@ struct Lists {
 
 /// What a row's menu (right click, or the "..." button) offers. It acts on
 /// the whole selection when the row is part of it, else on the row alone.
+/// The element a row stands for, for mirror copy (a part has none).
+fn mirror_element(row: &Row) -> Option<ElementRef> {
+    match row.kind {
+        Kind::Mesh => Some(ElementRef::Mesh {
+            name: row.name.clone(),
+        }),
+        Kind::Warp | Kind::Rotation => Some(ElementRef::Deformer {
+            name: row.name.clone(),
+        }),
+        _ => None,
+    }
+}
+
 fn row_menu(
     ui: &mut Ui,
     model: &Model,
@@ -670,6 +686,18 @@ fn row_menu(
     if ui.button(tr(&ctx, "tree-delete")).clicked() {
         outs.push(Out::Delete(targets));
         ui.close();
+    }
+    if let Some(element) = mirror_element(row) {
+        if ui.button(tr(&ctx, "mirror-source")).clicked() {
+            if let Err(key) = mirror::set_source(model, view, &element) {
+                outs.push(Out::Mirror(Err(key)));
+            }
+            ui.close();
+        }
+        if ui.button(tr(&ctx, "mirror-paste")).clicked() {
+            outs.push(Out::Mirror(mirror::paste(model, view, &element)));
+            ui.close();
+        }
     }
     ui.separator();
     if let Some(target) = target {

@@ -528,6 +528,10 @@ impl Editor {
                     self.toasts.push(ctx, Tone::Neutral, text);
                 }
             }
+            tree::Out::Mirror(Ok((command, label))) => {
+                self.submit_labeled(ctx, command, Some(label));
+            }
+            tree::Out::Mirror(Err(key)) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
             tree::Out::Reset(items) => self.reset_deformers(ctx, &items),
             tree::Out::Delete(items) => {
                 let Some(doc) = &self.doc else { return };

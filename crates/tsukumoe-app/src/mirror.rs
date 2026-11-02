@@ -17,6 +17,7 @@ use tsukumoe_core::rig::DeformerRef;
 
 use crate::keyed;
 use crate::mesh_tool::Op;
+use crate::view::ViewState;
 
 /// Vertices pair when the nearest mirrored one is within this fraction of the
 /// diagonal of the target mesh (in the drawing space).
@@ -141,6 +142,28 @@ pub fn model_center(model: &Model) -> f32 {
 /// The mirror line: what was typed, else the centre of the model.
 pub fn center(model: &Model, typed: &str) -> f32 {
     typed.trim().parse().unwrap_or_else(|_| model_center(model))
+}
+
+/// Remembers the keyform of `element` under the sliders as the mirror source.
+pub fn set_source(
+    model: &Model,
+    view: &mut ViewState,
+    element: &ElementRef,
+) -> Result<(), &'static str> {
+    let at = keyed::values(model, view);
+    let key = key_here(model, element, &at).ok_or("param-err-not-on-key")?;
+    view.mirror_source = Some((element.clone(), key));
+    Ok(())
+}
+
+/// The op that pastes the mirror source, mirrored, onto the keyform of
+/// `element` under the sliders; the error is a translation key.
+pub fn paste(model: &Model, view: &ViewState, element: &ElementRef) -> Result<Op, &'static str> {
+    let (source, from) = view.mirror_source.as_ref().ok_or("mirror-err-no-source")?;
+    let at = keyed::values(model, view);
+    let to = key_here(model, element, &at).ok_or("param-err-not-on-key")?;
+    let center = center(model, &view.mirror_center);
+    mirror_copy(model, source, from, element, &to, center).map_err(|e| e.key())
 }
 
 /// The command that gives the keyform of `target` at `to` the mirror image of

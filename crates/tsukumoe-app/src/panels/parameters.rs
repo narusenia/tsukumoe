@@ -319,26 +319,16 @@ fn mirror_row(
 ) {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    let at = crate::keyed::values(model, view);
-    let here = mirror::key_here(model, element, &at);
     ui.horizontal(|ui| {
-        if button(ui, &t("mirror-source"), Variant::Secondary).clicked() {
-            match &here {
-                Some(key) => view.mirror_source = Some((element.clone(), key.clone())),
-                None => outs.push(Out::Error("param-err-not-on-key")),
-            }
+        if button(ui, &t("mirror-source"), Variant::Secondary).clicked()
+            && let Err(key) = mirror::set_source(model, view, element)
+        {
+            outs.push(Out::Error(key));
         }
         if button(ui, &t("mirror-paste"), Variant::Secondary).clicked() {
-            outs.push(match (&view.mirror_source, &here) {
-                (None, _) => Out::Error("mirror-err-no-source"),
-                (_, None) => Out::Error("param-err-not-on-key"),
-                (Some((source, from)), Some(to)) => {
-                    let center = mirror::center(model, &view.mirror_center);
-                    match mirror::mirror_copy(model, source, from, element, to, center) {
-                        Ok(op) => Out::Op(op),
-                        Err(e) => Out::Error(e.key()),
-                    }
-                }
+            outs.push(match mirror::paste(model, view, element) {
+                Ok(op) => Out::Op(op),
+                Err(key) => Out::Error(key),
             });
         }
     });
