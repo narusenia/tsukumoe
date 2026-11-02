@@ -16,6 +16,7 @@ pub mod editor;
 pub mod keyed;
 pub mod menu;
 pub mod mesh_tool;
+pub mod mirror;
 #[cfg(target_os = "macos")]
 mod native;
 pub mod panels;
