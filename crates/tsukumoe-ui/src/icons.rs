@@ -85,6 +85,8 @@ icons! {
     Sparkles => "sparkles",
     MousePointer => "mouse-pointer-2",
     PenLine => "pen-line",
+    Link => "link",
+    Unlink => "unlink",
 }
 
 impl Icon {

@@ -30,6 +30,10 @@ pub fn names(model: &Model, filter: &str) -> Vec<String> {
 }
 
 const LABEL_WIDTH: f32 = 120.0;
+/// The width of the number field next to a slider or a pad.
+const NUMBER_WIDTH: f32 = 64.0;
+/// The width of the link button at the start of a row.
+const LINK_WIDTH: f32 = 24.0;
 /// A slider snaps to a key within this many points.
 const SNAP_POINTS: f32 = 6.0;
 
@@ -117,7 +121,9 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                 let keys = param_ops::primary(model, &name, &selection).map(|(_, k)| k);
                 let mut value = view.param(&name, p);
                 let mut changed = false;
-                ui.horizontal(|ui| {
+                let bg = ui.painter().add(egui::Shape::Noop);
+                let row = ui.horizontal(|ui| {
+                    link_button(ui, model, view, &name, &mut outs);
                     ui.allocate_ui_with_layout(
                         Vec2::new(LABEL_WIDTH, m.control),
                         egui::Layout::left_to_right(egui::Align::Center),
@@ -145,6 +151,12 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     changed |=
                         number(ui, &mut value, p.min..=p.max, speed.max(1e-4), &name).changed();
                 });
+                highlight(
+                    ui,
+                    bg,
+                    row.response.rect,
+                    view.param_focus.as_deref() == Some(&name),
+                );
                 if changed {
                     view.set_param(&name, p, value);
                 }
@@ -172,6 +184,54 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         }
     }
     outs
+}
+
+/// A tint behind the row of the parameter the keys panel works on.
+fn highlight(ui: &Ui, bg: egui::layers::ShapeIdx, rect: egui::Rect, on: bool) {
+    if !on {
+        return;
+    }
+    let theme = tsukumoe_ui::Theme::get(ui.ctx());
+    ui.painter().set(
+        bg,
+        egui::epaint::RectShape::filled(
+            rect.expand2(Vec2::new(3.0, 1.0)),
+            3.0,
+            theme.colors.accent.gamma_multiply(0.22),
+        ),
+    );
+}
+
+/// The link button at the start of a row: for a free parameter it opens a
+/// list of the others to link with; for a linked one it unlinks the pair.
+fn link_button(ui: &mut Ui, model: &Model, view: &ViewState, name: &str, outs: &mut Vec<Out>) {
+    let ctx = ui.ctx().clone();
+    let linked = view.param_links.iter().any(|(a, b)| a == name || b == name);
+    if linked {
+        if icon_button(ui, Icon::Unlink, &tr(&ctx, "param-unlink"), Variant::Ghost).clicked() {
+            let mut links = view.param_links.clone();
+            links.retain(|(a, b)| a != name && b != name);
+            outs.push(Out::Links(links));
+        }
+        return;
+    }
+    let r = icon_button(ui, Icon::Link, &tr(&ctx, "param-link"), Variant::Ghost);
+    egui::Popup::from_toggle_button_response(&r).show(|ui| {
+        let free: Vec<String> = model
+            .parameters()
+            .iter()
+            .map(|(_, n, _)| n.to_owned())
+            .filter(|n| n != name && !view.param_links.iter().any(|(a, b)| a == n || b == n))
+            .collect();
+        for other in free {
+            if ui.button(&other).clicked() {
+                let mut links = view.param_links.clone();
+                links.push((name.to_owned(), other));
+                outs.push(Out::Links(links));
+                ui.close();
+            }
+        }
+    });
 }
 
 /// The parameter's name: a click focuses it (the keys panel works on it), a
@@ -270,18 +330,39 @@ fn link_row(
     let (mut va, mut vb) = (view.param(a, pa), view.param(b, pb));
     let mut changed = false;
     let shift = ui.input(|i| i.modifiers.shift);
-    ui.horizontal(|ui| {
+    let row = Vec2::new(LABEL_WIDTH, m.control);
+    let gap = ui.spacing().item_spacing.y;
+    let focused = [a, b].contains(&view.param_focus.as_deref().unwrap_or_default());
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let whole = ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(LINK_WIDTH, 3.0 * m.control + 2.0 * gap),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                ui.add_space(m.control + gap);
+                link_button(ui, model, view, a, outs);
+            },
+        );
+        // The names and the number fields sit at the top and the bottom of the
+        // pad, each as high as a slider row.
         ui.vertical(|ui| {
-            ui.set_width(LABEL_WIDTH);
-            name_label(ui, model, view, a, outs);
-            name_label(ui, model, view, b, outs);
+            for (i, name) in [a, b].into_iter().enumerate() {
+                if i == 1 {
+                    ui.add_space(m.control);
+                }
+                ui.allocate_ui_with_layout(
+                    row,
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| name_label(ui, model, view, name, outs),
+                );
+            }
         });
-        let width = (ui.available_width() - 64.0).max(60.0);
+        let width = (ui.available_width() - NUMBER_WIDTH - ui.spacing().item_spacing.x).max(60.0);
         let (rect, response) = ui.allocate_exact_size(
-            Vec2::new(width, 4.0 * m.control),
+            Vec2::new(width, 3.0 * m.control + 2.0 * gap),
             egui::Sense::click_and_drag(),
         );
-        let inner = rect.shrink(8.0);
+        let inner = rect.shrink2(Vec2::new(8.0, m.control / 2.0));
         let to_screen = |x: f32, y: f32| {
             egui::pos2(
                 inner.left() + (x - pa.min) / (pa.max - pa.min).max(1e-6) * inner.width(),
@@ -302,12 +383,11 @@ fn link_row(
                 + ((inner.bottom() - pointer.y) / inner.height()).clamp(0.0, 1.0)
                     * (pb.max - pb.min);
             if !shift
-                && let Some(&(pos, x, y)) = spots
+                && let Some(&(_, x, y)) = spots
                     .iter()
                     .filter(|(pos, ..)| pos.distance(pointer) <= SNAP_POINTS * 1.5)
                     .min_by(|s, t| s.0.distance(pointer).total_cmp(&t.0.distance(pointer)))
             {
-                let _ = pos;
                 (va, vb) = (x, y);
             }
             changed = true;
@@ -316,8 +396,7 @@ fn link_row(
         let painter = ui.painter_at(rect);
         let dotted = egui::Stroke::new(1.0, theme.colors.border);
         for &x in &xkeys {
-            let top = to_screen(x, pb.max);
-            painter.line_segment([top, to_screen(x, pb.min)], dotted);
+            painter.line_segment([to_screen(x, pb.max), to_screen(x, pb.min)], dotted);
         }
         for &y in &ykeys {
             painter.line_segment([to_screen(pa.min, y), to_screen(pa.max, y)], dotted);
@@ -330,17 +409,23 @@ fn link_row(
                 egui::Stroke::new(1.0, theme.colors.text_muted),
             );
         }
-        painter.circle_filled(
-            to_screen(va.clamp(pa.min, pa.max), vb.clamp(pb.min, pb.max)),
-            4.5,
-            theme.colors.accent,
-        );
+        let now = to_screen(va.clamp(pa.min, pa.max), vb.clamp(pb.min, pb.max));
+        painter.circle_filled(now, 4.5, theme.colors.accent);
         ui.vertical(|ui| {
             let speed = |p: &Parameter| (f64::from(p.max - p.min) / 200.0).max(1e-4);
-            changed |= number(ui, &mut va, pa.min..=pa.max, speed(pa), a).changed();
-            changed |= number(ui, &mut vb, pb.min..=pb.max, speed(pb), b).changed();
+            for (i, (v, p, name)) in [(&mut va, pa, a), (&mut vb, pb, b)].into_iter().enumerate() {
+                if i == 1 {
+                    ui.add_space(m.control);
+                }
+                ui.allocate_ui_with_layout(
+                    Vec2::new(NUMBER_WIDTH, m.control),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| changed |= number(ui, v, p.min..=p.max, speed(p), name).changed(),
+                );
+            }
         });
     });
+    highlight(ui, bg, whole.response.rect, focused);
     if changed {
         view.set_param(a, pa, va);
         view.set_param(b, pb, vb);
