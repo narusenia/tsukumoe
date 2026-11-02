@@ -89,6 +89,8 @@ icons! {
     PenLine => "pen-line",
     Link => "link",
     Unlink => "unlink",
+    BoxSelect => "square-dashed-mouse-pointer",
+    Mirror => "mirror-rectangular",
 }
 
 impl Icon {
