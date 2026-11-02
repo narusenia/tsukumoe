@@ -123,6 +123,16 @@ fn action(
     let radius = m.radius;
     let painter = ui.painter();
     painter.rect_filled(rect, radius, bg);
+    // The resting fill of a secondary button is close to its surface; the
+    // outline is what makes it read as a button.
+    if variant == Variant::Secondary && enabled {
+        painter.rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.0, t.colors.border_strong),
+            StrokeKind::Inside,
+        );
+    }
     if response.has_focus() {
         painter.rect_stroke(
             rect.expand(1.0),
