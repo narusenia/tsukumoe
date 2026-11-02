@@ -41,6 +41,120 @@ fn commit_field(
     None
 }
 
+/// A row of three number fields for an RGB color (0 to 1); the new color once an edit ends.
+fn color_row(
+    ui: &mut Ui,
+    ctx: &egui::Context,
+    mesh: &str,
+    key: &str,
+    current: [f32; 3],
+) -> Option<[f32; 3]> {
+    let mut out = None;
+    ui.horizontal(|ui| {
+        label(ui, tr(ctx, key));
+        for (i, channel) in ["R", "G", "B"].into_iter().enumerate() {
+            let name = format!("{} {channel}", tr(ctx, key));
+            if let Some(v) = commit_field(
+                ui,
+                &format!("{mesh}/{key}/{i}"),
+                current[i],
+                0.0..=1.0,
+                0.005,
+                &name,
+            ) {
+                let mut rgb = current;
+                rgb[i] = v;
+                out = Some(rgb);
+            }
+        }
+    });
+    out
+}
+
+/// The buttons that move a mesh among the meshes of its part.
+fn order_buttons(
+    ui: &mut Ui,
+    ctx: &egui::Context,
+    model: &Model,
+    mesh: &str,
+    at: &dyn Fn(ParameterId) -> f32,
+) -> Option<Command> {
+    use crate::draw_style::{Place, reorder};
+    let mut out = None;
+    ui.horizontal(|ui| {
+        for (place, key) in [
+            (Place::Front, "inspector-order-front"),
+            (Place::Forward, "inspector-order-forward"),
+            (Place::Backward, "inspector-order-backward"),
+            (Place::Back, "inspector-order-back"),
+        ] {
+            let movable = reorder(model, mesh, place, at);
+            ui.add_enabled_ui(movable.is_some(), |ui| {
+                if tsukumoe_ui::button(ui, &tr(ctx, key), tsukumoe_ui::Variant::Ghost).clicked() {
+                    out = movable;
+                }
+            });
+        }
+    });
+    out
+}
+
+/// The masks of a mesh: each with a button to take it off, a menu to add
+/// another, and the invert switch. Every change is one `SetMeshMasks`.
+fn mask_rows(ui: &mut Ui, ctx: &egui::Context, model: &Model, mesh: &str) -> Option<Command> {
+    let m = model.meshes().get(model.meshes().find(mesh)?)?;
+    let names: Vec<String> = m
+        .masks
+        .iter()
+        .filter_map(|&id| model.meshes().name(id).map(str::to_owned))
+        .collect();
+    let set = |masks: Vec<String>, inverted: bool| Command::SetMeshMasks {
+        name: mesh.to_owned(),
+        masks,
+        inverted,
+    };
+    let mut out = None;
+    section_header(ui, &tr(ctx, "inspector-masks"));
+    for (i, mask) in names.iter().enumerate() {
+        ui.horizontal(|ui| {
+            label(ui, mask.clone());
+            if tsukumoe_ui::icon_button(
+                ui,
+                tsukumoe_ui::Icon::Close,
+                &tr(ctx, "inspector-mask-remove"),
+                tsukumoe_ui::Variant::Ghost,
+            )
+            .clicked()
+            {
+                let mut rest = names.clone();
+                rest.remove(i);
+                out = Some(set(rest, m.mask_inverted));
+            }
+        });
+    }
+    let candidates = crate::draw_style::mask_candidates(model, mesh);
+    if !candidates.is_empty() {
+        egui::ComboBox::from_id_salt(("mask-add", mesh))
+            .selected_text(tr(ctx, "inspector-mask-add"))
+            .show_ui(ui, |ui| {
+                for c in &candidates {
+                    if ui.selectable_label(false, c).clicked() {
+                        let mut all = names.clone();
+                        all.push(c.clone());
+                        out = Some(set(all, m.mask_inverted));
+                    }
+                }
+            });
+    }
+    if !names.is_empty() {
+        let mut inverted = m.mask_inverted;
+        if checkbox(ui, &mut inverted, &tr(ctx, "inspector-mask-inverted")).changed() {
+            out = Some(set(names, inverted));
+        }
+    }
+    out
+}
+
 /// The icon button that puts a deformer's base shape back to its initial state.
 fn reset_button(ui: &mut Ui, ctx: &egui::Context) -> bool {
     tsukumoe_ui::icon_button(
@@ -240,6 +354,31 @@ pub fn show_at(
                     });
                 }
             });
+            if let Some(c) = order_buttons(ui, &ctx, model, name, at) {
+                command = Some(c);
+            }
+            let (multiply, screen) = crate::keyed::mesh_colors(model, name, at)
+                .unwrap_or((mesh.multiply_color, mesh.screen_color));
+            for (key, current, multiply_row) in [
+                ("inspector-multiply-color", multiply, true),
+                ("inspector-screen-color", screen, false),
+            ] {
+                if let Some(rgb) = color_row(ui, &ctx, name, key, current) {
+                    let (multiply_color, screen_color) = if multiply_row {
+                        (rgb, screen)
+                    } else {
+                        (multiply, rgb)
+                    };
+                    command = Some(Command::SetMeshColors {
+                        name: name.clone(),
+                        multiply_color,
+                        screen_color,
+                    });
+                }
+            }
+            if let Some(c) = mask_rows(ui, &ctx, model, name) {
+                command = Some(c);
+            }
         }
         Selection::Warp(name) => {
             let w = model
