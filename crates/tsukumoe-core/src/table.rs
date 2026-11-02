@@ -24,6 +24,10 @@ pub enum InsertError {
 pub struct Table<T> {
     arena: Arena<Entry<T>>,
     names: HashMap<String, Id<T>>,
+    /// Iteration order: insertion order until `move_to` changes it.
+    order: Vec<Id<T>>,
+    /// Where a removed element stood, so that undo puts it back there.
+    removed_at: HashMap<Id<T>, usize>,
 }
 
 impl<T> Default for Table<T> {
@@ -31,6 +35,8 @@ impl<T> Default for Table<T> {
         Self {
             arena: Arena::new(),
             names: HashMap::new(),
+            order: Vec::new(),
+            removed_at: HashMap::new(),
         }
     }
 }
@@ -56,6 +62,7 @@ impl<T> Table<T> {
             })
             .cast();
         self.names.insert(name, id);
+        self.order.push(id);
         Ok(id)
     }
 
@@ -70,6 +77,10 @@ impl<T> Table<T> {
             self.names.remove(&old.name);
         }
         self.names.insert(name.to_owned(), id);
+        if !self.order.contains(&id) {
+            let at = self.removed_at.remove(&id).unwrap_or(usize::MAX);
+            self.order.insert(at.min(self.order.len()), id);
+        }
     }
 
     pub fn get(&self, id: Id<T>) -> Option<&T> {
@@ -91,7 +102,27 @@ impl<T> Table<T> {
     pub fn remove(&mut self, id: Id<T>) -> Option<T> {
         let entry = self.arena.remove(id.cast())?;
         self.names.remove(&entry.name);
+        if let Some(at) = self.order.iter().position(|&o| o == id) {
+            self.order.remove(at);
+            self.removed_at.insert(id, at);
+        }
         Some(entry.value)
+    }
+
+    /// Moves `id` to position `to` (clamped) in the iteration order. `false`
+    /// if `id` is not in the table.
+    pub fn move_to(&mut self, id: Id<T>, to: usize) -> bool {
+        let Some(at) = self.order.iter().position(|&o| o == id) else {
+            return false;
+        };
+        self.order.remove(at);
+        self.order.insert(to.min(self.order.len()), id);
+        true
+    }
+
+    /// The position of `id` in the iteration order.
+    pub fn position(&self, id: Id<T>) -> Option<usize> {
+        self.order.iter().position(|&o| o == id)
     }
 
     pub fn contains(&self, id: Id<T>) -> bool {
@@ -107,9 +138,10 @@ impl<T> Table<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Id<T>, &str, &T)> {
-        self.arena
-            .iter()
-            .map(|(id, entry)| (id.cast(), entry.name.as_str(), &entry.value))
+        self.order.iter().filter_map(|&id| {
+            let entry = self.arena.get(id.cast())?;
+            Some((id, entry.name.as_str(), &entry.value))
+        })
     }
 }
 
@@ -164,5 +196,29 @@ mod tests {
         assert_ne!(old, new);
         assert_eq!(table.get(old), None);
         assert_eq!(table.name(old), None);
+    }
+
+    #[test]
+    fn move_to_reorders_iteration() {
+        let mut table = Table::new();
+        let a = table.insert("a", 1).unwrap();
+        table.insert("b", 2).unwrap();
+        table.insert("c", 3).unwrap();
+        assert!(table.move_to(a, 2));
+        let names: Vec<_> = table.iter().map(|(_, n, _)| n).collect();
+        assert_eq!(names, ["b", "c", "a"]);
+        assert_eq!(table.position(a), Some(2));
+    }
+
+    #[test]
+    fn put_after_remove_returns_to_the_old_position() {
+        let mut table = Table::new();
+        table.insert("a", 1).unwrap();
+        let b = table.insert("b", 2).unwrap();
+        table.insert("c", 3).unwrap();
+        let v = table.remove(b).unwrap();
+        table.put(b, "b", v);
+        let names: Vec<_> = table.iter().map(|(_, n, _)| n).collect();
+        assert_eq!(names, ["a", "b", "c"]);
     }
 }
