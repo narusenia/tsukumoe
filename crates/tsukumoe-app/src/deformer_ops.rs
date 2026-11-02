@@ -347,6 +347,10 @@ pub fn move_axis(model: &Model, name: &str, origin: Point) -> Result<Op, OpError
             name: child.to_owned(),
             points: keep(&d.base_points)?,
         });
+        // Its points moved into the new axes: the remembered grid is in the old ones.
+        commands.push(Command::ClearWarpRestPoints {
+            name: child.to_owned(),
+        });
     }
     for (_, child, d) in model
         .rotations()
@@ -392,8 +396,9 @@ pub fn previews_of(command: &Command) -> Vec<crate::scene::Preview> {
 }
 
 /// Puts the base shape of the deformers in `items` back to its initial state:
-/// a warp's grid becomes the evenly spaced grid of its own bounding box (the
-/// cell counts stay), a rotation goes back to angle 0, scale 1 and no
+/// a warp's grid becomes the grid it was made with (or, if that is not
+/// remembered, the evenly spaced grid of its own bounding box; the cell
+/// counts stay), a rotation goes back to angle 0, scale 1 and no
 /// reflection (its origin stays). Deformers already so are left out; if all
 /// are, `NoChange`. One `Batch`, so one undo step; a deformer with keyforms
 /// makes the whole batch fail when applied, and nothing changes.
@@ -408,16 +413,23 @@ pub fn reset(model: &Model, items: &[Selection]) -> Result<Op, OpError> {
                     .find(name)
                     .ok_or_else(|| OpError::Missing(name.clone()))?;
                 let w = model.warps().get(id).expect("found above");
-                let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-                for p in &w.base_points {
-                    b = [
-                        b[0].min(p[0]),
-                        b[1].min(p[1]),
-                        b[2].max(p[0]),
-                        b[3].max(p[1]),
-                    ];
-                }
-                let grid = regular_grid(b, w.rows, w.columns);
+                // The grid as it was made, if it is remembered; else an even
+                // grid over the box of the points as they are now.
+                let grid = match &w.rest_points {
+                    Some(rest) if rest.len() == w.base_points.len() => rest.clone(),
+                    _ => {
+                        let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                        for p in &w.base_points {
+                            b = [
+                                b[0].min(p[0]),
+                                b[1].min(p[1]),
+                                b[2].max(p[0]),
+                                b[3].max(p[1]),
+                            ];
+                        }
+                        regular_grid(b, w.rows, w.columns)
+                    }
+                };
                 let same = grid.len() == w.base_points.len()
                     && grid
                         .iter()
@@ -808,8 +820,12 @@ mod tests {
     }
 
     #[test]
-    fn resetting_a_warp_makes_its_grid_even_over_its_own_box_and_one_undo_brings_the_shape_back() {
+    fn without_a_remembered_grid_a_reset_is_even_over_the_box_and_one_undo_brings_the_shape_back() {
         let mut m = bent_warp_model();
+        m.apply(Command::ClearWarpRestPoints {
+            name: "Warp".into(),
+        })
+        .unwrap();
         let id = m.warps().find("Warp").unwrap();
         let bent = m.warps().get(id).unwrap().base_points.clone();
         let box_of = |p: &[Point]| {
@@ -845,6 +861,76 @@ mod tests {
             reset(&m, &[Selection::Warp("Warp".into())]),
             Err(OpError::NoChange)
         );
+    }
+
+    #[test]
+    fn a_reset_goes_back_to_the_grid_it_was_made_with_and_the_child_looks_as_made() {
+        let mut m = built(vec![part(), mesh("Skin", 1.0)]);
+        let (c, _) = create_warp(&m, &[mesh_target("Skin")], 2, 3).unwrap();
+        m.apply(c).unwrap();
+        let id = m.warps().find("Warp").unwrap();
+        let made = m.warps().get(id).unwrap().base_points.clone();
+        let made_drawn = drawn(&m);
+        assert_eq!(m.warps().get(id).unwrap().rest_points.as_ref(), Some(&made));
+        // Thin the grid the way a proportional drag does: the points near one
+        // side follow, so the box is narrower and the aspect changes.
+        let mut thin = made.clone();
+        for p in &mut thin {
+            let k = ((p[0] - made[0][0]) / (made[3][0] - made[0][0])).clamp(0.0, 1.0);
+            p[0] -= 0.4 * k;
+            p[1] -= 0.1 * k;
+        }
+        m.apply(Command::SetWarpBasePoints {
+            name: "Warp".into(),
+            points: thin.clone(),
+        })
+        .unwrap();
+        // Editing the points keeps the remembered grid.
+        assert_eq!(m.warps().get(id).unwrap().rest_points.as_ref(), Some(&made));
+        assert_ne!(drawn(&m), made_drawn);
+        let (command, _) = reset(&m, &[Selection::Warp("Warp".into())]).unwrap();
+        m.apply(command).unwrap();
+        assert_eq!(m.warps().get(id).unwrap().base_points, made);
+        same(&drawn(&m), &made_drawn);
+        // Again: nothing to do. One undo brings the thin grid back, with the memory.
+        assert_eq!(
+            reset(&m, &[Selection::Warp("Warp".into())]),
+            Err(OpError::NoChange)
+        );
+        assert!(m.undo());
+        assert_eq!(m.warps().get(id).unwrap().base_points, thin);
+        assert_eq!(m.warps().get(id).unwrap().rest_points.as_ref(), Some(&made));
+    }
+
+    #[test]
+    fn a_new_parent_or_a_moved_axis_drops_the_remembered_grid_and_undo_brings_it_back() {
+        // Re-parenting the warp.
+        let mut m = built(vec![part(), mesh("Skin", 1.0)]);
+        let (c, _) = create_warp(&m, &[mesh_target("Skin")], 2, 2).unwrap();
+        m.apply(c).unwrap();
+        let (c, _) = create_rotation(&m, &[Target::Deformer("Warp".into())]).unwrap();
+        m.apply(c).unwrap();
+        let id = m.warps().find("Warp").unwrap();
+        // The rotation was made around the warp: the warp went under it, so the memory is gone.
+        assert!(m.warps().get(id).unwrap().rest_points.is_none());
+        assert!(m.undo());
+        assert!(m.warps().get(id).unwrap().rest_points.is_some());
+        // Moving the axis of a rotation that holds a warp.
+        let mut m = axis_model(false);
+        let id = m.warps().find("ChildWarp").unwrap();
+        assert!(m.warps().get(id).unwrap().rest_points.is_some());
+        let (command, _) = move_axis(&m, "Axis", [7.0, 2.5]).unwrap();
+        m.apply(command).unwrap();
+        assert!(m.warps().get(id).unwrap().rest_points.is_none());
+        assert!(m.undo());
+        assert!(m.warps().get(id).unwrap().rest_points.is_some());
+        // With no memory a reset still has the old meaning (an even grid over the box).
+        let (command, _) = move_axis(&m, "Axis", [7.0, 2.5]).unwrap();
+        m.apply(command).unwrap();
+        assert!(matches!(
+            reset(&m, &[Selection::Warp("ChildWarp".into())]),
+            Ok(_) | Err(OpError::NoChange)
+        ));
     }
 
     #[test]
