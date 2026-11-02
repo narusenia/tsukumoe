@@ -144,11 +144,13 @@ pub fn paint(
     }
 }
 
-/// The options box of the deformer tool: rows and columns of the warp that
-/// `deformer.create-warp` makes. The values live in the tool, not in the model.
-pub fn options(ui: &mut egui::Ui, tool: &mut DeformerTool) {
+/// The flyout of the deformer tool: rows and columns of the warp, and the
+/// buttons that make a warp or a rotation deformer. Returns the action
+/// clicked. The values live in the tool, not in the model.
+pub fn options(ui: &mut egui::Ui, tool: &mut DeformerTool) -> Option<&'static str> {
     let ctx = ui.ctx().clone();
     let t = |key: &str| tsukumoe_ui::tr(&ctx, key);
+    let mut chosen = None;
     super::overlay::boxed(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label(t("deformer-warp-grid"));
@@ -159,5 +161,20 @@ pub fn options(ui: &mut egui::Ui, tool: &mut DeformerTool) {
             ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
                 .accessible_name(t("deformer-warp-columns"));
         });
+        ui.horizontal(|ui| {
+            for (key, action) in [
+                ("deformer-make-warp", "deformer.create-warp"),
+                ("deformer-make-rotation", "deformer.create-rotation"),
+            ] {
+                let hint = t(&crate::actions::label_key(action));
+                if tsukumoe_ui::button(ui, &t(key), tsukumoe_ui::Variant::Secondary)
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    chosen = Some(action);
+                }
+            }
+        });
     });
+    chosen
 }

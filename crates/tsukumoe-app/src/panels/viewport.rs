@@ -683,8 +683,8 @@ impl Viewport {
             }
             _ => overlay::help(ui.ctx(), rect, &tr(ui.ctx(), "deformer-pick"), None),
         }
-        overlay::options_stack(ui.ctx(), rect, |ui| {
-            deformer_overlay::options(ui, tool);
+        overlay::flyout(ui.ctx(), rect, |ui| {
+            actions.extend(deformer_overlay::options(ui, tool));
             proportional_overlay::options(ui, &mut view.proportional);
         });
         tool.proportional = view.proportional;
@@ -845,8 +845,8 @@ impl Viewport {
             }
         }
         if mesh.is_some() {
-            overlay::options_stack(ui.ctx(), rect, |ui| {
-                mesh_overlay::grid_options(ui, tool);
+            overlay::flyout(ui.ctx(), rect, |ui| {
+                actions.extend(mesh_overlay::grid_options(ui, tool));
                 proportional_overlay::options(ui, &mut view.proportional);
             });
             tool.proportional = view.proportional;

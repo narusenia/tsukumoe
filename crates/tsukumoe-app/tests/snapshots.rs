@@ -135,7 +135,9 @@ fn mesh_overlay_snapshot(mode: Mode, name: &str) {
             painter.image(scene.id(), rect, uv, egui::Color32::WHITE);
             mesh_overlay::veil(&painter, &theme, rect, Some(focus.id()));
             mesh_overlay::paint(&painter, &theme, &mapper, &positions, &indices, tool, None);
-            overlay::options_stack(&ctx, rect, |ui| mesh_overlay::grid_options(ui, tool));
+            overlay::flyout(&ctx, rect, |ui| {
+                mesh_overlay::grid_options(ui, tool);
+            });
         },
         tool,
     );
@@ -294,7 +296,9 @@ fn deformer_overlay_snapshot(mode: Mode, name: &str) {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
             deformer_overlay::paint(&painter, &theme, &mapper, &shape, &related, tool);
-            overlay::options_stack(&ctx, rect, |ui| deformer_overlay::options(ui, tool));
+            overlay::flyout(&ctx, rect, |ui| {
+                deformer_overlay::options(ui, tool);
+            });
         },
         tool,
     );
@@ -662,7 +666,7 @@ fn proportional_snapshot(mode: Mode, name: &str) {
                 Some((&screen, &weights)),
             );
             let mut options = tool.proportional;
-            overlay::options_stack(&ctx, rect, |ui| {
+            overlay::flyout(&ctx, rect, |ui| {
                 proportional_overlay::options(ui, &mut options);
             });
         },

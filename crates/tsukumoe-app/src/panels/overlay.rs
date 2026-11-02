@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 //! The pieces every viewport overlay is built from, so they share one look and
-//! one place each: tools top left, options top right (a stack of boxes), a
+//! one place each: tools top left with the active tool's flyout beside them, a
 //! status badge top centre, help bottom left. Nothing here is positioned by
 //! the size of another overlay, so they cannot overlap.
 
@@ -35,26 +35,37 @@ fn area(id: &'static str, pos: egui::Pos2, pivot: Align2) -> Area {
         .order(Order::Foreground)
 }
 
-/// Boxes stacked down the top right corner, widest first.
-pub fn options_stack(ctx: &egui::Context, rect: Rect, add: impl FnOnce(&mut Ui)) {
-    area(
-        "tsukumoe-viewport-options",
-        rect.right_top() + vec2(-MARGIN, MARGIN),
-        Align2::RIGHT_TOP,
-    )
-    .show(ctx, |ui| {
-        ui.with_layout(Layout::top_down(Align::RIGHT), add);
-    });
+/// Memory key for the width of the tool bar, so the flyout can sit beside it.
+fn tools_width_id() -> Id {
+    Id::unique("tsukumoe-viewport-tools-width")
 }
 
 /// A boxed list of tools at the top left; the caller draws the buttons.
 pub fn tools(ctx: &egui::Context, rect: Rect, add: impl FnOnce(&mut Ui)) {
-    area(
+    let response = area(
         "tsukumoe-viewport-tools",
         rect.left_top() + vec2(MARGIN, MARGIN),
         Align2::LEFT_TOP,
     )
     .show(ctx, |ui| boxed(ui, add));
+    let width = response.response.rect.width();
+    ctx.data_mut(|d| d.insert_temp(tools_width_id(), width));
+}
+
+/// The flyout of the active tool, right of the tool bar: boxes stacked down
+/// from the top, left-aligned. The caller draws the boxes (see `boxed`).
+pub fn flyout(ctx: &egui::Context, rect: Rect, add: impl FnOnce(&mut Ui)) {
+    let bar = ctx
+        .data(|d| d.get_temp::<f32>(tools_width_id()))
+        .unwrap_or(32.0);
+    area(
+        "tsukumoe-viewport-flyout",
+        rect.left_top() + vec2(2.0 * MARGIN + bar, MARGIN),
+        Align2::LEFT_TOP,
+    )
+    .show(ctx, |ui| {
+        ui.with_layout(Layout::top_down(Align::LEFT), add);
+    });
 }
 
 /// A pill at the top centre saying what the viewport shows.

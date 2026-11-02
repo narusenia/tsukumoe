@@ -62,24 +62,17 @@ fn falloff_button(ui: &mut egui::Ui, falloff: &mut Falloff, name: &str) {
     response.on_hover_text(name);
 }
 
-/// The options box: on or off, radius, falloff curve, distance kind. Returns
-/// true when anything changed.
+/// The options box: radius, falloff curve, distance kind; shown only while
+/// proportional edit is on (the tool bar's button turns it on and off).
+/// Returns true when anything changed.
 pub fn options(ui: &mut egui::Ui, p: &mut Proportional) -> bool {
     let ctx = ui.ctx().clone();
     let before = *p;
+    if !p.on {
+        return false;
+    }
     super::overlay::boxed(ui, |ui| {
         ui.horizontal(|ui| {
-            let variant = if p.on {
-                Variant::Primary
-            } else {
-                Variant::Ghost
-            };
-            if icon_button(ui, Icon::Locate, &tr(&ctx, "proportional-on"), variant).clicked() {
-                p.on = !p.on;
-            }
-            if !p.on {
-                return;
-            }
             ui.add(
                 egui::DragValue::new(&mut p.radius)
                     .range(RADIUS_RANGE.0..=RADIUS_RANGE.1)
@@ -157,13 +150,15 @@ mod tests {
     }
 
     #[test]
-    fn the_box_shows_the_other_controls_only_while_on_and_each_button_changes_its_option() {
+    fn the_box_shows_only_while_on_and_each_button_changes_its_option() {
         let mut h = harness(Proportional::default());
         h.run();
         assert!(h.query_by_label("Influence radius").is_none());
-        h.get_by_label("Proportional edit").click();
+        let mut h = harness(Proportional {
+            on: true,
+            ..Proportional::default()
+        });
         h.run();
-        assert!(h.state().on);
         h.get_by_label("Influence radius");
         h.get_by_label("Falloff: Smooth").click();
         h.run();
@@ -177,9 +172,6 @@ mod tests {
         h.get_by_label("Distance: Straight line").click();
         h.run();
         assert_eq!(h.state().distance, Distance::Path);
-        h.get_by_label("Proportional edit").click();
-        h.run();
-        assert!(!h.state().on);
     }
 
     #[test]

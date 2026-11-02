@@ -118,17 +118,25 @@ fn float(v: &mut f32, max: f32) -> egui::DragValue<'_> {
         .max_decimals(1)
 }
 
-/// The options box of the mesh tool: its sub-tools, and the columns and rows
-/// of the grid `mesh.fill-grid` lays and the settings of `mesh.contour`. The
-/// values live in the tool, not in the model.
-pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) {
+/// The flyout of the mesh tool: its sub-tools and symmetry, the grid
+/// (rows × columns, like the warp and the inspector) and the contour settings,
+/// each with the button that runs it. Returns the action clicked. The values
+/// live in the tool, not in the model.
+pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static str> {
     let ctx = ui.ctx().clone();
     let t = |key: &str| tsukumoe_ui::tr(&ctx, key);
+    let run = |ui: &mut egui::Ui, key: &str, action: &'static str| {
+        let text = t(key);
+        tsukumoe_ui::button(ui, &text, Variant::Secondary)
+            .on_hover_text(t(&crate::actions::label_key(action)))
+            .clicked()
+            .then_some(action)
+    };
+    let mut chosen = None;
     super::overlay::boxed(ui, |ui| {
-        // The sub-tools of the mesh tool: the active one is filled.
         ui.horizontal(|ui| {
             for (pen, icon, key) in [
-                (false, Icon::MousePointer, "mesh-edit-select"),
+                (false, Icon::BoxSelect, "mesh-edit-select"),
                 (true, Icon::PenLine, "mesh-edit-pen"),
             ] {
                 let variant = if tool.pen == pen {
@@ -142,56 +150,83 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) {
                     tool.cancel();
                 }
             }
-        });
-        ui.horizontal(|ui| {
             let variant = if tool.symmetry {
                 Variant::Primary
             } else {
                 Variant::Secondary
             };
-            if tsukumoe_ui::button(ui, &t("mesh-edit-symmetry"), variant).clicked() {
+            if tsukumoe_ui::icon_button(ui, Icon::Mirror, &t("mesh-edit-symmetry"), variant)
+                .clicked()
+            {
                 tool.symmetry = !tool.symmetry;
             }
+            chosen = chosen.or(run(ui, "mesh-edit-weld", "mesh.weld"));
         });
         ui.horizontal(|ui| {
             ui.label(t("mesh-edit-grid"));
             let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
-            ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
-                .accessible_name(t("mesh-edit-grid-cols"));
+            // The tool keeps (columns, rows); the screen reads rows first.
+            let mut edited = ui
+                .add(egui::DragValue::new(&mut tool.grid.1).range(range.clone()))
+                .accessible_name(t("mesh-edit-grid-rows"))
+                .changed();
             ui.label("\u{d7}");
-            ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
-                .accessible_name(t("mesh-edit-grid-rows"));
+            edited |= ui
+                .add(egui::DragValue::new(&mut tool.grid.0).range(range))
+                .accessible_name(t("mesh-edit-grid-cols"))
+                .changed();
+            if edited {
+                tool.grid_auto = false;
+            }
+            chosen = chosen.or(run(ui, "mesh-edit-make-grid", "mesh.fill-grid"));
         });
         ui.horizontal(|ui| {
-            ui.label(t("mesh-edit-contour"));
-            let c = &mut tool.contour;
-            let fields = [
-                (
-                    ui.add(egui::DragValue::new(&mut c.threshold)),
-                    "mesh-edit-contour-threshold",
-                ),
-                (
-                    ui.add(float(&mut c.simplify, 50.0)),
-                    "mesh-edit-contour-simplify",
-                ),
-                (
-                    ui.add(float(&mut c.offset, 50.0)),
-                    "mesh-edit-contour-offset",
-                ),
-                (
-                    ui.add(float(&mut c.spacing, 512.0)),
-                    "mesh-edit-contour-spacing",
-                ),
-            ];
-            for (response, key) in fields {
-                response.accessible_name(t(key)).on_hover_text(t(key));
+            for n in [2, 4, 8] {
+                let on = !tool.grid_auto && tool.grid == (n, n);
+                let variant = if on { Variant::Primary } else { Variant::Ghost };
+                if tsukumoe_ui::button(ui, &format!("{n}\u{d7}{n}"), variant).clicked() {
+                    tool.grid = (n, n);
+                    tool.grid_auto = false;
+                }
             }
-            // The spacing is 0 (none) or at least 4.
-            if c.spacing > 0.0 && c.spacing < 4.0 {
-                c.spacing = 4.0;
+            let variant = if tool.grid_auto {
+                Variant::Primary
+            } else {
+                Variant::Ghost
+            };
+            if tsukumoe_ui::button(ui, &t("mesh-edit-grid-auto"), variant).clicked() {
+                tool.grid_auto = true;
             }
         });
+        ui.separator();
+        ui.label(t("mesh-edit-contour"));
+        let c = &mut tool.contour;
+        egui::Grid::new("tsukumoe-mesh-contour")
+            .num_columns(2)
+            .show(ui, |ui| {
+                let key = "mesh-edit-contour-threshold";
+                ui.label(t(key));
+                ui.add(egui::DragValue::new(&mut c.threshold))
+                    .accessible_name(t(key));
+                ui.end_row();
+                let rows: [(&str, &mut f32, f32); 3] = [
+                    ("mesh-edit-contour-simplify", &mut c.simplify, 50.0),
+                    ("mesh-edit-contour-offset", &mut c.offset, 50.0),
+                    ("mesh-edit-contour-spacing", &mut c.spacing, 512.0),
+                ];
+                for (key, value, max) in rows {
+                    ui.label(t(key));
+                    ui.add(float(value, max)).accessible_name(t(key));
+                    ui.end_row();
+                }
+            });
+        // The spacing is 0 (none) or at least 4.
+        if c.spacing > 0.0 && c.spacing < 4.0 {
+            c.spacing = 4.0;
+        }
+        chosen = chosen.or(run(ui, "mesh-edit-make-contour", "mesh.contour"));
     });
+    chosen
 }
 
 /// The edge pen's preview: the start vertex ringed, and a line from it to
