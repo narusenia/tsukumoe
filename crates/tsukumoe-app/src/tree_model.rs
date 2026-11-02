@@ -74,6 +74,8 @@ pub struct Row {
     pub expandable: bool,
     /// Its children are listed.
     pub open: bool,
+    /// A mesh or deformer whose shape is bound to parameters (has keyforms).
+    pub bound: bool,
 }
 
 impl Row {
@@ -358,6 +360,7 @@ pub fn rows(model: &Model, view: &TreeView, panel: Panel) -> Vec<Row> {
                         part: None,
                         expandable: false,
                         open: false,
+                        bound: false,
                     });
                 }
             }
@@ -457,6 +460,7 @@ impl Builder<'_> {
             part: with_part.then(|| self.part_name(m.part)).flatten(),
             expandable: false,
             open: false,
+            bound: m.keyforms.is_some(),
         })
     }
 
@@ -505,6 +509,7 @@ impl Builder<'_> {
             part: None,
             expandable: false,
             open: false,
+            bound: false,
         };
         let own = self.wanted(Kind::Part, &name, hidden);
         self.folder(row, own, children, has_children, out)
@@ -582,6 +587,18 @@ impl Builder<'_> {
             part: self.part_name(part),
             expandable: false,
             open: false,
+            bound: match r {
+                DeformerRef::Warp(id) => self
+                    .model
+                    .warps()
+                    .get(id)
+                    .is_some_and(|w| w.keyforms.is_some()),
+                DeformerRef::Rotation(id) => self
+                    .model
+                    .rotations()
+                    .get(id)
+                    .is_some_and(|d| d.keyforms.is_some()),
+            },
         };
         let own = self.wanted(kind, &name, hidden);
         self.folder(row, own, children, has_children, out)

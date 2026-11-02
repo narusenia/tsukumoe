@@ -447,8 +447,20 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                     galley,
                     name_color,
                 );
+                let mut after = cols.name_x + name_width + 8.0;
+                // Bound to parameters: a small link after the name.
+                if row.bound && after + icon_size < right - 20.0 {
+                    let at = Rect::from_center_size(
+                        pos2(after + icon_size / 2.0 - 2.0, rect.center().y),
+                        vec2(icon_size - 3.0, icon_size - 3.0),
+                    );
+                    Icon::Link
+                        .image(theme.colors.accent, icon_size - 3.0)
+                        .paint_at(ui, at);
+                    after += icon_size + 2.0;
+                }
                 if let Some(part) = &row.part {
-                    let x = cols.name_x + name_width + 8.0;
+                    let x = after;
                     if x < right - 20.0 {
                         ui.painter_at(name_clip).text(
                             pos2(x, rect.center().y),
