@@ -12,6 +12,7 @@ pub mod deformer_tool;
 pub mod dispatcher;
 pub mod drag;
 pub mod editor;
+pub mod keyed;
 pub mod menu;
 pub mod mesh_tool;
 #[cfg(target_os = "macos")]

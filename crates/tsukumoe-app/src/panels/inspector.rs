@@ -8,6 +8,7 @@
 
 use egui::{Id, Ui};
 use tsukumoe_core::command::{Command, RotationBase};
+use tsukumoe_core::elements::ParameterId;
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{checkbox, hint, label, number, section_header, tr};
 
@@ -92,6 +93,8 @@ pub struct Requests {
     /// The origin of a rotation was edited: move its axis only (what hangs
     /// from it keeps its place), to this point.
     pub move_axis: Option<(String, [f32; 2])>,
+    /// The opacity of a deformer's keyform was edited: the deformer and the value.
+    pub opacity: Option<(String, f32)>,
 }
 
 /// [`show`], also telling in `requests` what needs the editor: the reset
@@ -102,6 +105,21 @@ pub fn show_with(
     selection: Option<&Selection>,
     deformer: Option<&DeformerTool>,
     requests: &mut Requests,
+) -> Option<Command> {
+    let defaults = |id: ParameterId| model.parameters().get(id).map_or(0.0, |p| p.default);
+    show_at(ui, model, selection, deformer, requests, &defaults)
+}
+
+/// [`show_with`] with the parameters at the values `at` says: the opacity and
+/// draw order of an element with keyforms are those it has there. An edit is
+/// the base-shape command; the editor aims it at the keyform the sliders are on.
+pub fn show_at(
+    ui: &mut Ui,
+    model: &Model,
+    selection: Option<&Selection>,
+    deformer: Option<&DeformerTool>,
+    requests: &mut Requests,
+    at: &dyn Fn(ParameterId) -> f32,
 ) -> Option<Command> {
     let ctx = ui.ctx().clone();
     let Some(selection) = selection else {
@@ -188,6 +206,40 @@ pub fn show_with(
                     mesh.indices.len() / 3
                 ),
             );
+            let (opacity, draw_order) = crate::keyed::mesh_attrs(model, name, at)
+                .unwrap_or((mesh.opacity, mesh.draw_order));
+            ui.horizontal(|ui| {
+                label(ui, tr(&ctx, "inspector-opacity"));
+                if let Some(v) = commit_field(
+                    ui,
+                    &format!("{name}/mesh-opacity"),
+                    opacity,
+                    0.0..=1.0,
+                    0.005,
+                    &tr(&ctx, "inspector-opacity"),
+                ) {
+                    command = Some(Command::SetMeshOpacity {
+                        name: name.clone(),
+                        opacity: v,
+                    });
+                }
+            });
+            ui.horizontal(|ui| {
+                label(ui, tr(&ctx, "inspector-draw-order"));
+                if let Some(v) = commit_field(
+                    ui,
+                    &format!("{name}/draw-order"),
+                    draw_order,
+                    0.0..=1000.0,
+                    1.0,
+                    &tr(&ctx, "inspector-draw-order"),
+                ) {
+                    command = Some(Command::SetMeshDrawOrder {
+                        name: name.clone(),
+                        draw_order: v,
+                    });
+                }
+            });
         }
         Selection::Warp(name) => {
             let w = model
@@ -197,6 +249,21 @@ pub fn show_with(
             section_header(ui, name);
             if reset_button(ui, &ctx) {
                 requests.reset = true;
+            }
+            if let Some(opacity) = crate::keyed::deformer_opacity(model, name, at) {
+                ui.horizontal(|ui| {
+                    label(ui, tr(&ctx, "inspector-opacity"));
+                    if let Some(v) = commit_field(
+                        ui,
+                        &format!("{name}/deformer-opacity"),
+                        opacity,
+                        0.0..=1.0,
+                        0.005,
+                        &tr(&ctx, "inspector-opacity"),
+                    ) {
+                        requests.opacity = Some((name.clone(), v));
+                    }
+                });
             }
             // The grid size is fixed; a different one means making a new warp.
             hint(
@@ -208,8 +275,10 @@ pub fn show_with(
                 .filter(|t| t.deformer() == Some(name.as_str()))
                 .map(|t| t.points().iter().copied().take(8).collect())
                 .unwrap_or_default();
+            let shape =
+                crate::keyed::warp_stored(model, name, at).unwrap_or_else(|| w.base_points.clone());
             for i in selected {
-                let Some(&p) = w.base_points.get(i as usize) else {
+                let Some(&p) = shape.get(i as usize) else {
                     continue;
                 };
                 ui.horizontal(|ui| {
@@ -224,7 +293,7 @@ pub fn show_with(
                             0.01,
                             &tr(&ctx, "inspector-point"),
                         ) {
-                            let mut points = w.base_points.clone();
+                            let mut points = shape.clone();
                             points[i as usize][axis] = v;
                             command = Some(Command::SetWarpBasePoints {
                                 name: name.clone(),
@@ -244,7 +313,23 @@ pub fn show_with(
             if reset_button(ui, &ctx) {
                 requests.reset = true;
             }
-            let base = RotationBase::of(&r.base);
+            if let Some(opacity) = crate::keyed::deformer_opacity(model, name, at) {
+                ui.horizontal(|ui| {
+                    label(ui, tr(&ctx, "inspector-opacity"));
+                    if let Some(v) = commit_field(
+                        ui,
+                        &format!("{name}/deformer-opacity"),
+                        opacity,
+                        0.0..=1.0,
+                        0.005,
+                        &tr(&ctx, "inspector-opacity"),
+                    ) {
+                        requests.opacity = Some((name.clone(), v));
+                    }
+                });
+            }
+            let base =
+                RotationBase::of(&crate::keyed::rotation_stored(model, name, at).unwrap_or(r.base));
             let rows = [
                 (
                     "inspector-origin-x",

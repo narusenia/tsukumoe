@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::deformer_space::Space;
-use tsukumoe_core::elements::Point;
+use tsukumoe_core::elements::{ParameterId, Point};
 use tsukumoe_core::model::Model;
 use tsukumoe_core::proportional;
 use tsukumoe_core::rig::DeformerRef;
@@ -79,23 +79,37 @@ fn pt(p: [f64; 2]) -> Point {
 }
 
 impl Shape {
-    /// The shape of the deformer `name`. `radius_world` is how long the
-    /// rotation handles are, in drawing units.
+    /// The shape of the deformer `name` with every parameter at its default.
+    /// `radius_world` is how long the rotation handles are, in drawing units.
     pub fn of(model: &Model, name: &str, radius_world: f32) -> Option<Self> {
+        let defaults = |id: ParameterId| model.parameters().get(id).map_or(0.0, |p| p.default);
+        Self::of_at(model, name, radius_world, &defaults)
+    }
+
+    /// The shape as drawn when each parameter has the value `at` says: what a
+    /// deformer with keyforms interpolates there, in the space its own
+    /// parents have there (on a key, that keyform).
+    pub fn of_at(
+        model: &Model,
+        name: &str,
+        radius_world: f32,
+        at: &dyn Fn(ParameterId) -> f32,
+    ) -> Option<Self> {
         if let Some(id) = model.warps().find(name) {
             let w = model.warps().get(id)?;
             return Some(Self::Warp {
-                points: w.base_points.clone(),
+                points: crate::keyed::warp_stored(model, name, at)?,
                 rows: w.rows,
                 columns: w.columns,
-                parent: Space::of(model, w.parent).ok()?,
+                parent: Space::of_at(model, w.parent, at).ok()?,
             });
         }
         let id = model.rotations().find(name)?;
         let r = model.rotations().get(id)?;
-        let parent = Space::of(model, r.parent).ok()?;
+        let parent = Space::of_at(model, r.parent, at).ok()?;
+        let shape = crate::keyed::rotation_stored(model, name, at)?;
         // One parent unit is this long in the drawing space.
-        let o = p64(r.base.origin);
+        let o = p64(shape.origin);
         let there = parent.to_world([o[0] + 1.0, o[1]]);
         let here = parent.to_world(o);
         let unit = (there[0] - here[0]).hypot(there[1] - here[1]);
@@ -105,7 +119,7 @@ impl Shape {
             radius_world
         };
         Some(Self::Rotation {
-            base: RotationBase::of(&r.base),
+            base: RotationBase::of(&shape),
             parent,
             radius,
         })
@@ -335,12 +349,24 @@ fn inside(ring: &[Point], p: Point) -> bool {
 /// The deformer a click at `at` names: the origin of a rotation deformer
 /// within reach, else the smallest warp whose grid covers the point.
 pub fn pick_deformer(model: &Model, m: &Mapper, at: [f32; 2], radius_world: f32) -> Option<String> {
+    let defaults = |id: ParameterId| model.parameters().get(id).map_or(0.0, |p| p.default);
+    pick_deformer_at(model, m, at, radius_world, &defaults)
+}
+
+/// [`pick_deformer`] with the shapes as drawn at the parameter values `values` says.
+pub fn pick_deformer_at(
+    model: &Model,
+    m: &Mapper,
+    at: [f32; 2],
+    radius_world: f32,
+    values: &dyn Fn(ParameterId) -> f32,
+) -> Option<String> {
     let world = m.to_model(at);
     let origin = model
         .rotations()
         .iter()
         .filter_map(|(_, name, _)| {
-            let shape = Shape::of(model, name, radius_world)?;
+            let shape = Shape::of_at(model, name, radius_world, values)?;
             let (_, o) = shape.handles().into_iter().next()?;
             let s = m.to_screen(o);
             let d = (s[0] - at[0]).hypot(s[1] - at[1]);
@@ -670,6 +696,17 @@ pub enum Role {
 /// The parents (up the chain) and the direct child deformers of `name`, as
 /// shapes, for the overlay to show in other colours.
 pub fn related(model: &Model, name: &str, radius_world: f32) -> Vec<(Role, Shape)> {
+    let defaults = |id: ParameterId| model.parameters().get(id).map_or(0.0, |p| p.default);
+    related_at(model, name, radius_world, &defaults)
+}
+
+/// [`related`] with the shapes as drawn at the parameter values `values` says.
+pub fn related_at(
+    model: &Model,
+    name: &str,
+    radius_world: f32,
+    values: &dyn Fn(ParameterId) -> f32,
+) -> Vec<(Role, Shape)> {
     let Some(me) = model
         .warps()
         .find(name)
@@ -687,7 +724,9 @@ pub fn related(model: &Model, name: &str, radius_world: f32) -> Vec<(Role, Shape
     // Bounded: the model has no loops, but never trust that in a draw loop.
     for _ in 0..16 {
         let Some(r) = up else { break };
-        if let Some(shape) = name_of(model, r).and_then(|n| Shape::of(model, &n, radius_world)) {
+        if let Some(shape) =
+            name_of(model, r).and_then(|n| Shape::of_at(model, &n, radius_world, values))
+        {
             out.push((Role::Parent, shape));
         }
         up = parent_of(r);
@@ -705,7 +744,7 @@ pub fn related(model: &Model, name: &str, radius_world: f32) -> Vec<(Role, Shape
                 .map(|(_, n, _)| n.to_owned()),
         );
     for n in children {
-        if let Some(shape) = Shape::of(model, &n, radius_world) {
+        if let Some(shape) = Shape::of_at(model, &n, radius_world, values) {
             out.push((Role::Child, shape));
         }
     }

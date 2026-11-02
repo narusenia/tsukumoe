@@ -162,14 +162,15 @@ pub enum Command {
     /// Removes a deformer (warp or rotation) by name; fails while a mesh or a deformer hangs from it.
     RemoveDeformer { name: String },
     /// Sets the parent deformer of a deformer (`null` for none). The command
-    /// does not convert coordinates; fails if it makes a cycle or if the
-    /// deformer has keyforms.
+    /// does not convert coordinates (also not those of the keyforms); fails if
+    /// it makes a cycle.
     SetDeformerParent {
         name: String,
         #[serde(default)]
         parent: Option<String>,
     },
-    /// Sets the parent deformer of a mesh (`null` for none). Fails if the mesh has keyforms.
+    /// Sets the parent deformer of a mesh (`null` for none). The command does
+    /// not convert coordinates (also not those of the keyforms).
     SetMeshParent {
         name: String,
         #[serde(default)]
@@ -577,7 +578,6 @@ impl Model {
                 let parent = self.resolve_parent(parent.as_deref())?;
                 match self.resolve_deformer(name)? {
                     DeformerRef::Warp(id) => {
-                        self.reject_keyforms::<WarpDeformer>(id, name, |d| d.keyforms.is_some())?;
                         // The points keep their numbers but not their space.
                         self.modify(changes, id, |d| {
                             d.parent = parent;
@@ -585,9 +585,6 @@ impl Model {
                         });
                     }
                     DeformerRef::Rotation(id) => {
-                        self.reject_keyforms::<RotationDeformer>(id, name, |d| {
-                            d.keyforms.is_some()
-                        })?;
                         self.modify(changes, id, |d| d.parent = parent);
                     }
                 }
@@ -595,7 +592,6 @@ impl Model {
             Command::SetMeshParent { name, parent } => {
                 let parent = self.resolve_parent(parent.as_deref())?;
                 let id = self.resolve::<ArtMesh>(name)?;
-                self.reject_keyforms::<ArtMesh>(id, name, |m| m.keyforms.is_some())?;
                 self.modify(changes, id, |m| m.parent = parent);
             }
             Command::SetWarpBasePoints { name, points } => {
@@ -1564,21 +1560,21 @@ mod tests {
         let id = model.warps().find("Warp").unwrap();
         model.warps.get_mut(id).unwrap().keyforms =
             Some(KeyformGrid::new(binding, vec![keyform; 2]));
-        for command in [
-            Command::SetWarpBasePoints {
+        // The base shape of a keyed warp is not edited (its keyforms are); moving it
+        // under another parent is allowed (the caller converts the keyforms).
+        assert!(matches!(
+            model.apply(Command::SetWarpBasePoints {
                 name: "Warp".into(),
                 points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]],
-            },
-            Command::SetDeformerParent {
+            }),
+            Err(CommandError::HasKeyforms { .. })
+        ));
+        model
+            .apply(Command::SetDeformerParent {
                 name: "Warp".into(),
                 parent: None,
-            },
-        ] {
-            assert!(matches!(
-                model.apply(command),
-                Err(CommandError::HasKeyforms { .. })
-            ));
-        }
+            })
+            .unwrap();
     }
 
     #[test]

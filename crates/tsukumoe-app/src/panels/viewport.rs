@@ -356,31 +356,41 @@ impl Viewport {
             size: [rect.width(), rect.height()],
             view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
         };
+        let at = crate::keyed::values(model, view);
+        let lift = |previews: Vec<Preview>| -> Vec<Preview> {
+            previews
+                .into_iter()
+                .map(|p| crate::keyed::lift_preview(model, &at, p))
+                .collect()
+        };
         match view.tool {
             Tool::Mesh => (|| {
                 let name = mesh.mesh()?;
                 let m = model.meshes().get(model.meshes().find(name)?)?;
-                let space = Space::of(model, m.parent).ok()?;
-                let positions = mesh.dragging_stored(&m.positions, &mapper, &space)?;
-                Some(vec![Preview::Mesh {
+                let space = Space::of_at(model, m.parent, &at).ok()?;
+                let stored = crate::keyed::mesh_stored(model, name, &at)?;
+                let positions = mesh.dragging_stored(&stored, &mapper, &space)?;
+                Some(lift(vec![Preview::Mesh {
                     name: name.to_owned(),
                     positions,
-                }])
+                }]))
             })()
             .unwrap_or_default(),
             Tool::Deformer => (|| {
                 let name = deformer.deformer()?;
                 let radius = (mapper.view[2] - mapper.view[0]) * 0.05;
-                let shape = deformer_tool::Shape::of(model, name, radius)?;
+                let shape = deformer_tool::Shape::of_at(model, name, radius, &at)?;
                 // Dragging a rotation's origin moves the axis and corrects what hangs
                 // from it: preview all of it, exactly as it would be committed.
                 if let Some(axis) = deformer.axis_drag(name, &shape, &mapper, model) {
                     return Some(match axis {
-                        Ok((command, _)) => crate::deformer_ops::previews_of(&command),
+                        Ok((command, _)) => lift(crate::deformer_ops::previews_of(&command)),
                         Err(_) => Vec::new(),
                     });
                 }
-                Some(vec![deformer.dragging(&shape, &mapper)?.as_preview(name)])
+                Some(lift(vec![
+                    deformer.dragging(&shape, &mapper)?.as_preview(name),
+                ]))
             })()
             .unwrap_or_default(),
             Tool::Select => Vec::new(),
@@ -459,9 +469,11 @@ impl Viewport {
         // Rotation handles are a twentieth of the view wide.
         let radius = (mapper.view[2] - mapper.view[0]) * 0.05;
         let name = tool.deformer().map(str::to_owned);
+        // The parameter values the picture shows: shapes are taken at them.
+        let param_at = crate::keyed::values(model, view);
         let shape = name
             .as_deref()
-            .and_then(|n| deformer_tool::Shape::of(model, n, radius));
+            .and_then(|n| deformer_tool::Shape::of_at(model, n, radius, &param_at));
         let (modifiers, escape) = ui.input(|i| (i.modifiers, i.key_pressed(egui::Key::Escape)));
         let arrow = |p: Option<egui::Pos2>| p.map(|p| [p.x, p.y]);
         let pressed = arrow(ui.input(|i| i.pointer.press_origin()));
@@ -501,7 +513,7 @@ impl Viewport {
             });
             match (&shape, on_shape) {
                 (Some(shape), true) => tool.click(shape, &mapper, at, modifiers.shift),
-                _ => match deformer_tool::pick_deformer(model, &mapper, at, radius) {
+                _ => match deformer_tool::pick_deformer_at(model, &mapper, at, radius, &param_at) {
                     Some(picked) if !modifiers.shift => {
                         view.select_only(if model.warps().find(&picked).is_some() {
                             Selection::Warp(picked)
@@ -529,7 +541,7 @@ impl Viewport {
         });
         match (&name, &shape) {
             (Some(name), Some(shape)) => {
-                let related = deformer_tool::related(model, name, radius);
+                let related = deformer_tool::related_at(model, name, radius, &param_at);
                 let preview = tool.preview(shape, &mapper);
                 deformer_overlay::paint(
                     &painter,
@@ -540,6 +552,9 @@ impl Viewport {
                     tool,
                 );
                 deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-hint"));
+                if let Some(place) = crate::keyed::deformer_place(model, name, &|id| param_at(id)) {
+                    mesh_overlay::key_caption(&painter, &theme, rect, ui.ctx(), &place);
+                }
                 if tool.proportional.on && matches!(shape, deformer_tool::Shape::Warp { .. }) {
                     let screen: Vec<egui::Pos2> = preview
                         .as_ref()
@@ -615,10 +630,19 @@ impl Viewport {
                     .unwrap_or_else(|| m.positions.clone())
             })
             .unwrap_or_default();
+        let at = crate::keyed::values(model, view);
         let space = mesh
             .as_ref()
-            .and_then(|(_, m)| Space::of(model, m.parent).ok())
+            .and_then(|(_, m)| Space::of_at(model, m.parent, &at).ok())
             .unwrap_or(Space::Drawing);
+        // What a drag changes: the keyform at the key the sliders are on, else the base shape.
+        let stored: Vec<[f32; 2]> = mesh
+            .as_ref()
+            .and_then(|(n, _)| crate::keyed::mesh_stored(model, n, &at))
+            .unwrap_or_default();
+        let place = tool
+            .mesh()
+            .and_then(|n| crate::keyed::mesh_place(model, n, &at));
         // The edited mesh is drawn again above the veil so it stays bright.
         let focus = self
             .focus
@@ -650,7 +674,7 @@ impl Viewport {
                 tool.drag(at);
             }
             if response.drag_stopped_by(primary)
-                && let Some(op) = tool.release_in(name, &mesh.positions, &shown, &mapper, &space)
+                && let Some(op) = tool.release_in(name, &stored, &shown, &mapper, &space)
             {
                 ops.push(Ok(op));
             }
@@ -735,6 +759,9 @@ impl Viewport {
                     );
                 }
                 mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-hint"));
+                if let Some(place) = &place {
+                    mesh_overlay::key_caption(&painter, &theme, rect, ui.ctx(), place);
+                }
             }
             None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),
         }

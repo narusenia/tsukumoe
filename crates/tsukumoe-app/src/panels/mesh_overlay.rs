@@ -105,6 +105,34 @@ pub fn caption(painter: &Painter, theme: &Theme, rect: Rect, text: &str) {
     );
 }
 
+/// The key being edited under the help line (or, dimmed, that the sliders are
+/// not on one) for an element with keyforms.
+pub fn key_caption(
+    painter: &Painter,
+    theme: &Theme,
+    rect: Rect,
+    ctx: &egui::Context,
+    place: &crate::keyed::Place,
+) {
+    let (text, color) = match place {
+        crate::keyed::Place::Key { label, .. } => (
+            format!("{}: {label}", tsukumoe_ui::tr(ctx, "keyform-editing")),
+            theme.colors.text,
+        ),
+        crate::keyed::Place::Off { label } => (
+            format!("{}: {label}", tsukumoe_ui::tr(ctx, "keyform-off")),
+            theme.colors.text_muted,
+        ),
+    };
+    painter.text(
+        rect.left_top() + vec2(8.0, 28.0),
+        Align2::LEFT_TOP,
+        text,
+        FontId::proportional(theme.metrics.text),
+        color,
+    );
+}
+
 fn float(v: &mut f32, max: f32) -> egui::DragValue<'_> {
     egui::DragValue::new(v)
         .range(0.0..=max)

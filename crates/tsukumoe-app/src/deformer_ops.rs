@@ -11,9 +11,9 @@ use std::fmt;
 
 use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::deformer_space::{Space, SpaceError};
-use tsukumoe_core::elements::Point;
+use tsukumoe_core::elements::{ParameterId, Point};
 use tsukumoe_core::model::Model;
-use tsukumoe_core::rig::{DeformerRef, RotationKeyform};
+use tsukumoe_core::rig::{ArtMesh, DeformerRef, RotationDeformer, RotationKeyform, WarpDeformer};
 
 use crate::mesh_tool::Op;
 use crate::view::Selection;
@@ -199,6 +199,104 @@ fn convert_rotation(
     })
 }
 
+/// Makes new points from old ones, keeping what is drawn.
+type PointsFn<'a> = &'a dyn Fn(&[Point]) -> Result<Vec<Point>, OpError>;
+
+/// The commands that give mesh `name` the vertices `f` makes from its own: its
+/// base positions, or, with keyforms, every keyform's (one command each).
+fn mesh_shape_commands(
+    model: &Model,
+    name: &str,
+    mesh: &ArtMesh,
+    f: PointsFn,
+) -> Result<Vec<Command>, OpError> {
+    let Some(grid) = &mesh.keyforms else {
+        return Ok(vec![Command::SetMeshPositions {
+            name: name.to_owned(),
+            positions: f(&mesh.positions)?,
+        }]);
+    };
+    let binding = model
+        .bindings()
+        .get(grid.binding)
+        .ok_or_else(|| OpError::Missing(name.to_owned()))?;
+    grid.keyforms
+        .iter()
+        .enumerate()
+        .map(|(k, kf)| {
+            Ok(Command::SetMeshKeyform {
+                name: name.to_owned(),
+                key: crate::keyed::key_of(binding, k),
+                positions: f(&kf.positions)?,
+                opacity: kf.opacity,
+                draw_order: kf.draw_order,
+            })
+        })
+        .collect()
+}
+
+/// [`mesh_shape_commands`] for the control points of a warp deformer.
+fn warp_shape_commands(
+    model: &Model,
+    name: &str,
+    warp: &WarpDeformer,
+    f: PointsFn,
+) -> Result<Vec<Command>, OpError> {
+    let Some(grid) = &warp.keyforms else {
+        return Ok(vec![Command::SetWarpBasePoints {
+            name: name.to_owned(),
+            points: f(&warp.base_points)?,
+        }]);
+    };
+    let binding = model
+        .bindings()
+        .get(grid.binding)
+        .ok_or_else(|| OpError::Missing(name.to_owned()))?;
+    grid.keyforms
+        .iter()
+        .enumerate()
+        .map(|(k, kf)| {
+            Ok(Command::SetWarpKeyform {
+                name: name.to_owned(),
+                key: crate::keyed::key_of(binding, k),
+                points: f(&kf.points)?,
+                opacity: kf.opacity,
+            })
+        })
+        .collect()
+}
+
+/// [`mesh_shape_commands`] for the shape of a rotation deformer.
+fn rotation_shape_commands(
+    model: &Model,
+    name: &str,
+    rotation: &RotationDeformer,
+    f: &dyn Fn(&RotationKeyform) -> Result<RotationBase, OpError>,
+) -> Result<Vec<Command>, OpError> {
+    let Some(grid) = &rotation.keyforms else {
+        return Ok(vec![Command::SetRotationBase {
+            name: name.to_owned(),
+            base: f(&rotation.base)?,
+        }]);
+    };
+    let binding = model
+        .bindings()
+        .get(grid.binding)
+        .ok_or_else(|| OpError::Missing(name.to_owned()))?;
+    grid.keyforms
+        .iter()
+        .enumerate()
+        .map(|(k, kf)| {
+            Ok(Command::SetRotationKeyform {
+                name: name.to_owned(),
+                key: crate::keyed::key_of(binding, k),
+                base: f(kf)?,
+                opacity: kf.opacity,
+            })
+        })
+        .collect()
+}
+
 /// The commands that put `target` under `parent` (a deformer name, or none)
 /// whose child space is `new`, keeping the drawn position of everything.
 fn reparent(
@@ -216,21 +314,18 @@ fn reparent(
                 .and_then(|id| model.meshes().get(id))
                 .ok_or_else(|| OpError::Missing(name.clone()))?;
             let old = Space::of(model, mesh.parent)?;
-            let positions = mesh
-                .positions
-                .iter()
-                .map(|&p| Ok(new.point_from_world(old.point_to_world(p))?))
-                .collect::<Result<Vec<_>, OpError>>()?;
-            Ok(vec![
-                Command::SetMeshParent {
-                    name: name.clone(),
-                    parent,
-                },
-                Command::SetMeshPositions {
-                    name: name.clone(),
-                    positions,
-                },
-            ])
+            let keep = |points: &[Point]| -> Result<Vec<Point>, OpError> {
+                points
+                    .iter()
+                    .map(|&p| Ok(new.point_from_world(old.point_to_world(p))?))
+                    .collect()
+            };
+            let mut commands = vec![Command::SetMeshParent {
+                name: name.clone(),
+                parent,
+            }];
+            commands.extend(mesh_shape_commands(model, name, mesh, &keep)?);
+            Ok(commands)
         }
         Target::Deformer(name) => {
             let set_parent = Command::SetDeformerParent {
@@ -241,30 +336,23 @@ fn reparent(
                 DeformerRef::Warp(id) => {
                     let warp = model.warps().get(id).expect("found above");
                     let old = Space::of(model, warp.parent)?;
-                    let points = warp
-                        .base_points
-                        .iter()
-                        .map(|&p| Ok(new.point_from_world(old.point_to_world(p))?))
-                        .collect::<Result<Vec<_>, OpError>>()?;
-                    Ok(vec![
-                        set_parent,
-                        Command::SetWarpBasePoints {
-                            name: name.clone(),
-                            points,
-                        },
-                    ])
+                    let keep = |points: &[Point]| -> Result<Vec<Point>, OpError> {
+                        points
+                            .iter()
+                            .map(|&p| Ok(new.point_from_world(old.point_to_world(p))?))
+                            .collect()
+                    };
+                    let mut commands = vec![set_parent];
+                    commands.extend(warp_shape_commands(model, name, warp, &keep)?);
+                    Ok(commands)
                 }
                 DeformerRef::Rotation(id) => {
                     let rot = model.rotations().get(id).expect("found above");
                     let old = Space::of(model, rot.parent)?;
-                    let base = convert_rotation(&old, new, &rot.base)?;
-                    Ok(vec![
-                        set_parent,
-                        Command::SetRotationBase {
-                            name: name.clone(),
-                            base,
-                        },
-                    ])
+                    let convert = |kf: &RotationKeyform| convert_rotation(&old, new, kf);
+                    let mut commands = vec![set_parent];
+                    commands.extend(rotation_shape_commands(model, name, rot, &convert)?);
+                    Ok(commands)
                 }
             }
         }
@@ -295,8 +383,9 @@ pub fn regular_grid(rect: [f32; 4], rows: u32, columns: u32) -> Vec<Point> {
 /// everything that hangs from it where it is drawn: the meshes and the child
 /// deformers get the coordinates that, in the moved axes, come out at the
 /// same place (a child rotation keeps its world axes as far as one angle and
-/// one scale can). One `Batch`, so one undo step. Fails if the rotation or
-/// anything directly under it has keyforms.
+/// one scale can). One `Batch`, so one undo step. What hangs from it may have
+/// keyforms: every keyform gets the same conversion. Fails if the rotation
+/// itself has keyforms (its origin is then a part of the keyform at a key).
 pub fn move_axis(model: &Model, name: &str, origin: Point) -> Result<Op, OpError> {
     let id = model
         .rotations()
@@ -322,31 +411,20 @@ pub fn move_axis(model: &Model, name: &str, origin: Point) -> Result<Op, OpError
         name: name.to_owned(),
         base,
     }];
+    // Children with keyforms get the same conversion on every keyform.
     for (_, mesh, m) in model
         .meshes()
         .iter()
         .filter(|(_, _, m)| m.parent == Some(me))
     {
-        if m.keyforms.is_some() {
-            return Err(OpError::HasKeyforms(mesh.to_owned()));
-        }
-        commands.push(Command::SetMeshPositions {
-            name: mesh.to_owned(),
-            positions: keep(&m.positions)?,
-        });
+        commands.extend(mesh_shape_commands(model, mesh, m, &keep)?);
     }
     for (_, child, d) in model
         .warps()
         .iter()
         .filter(|(_, _, d)| d.parent == Some(me))
     {
-        if d.keyforms.is_some() {
-            return Err(OpError::HasKeyforms(child.to_owned()));
-        }
-        commands.push(Command::SetWarpBasePoints {
-            name: child.to_owned(),
-            points: keep(&d.base_points)?,
-        });
+        commands.extend(warp_shape_commands(model, child, d, &keep)?);
         // Its points moved into the new axes: the remembered grid is in the old ones.
         commands.push(Command::ClearWarpRestPoints {
             name: child.to_owned(),
@@ -357,13 +435,8 @@ pub fn move_axis(model: &Model, name: &str, origin: Point) -> Result<Op, OpError
         .iter()
         .filter(|(_, _, d)| d.parent == Some(me))
     {
-        if d.keyforms.is_some() {
-            return Err(OpError::HasKeyforms(child.to_owned()));
-        }
-        commands.push(Command::SetRotationBase {
-            name: child.to_owned(),
-            base: convert_rotation(&old, &new, &d.base)?,
-        });
+        let convert = |kf: &RotationKeyform| convert_rotation(&old, &new, kf);
+        commands.extend(rotation_shape_commands(model, child, d, &convert)?);
     }
     Ok(batch(commands, format!("deformer_move_axis: {name}")))
 }
@@ -403,6 +476,18 @@ pub fn previews_of(command: &Command) -> Vec<crate::scene::Preview> {
 /// are, `NoChange`. One `Batch`, so one undo step; a deformer with keyforms
 /// makes the whole batch fail when applied, and nothing changes.
 pub fn reset(model: &Model, items: &[Selection]) -> Result<Op, OpError> {
+    let defaults = |id: ParameterId| model.parameters().get(id).map_or(0.0, |p| p.default);
+    reset_at(model, items, &defaults)
+}
+
+/// [`reset`] for the shapes as they are at the parameter values `at` says: a
+/// deformer with keyforms is compared with (and reset to) its shape there, and
+/// the command it makes is meant for the keyform the sliders are on (see `keyed`).
+pub fn reset_at(
+    model: &Model,
+    items: &[Selection],
+    at: &dyn Fn(ParameterId) -> f32,
+) -> Result<Op, OpError> {
     let mut commands = Vec::new();
     let mut names = Vec::new();
     for item in items {
@@ -413,13 +498,16 @@ pub fn reset(model: &Model, items: &[Selection]) -> Result<Op, OpError> {
                     .find(name)
                     .ok_or_else(|| OpError::Missing(name.clone()))?;
                 let w = model.warps().get(id).expect("found above");
+                // The shape to reset: the keyform the sliders are on, else the base.
+                let current = crate::keyed::warp_stored(model, name, at)
+                    .unwrap_or_else(|| w.base_points.clone());
                 // The grid as it was made, if it is remembered; else an even
                 // grid over the box of the points as they are now.
                 let grid = match &w.rest_points {
-                    Some(rest) if rest.len() == w.base_points.len() => rest.clone(),
+                    Some(rest) if rest.len() == current.len() => rest.clone(),
                     _ => {
                         let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-                        for p in &w.base_points {
+                        for p in &current {
                             b = [
                                 b[0].min(p[0]),
                                 b[1].min(p[1]),
@@ -430,10 +518,10 @@ pub fn reset(model: &Model, items: &[Selection]) -> Result<Op, OpError> {
                         regular_grid(b, w.rows, w.columns)
                     }
                 };
-                let same = grid.len() == w.base_points.len()
+                let same = grid.len() == current.len()
                     && grid
                         .iter()
-                        .zip(&w.base_points)
+                        .zip(&current)
                         .all(|(a, p)| (a[0] - p[0]).abs() <= 1e-6 && (a[1] - p[1]).abs() <= 1e-6);
                 if !same {
                     commands.push(Command::SetWarpBasePoints {
@@ -448,7 +536,9 @@ pub fn reset(model: &Model, items: &[Selection]) -> Result<Op, OpError> {
                     .rotations()
                     .find(name)
                     .ok_or_else(|| OpError::Missing(name.clone()))?;
-                let base = RotationBase::of(&model.rotations().get(id).expect("found above").base);
+                let shape = crate::keyed::rotation_stored(model, name, at)
+                    .unwrap_or_else(|| model.rotations().get(id).expect("found above").base);
+                let base = RotationBase::of(&shape);
                 let initial = RotationBase {
                     angle_degrees: 0.0,
                     scale: 1.0,
@@ -934,6 +1024,57 @@ mod tests {
     }
 
     #[test]
+    fn a_keyed_mesh_put_under_a_new_warp_keeps_its_look_at_every_key() {
+        let mut m = built(vec![
+            part(),
+            mesh("Skin", 1.0),
+            Command::AddParameter {
+                name: "P".into(),
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+                repeat: false,
+            },
+        ]);
+        m.apply(Command::BindParameter {
+            parameter: "P".into(),
+            elements: vec![tsukumoe_core::command::ElementRef::Mesh {
+                name: "Skin".into(),
+            }],
+        })
+        .unwrap();
+        // At P = 1 the mesh is somewhere else.
+        m.apply(Command::SetMeshKeyform {
+            name: "Skin".into(),
+            key: vec![1],
+            positions: vec![[4.0, 1.0], [6.0, 1.0], [6.0, 4.0], [4.0, 4.0]],
+            opacity: 1.0,
+            draw_order: 500.0,
+        })
+        .unwrap();
+        let at = |m: &Model, value: f32| {
+            let compiled: CompiledModel = m.compile().unwrap();
+            let mut frame = Frame::new(&compiled);
+            frame.set_parameter(0, value);
+            frame.evaluate(&compiled);
+            frame.positions().to_vec()
+        };
+        let before = [at(&m, 0.0), at(&m, 1.0), at(&m, 0.5)];
+        let (command, _) = create_warp(&m, &[mesh_target("Skin")], 2, 2).unwrap();
+        m.apply(command).unwrap();
+        // The warp is a plain one around the mesh at the default; every key is converted.
+        same(&at(&m, 0.0), &before[0]);
+        let mesh = m.meshes().get(m.meshes().find("Skin").unwrap()).unwrap();
+        assert!(mesh.parent.is_some());
+        assert_eq!(mesh.keyforms.as_ref().unwrap().keyforms.len(), 2);
+        // The key at P = 1 got the same conversion (the grid reaches it by extension).
+        same(&at(&m, 1.0), &before[1]);
+        assert!(m.undo());
+        same(&at(&m, 1.0), &before[1]);
+        same(&at(&m, 0.5), &before[2]);
+    }
+
+    #[test]
     fn resetting_a_rotation_zeroes_the_angle_and_keeps_the_origin() {
         let mut m = built(vec![part(), mesh("Skin", 1.0)]);
         let (c, _) = create_rotation(&m, &[mesh_target("Skin")]).unwrap();
@@ -1277,7 +1418,7 @@ mod tests {
     }
 
     #[test]
-    fn a_child_with_keyforms_refuses_and_the_model_is_untouched() {
+    fn a_child_with_keyforms_gets_every_keyform_converted_in_one_step() {
         use tsukumoe_core::elements::{Parameter, Part};
         use tsukumoe_core::keyform::{Axis as KeyAxis, Binding, KeyformGrid};
         use tsukumoe_core::model::ModelParts;
@@ -1319,10 +1460,34 @@ mod tests {
         keyed.parent = Some(DeformerRef::Rotation(rot));
         keyed.keyforms = Some(KeyformGrid::new(binding, vec![key.clone(), key]));
         parts.meshes.insert("Keyed", keyed).unwrap();
-        let m = Model::from_parts(parts).unwrap();
+        let mut m = Model::from_parts(parts).unwrap();
+        let at = |m: &Model, value: f32| {
+            let compiled: CompiledModel = m.compile().unwrap();
+            let mut frame = Frame::new(&compiled);
+            frame.set_parameter(0, value);
+            frame.evaluate(&compiled);
+            frame.positions().to_vec()
+        };
+        let before = [at(&m, 0.0), at(&m, 1.0)];
+        // Every keyform of the child gets the conversion: it stays where it is drawn at each key.
+        let (command, _) = move_axis(&m, "Axis", [1.0, 1.0]).unwrap();
+        let Command::Batch { commands } = &command else {
+            panic!("a batch");
+        };
         assert_eq!(
-            move_axis(&m, "Axis", [1.0, 1.0]),
-            Err(OpError::HasKeyforms("Keyed".into()))
+            commands
+                .iter()
+                .filter(|c| matches!(c, Command::SetMeshKeyform { .. }))
+                .count(),
+            2
+        );
+        m.apply(command).unwrap();
+        same(&at(&m, 0.0), &before[0]);
+        same(&at(&m, 1.0), &before[1]);
+        // The rotation itself having keyforms (an origin that is part of a key) is refused.
+        assert_eq!(
+            move_axis(&m, "Nope", [1.0, 1.0]),
+            Err(OpError::Missing("Nope".into()))
         );
         assert_eq!(
             move_axis(&m, "Nope", [0.0, 0.0]),
