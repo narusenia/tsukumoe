@@ -53,7 +53,8 @@ pub struct SettingsState {
 
 const WIDTH: f32 = 680.0;
 const TAB_COLUMN: f32 = 140.0;
-const BODY_HEIGHT: f32 = 460.0;
+const BODY_MIN: f32 = 320.0;
+const BODY_MAX: f32 = 720.0;
 
 impl Editor {
     /// Opens the settings dialog on `tab`.
@@ -80,6 +81,8 @@ impl Editor {
         open: &mut bool,
     ) {
         let t = |key: &str| tr(ctx, key);
+        // Tall enough for the longest tab, but never more than the window allows.
+        let body_height = (ctx.content_rect().height() * 0.7).clamp(BODY_MIN, BODY_MAX);
         tsukumoe_ui::dialog_sized(
             ctx,
             "dialog-settings",
@@ -107,8 +110,8 @@ impl Editor {
                     ui.vertical(|ui| {
                         ui.set_width(WIDTH - TAB_COLUMN - 24.0);
                         ScrollArea::vertical()
-                            .max_height(BODY_HEIGHT)
-                            .auto_shrink([false, true])
+                            .max_height(body_height)
+                            .auto_shrink([false, false])
                             .show(ui, |ui| match state.tab {
                                 SettingsTab::General => self.general_contents(ctx, ui),
                                 SettingsTab::Controls => {
