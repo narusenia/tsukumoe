@@ -83,7 +83,7 @@ fn paint_keys(ui: &Ui, rect: egui::Rect, keys: &[f32], min: f32, max: f32, value
     }
 }
 
-/// The width of the settings window of a parameter.
+/// The width of the settings dialog of a parameter.
 const SETTINGS_WIDTH: f32 = 380.0;
 
 pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
@@ -147,7 +147,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                 drop_on_header(ctx, &r.header_response, model, &group, &mut outs);
             }
         });
-    // The settings window of one parameter (name, range, repeat, delete).
+    // The settings dialog of one parameter (name, range, repeat, delete).
     if let Some(name) = view.param_dialog.clone() {
         let mut open = true;
         let target = model
@@ -156,21 +156,15 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
             .and_then(|id| model.parameters().get(id));
         match target {
             Some(p) => {
-                egui::Window::new(format!("{}: {name}", tr(&ctx, "param-settings")))
-                    .id(ui.make_persistent_id(("param-settings", &name)))
-                    .open(&mut open)
-                    .collapsible(false)
-                    .resizable(false)
-                    // Pinned from the outside too: whatever a row asks for, the window
-                    // stays this wide (content width plus the frame margins).
-                    .min_width(SETTINGS_WIDTH)
-                    .max_width(SETTINGS_WIDTH)
-                    .show(&ctx, |ui| {
-                        // A fixed width: the name field fills what is left, so an
-                        // auto-sized window would grow on every frame.
-                        ui.set_width(SETTINGS_WIDTH);
-                        settings_section(ui, model, &name, p, &mut outs);
-                    });
+                let title = format!("{}: {name}", tr(&ctx, "param-settings"));
+                tsukumoe_ui::dialog_sized(
+                    &ctx,
+                    ("param-settings", &name),
+                    &title,
+                    SETTINGS_WIDTH,
+                    &mut open,
+                    |ui| settings_section(ui, model, &name, p, &mut outs),
+                );
             }
             None => open = false,
         }
