@@ -103,6 +103,10 @@ impl ToolError {
             Self::Edit(EditError::CannotConnect) => "mesh-edit-cannot-connect",
             Self::Edit(EditError::BadGrid) => "mesh-edit-grid-size",
             Self::Edit(EditError::NothingToAdd) => "mesh-edit-grid-empty",
+            Self::Edit(EditError::InsideMesh) => "mesh-edit-inside",
+            Self::Edit(EditError::CannotExtend) => "mesh-edit-cannot-extend",
+            Self::Edit(EditError::OutsideTexture) => "mesh-edit-outside-texture",
+            Self::Edit(EditError::NothingLeft) => "mesh-edit-nothing-left",
             Self::Edit(EditError::BadVertex | EditError::NoSuchEdge) => "mesh-edit-no-edge",
         }
     }

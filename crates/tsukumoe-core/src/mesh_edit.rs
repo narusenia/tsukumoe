@@ -50,6 +50,14 @@ pub enum EditError {
     BadGrid,
     /// No grid point fits inside the outline away from the vertices.
     NothingToAdd,
+    /// The point is inside the mesh: it does not extend the outline.
+    InsideMesh,
+    /// No outline edge sees the point without crossing the mesh.
+    CannotExtend,
+    /// The point would fall outside the texture.
+    OutsideTexture,
+    /// Removing the edge would leave no triangle.
+    NothingLeft,
 }
 
 impl fmt::Display for EditError {
@@ -65,6 +73,10 @@ impl fmt::Display for EditError {
             Self::CannotConnect => "the edge cannot be drawn",
             Self::BadGrid => "columns and rows must be between 1 and 64",
             Self::NothingToAdd => "no grid point fits inside the mesh",
+            Self::InsideMesh => "point is inside the mesh",
+            Self::CannotExtend => "the outline cannot reach the point",
+            Self::OutsideTexture => "point is outside the texture",
+            Self::NothingLeft => "removing the edge would leave no triangle",
         })
     }
 }
@@ -165,6 +177,149 @@ pub fn add_vertex(g: &Geometry, at: Point) -> Result<Geometry, EditError> {
     out.uvs.push([uv(0), uv(1)]);
     set_tri(&mut out, t, [v[0], v[1], n]);
     out.indices.extend([v[1], v[2], n, v[2], v[0], n]);
+    Ok(out)
+}
+
+/// Barycentric weights of `p` in triangle `t`, or `None` for a degenerate one.
+fn bary(g: &Geometry, t: usize, p: [f64; 2]) -> Option<[f64; 3]> {
+    let v = tri(g, t);
+    let (a, b, c) = (p64(g, v[0]), p64(g, v[1]), p64(g, v[2]));
+    let area = cross(a, b, c);
+    (area != 0.0).then(|| {
+        [
+            cross(p, b, c) / area,
+            cross(a, p, c) / area,
+            cross(a, b, p) / area,
+        ]
+    })
+}
+
+/// Whether the open segments `a b` and `c d` cross each other.
+fn crosses(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    cross(a, b, c) * cross(a, b, d) < 0.0 && cross(c, d, a) * cross(c, d, b) < 0.0
+}
+
+/// Adds a vertex outside the outline and joins it to the nearest outline edge
+/// that sees it, with one new triangle, so the outline grows. A candidate edge
+/// must have the point on its outer side, no vertex inside the new triangle
+/// and no edge crossing the new sides. The UV extends the triangle behind the
+/// edge; a point whose UV leaves the texture (0 to 1) is refused.
+pub fn extend_outline(g: &Geometry, at: Point) -> Result<Geometry, EditError> {
+    let p = [f64::from(at[0]), f64::from(at[1])];
+    let triangles = g.indices.len() / 3;
+    for t in 0..triangles {
+        if bary(g, t, p).is_some_and(|w| w[0].min(w[1]).min(w[2]) >= -ON_EDGE) {
+            return Err(EditError::InsideMesh);
+        }
+    }
+    let map = edge_map(g);
+    let edges: Vec<(u32, u32)> = map
+        .keys()
+        .copied()
+        .filter(|&(a, b)| a < b || !map.contains_key(&(b, a)))
+        .collect();
+    let mut best: Option<(f64, u32, u32, Point)> = None;
+    let mut seen = false;
+    for (&(u, v), &t) in &map {
+        if map.contains_key(&(v, u)) {
+            continue;
+        }
+        let w = tri(g, t);
+        let sign = cross(p64(g, w[0]), p64(g, w[1]), p64(g, w[2])).signum();
+        let (pu, pv) = (p64(g, u), p64(g, v));
+        if sign == 0.0 || cross(pv, pu, p) * sign <= 1e-12 {
+            continue;
+        }
+        let blocked = (0..g.positions.len() as u32).any(|x| {
+            x != u && x != v && {
+                let q = p64(g, x);
+                [cross(pv, pu, q), cross(pu, p, q), cross(p, pv, q)]
+                    .iter()
+                    .all(|a| a * sign >= 0.0)
+            }
+        }) || edges.iter().any(|&(x, y)| {
+            let (px, py) = (p64(g, x), p64(g, y));
+            (x != u && y != u && crosses(pu, p, px, py))
+                || (x != v && y != v && crosses(pv, p, px, py))
+        });
+        if blocked {
+            continue;
+        }
+        seen = true;
+        let Some(weights) = bary(g, t, p) else {
+            continue;
+        };
+        let uv = |axis: usize| {
+            (0..3)
+                .map(|k| weights[k] * f64::from(g.uvs[w[k] as usize][axis]))
+                .sum::<f64>()
+        };
+        let uv = [uv(0), uv(1)];
+        if uv.iter().any(|c| !(-ON_EDGE..=1.0 + ON_EDGE).contains(c)) {
+            continue;
+        }
+        let d = segment_distance(p, pu, pv);
+        if best.is_none_or(|(m, ..)| d < m) {
+            best = Some((d, u, v, [uv[0] as f32, uv[1] as f32]));
+        }
+    }
+    let (_, u, v, uv) = best.ok_or(if seen {
+        EditError::OutsideTexture
+    } else {
+        EditError::CannotExtend
+    })?;
+    let mut out = g.clone();
+    let n = g.positions.len() as u32;
+    out.positions.push(at);
+    out.uvs.push(uv);
+    out.indices.extend([v, u, n]);
+    Ok(out)
+}
+
+/// Removes the edge `u`-`v` with the one or two triangles that have it, which
+/// leaves a hole, or shrinks the outline when the edge is on it. Vertices left
+/// in no triangle go too. Fails when no triangle would remain.
+pub fn remove_edge(g: &Geometry, u: u32, v: u32) -> Result<Geometry, EditError> {
+    check_vertices(g, &[u, v])?;
+    let map = edge_map(g);
+    let gone: Vec<usize> = [map.get(&(u, v)), map.get(&(v, u))]
+        .into_iter()
+        .flatten()
+        .copied()
+        .collect();
+    if gone.is_empty() {
+        return Err(EditError::NoSuchEdge);
+    }
+    let mut out = Geometry {
+        positions: g.positions.clone(),
+        uvs: g.uvs.clone(),
+        indices: Vec::new(),
+    };
+    for t in (0..g.indices.len() / 3).filter(|t| !gone.contains(t)) {
+        out.indices.extend(tri(g, t));
+    }
+    if out.indices.is_empty() {
+        return Err(EditError::NothingLeft);
+    }
+    let mut remap = vec![u32::MAX; g.positions.len()];
+    for &i in &out.indices {
+        remap[i as usize] = 0;
+    }
+    let mut next = 0;
+    let (mut positions, mut uvs) = (Vec::new(), Vec::new());
+    for (i, slot) in remap.iter_mut().enumerate() {
+        if *slot == 0 {
+            *slot = next;
+            next += 1;
+            positions.push(g.positions[i]);
+            uvs.push(g.uvs[i]);
+        }
+    }
+    for i in &mut out.indices {
+        *i = remap[*i as usize];
+    }
+    out.positions = positions;
+    out.uvs = uvs;
     Ok(out)
 }
 
@@ -707,6 +862,103 @@ mod tests {
     fn sign_of(g: &Geometry) -> f64 {
         let v = tri(g, 0);
         cross(p64(g, v[0]), p64(g, v[1]), p64(g, v[2])).signum()
+    }
+
+    /// A grid whose UVs cover the middle of the texture, so the outline can grow.
+    fn small_in_texture(w: u32, h: u32, flipped: bool, seed: &mut u64) -> Geometry {
+        let mut g = grid(w, h, flipped, seed);
+        for uv in &mut g.uvs {
+            *uv = [0.25 + 0.5 * uv[0], 0.25 + 0.5 * uv[1]];
+        }
+        g
+    }
+
+    #[test]
+    fn extending_the_outline_adds_one_sound_triangle_with_an_extended_uv() {
+        let mut seed = 5;
+        for flipped in [false, true] {
+            let g = small_in_texture(2, 2, flipped, &mut seed);
+            let out = extend_outline(&g, [1.0, -0.4]).unwrap();
+            assert_eq!(out.positions.len(), g.positions.len() + 1);
+            assert_eq!(out.indices.len(), g.indices.len() + 3);
+            assert!(area(&out) > area(&g));
+            assert_sound(&out, sign_of(&g));
+            // 0.4 below a grid whose 2 cells span 0.5 of the texture: v = 0.25 - 0.1.
+            let uv = out.uvs.last().unwrap();
+            assert!(
+                (uv[0] - 0.5).abs() < 0.05 && (uv[1] - 0.15).abs() < 0.05,
+                "{uv:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn extending_refuses_a_point_inside_outside_the_texture_or_out_of_sight() {
+        let mut seed = 6;
+        let g = small_in_texture(2, 2, false, &mut seed);
+        assert_eq!(extend_outline(&g, [1.0, 1.0]), Err(EditError::InsideMesh));
+        assert_eq!(
+            extend_outline(&g, [1.0, -9.0]),
+            Err(EditError::OutsideTexture)
+        );
+        // A notch: the point behind the notch is hidden from the far edges but
+        // an edge that sees it takes it, and nothing overlaps.
+        let full = grid(2, 2, false, &mut seed);
+        assert_eq!(
+            extend_outline(&full, [1.0, -0.4]),
+            Err(EditError::OutsideTexture)
+        );
+        let mut notched = remove_edge(&g, 0, 1).unwrap();
+        assert_sound(&notched, 1.0);
+        notched = extend_outline(&notched, [1.0, -0.4]).unwrap();
+        assert_sound(&notched, 1.0);
+    }
+
+    #[test]
+    fn removing_an_edge_makes_a_hole_or_shrinks_the_outline_and_drops_orphans() {
+        let mut seed = 7;
+        let g = grid(2, 2, false, &mut seed);
+        let (outline_before, len_before) = outline(&g);
+        // An inner edge: both triangles go, the outline stays.
+        let map = edge_map(&g);
+        let (u, v) = *map
+            .keys()
+            .find(|&&(a, b)| map.contains_key(&(b, a)))
+            .unwrap();
+        let hole = remove_edge(&g, u, v).unwrap();
+        assert_eq!(hole.indices.len(), g.indices.len() - 6);
+        assert_sound(&hole, 1.0);
+        assert!(area(&hole) < area(&g));
+        // An outline edge: one triangle goes.
+        let (a, b) = outline_before[0];
+        let smaller = remove_edge(&g, a, b).unwrap();
+        assert_eq!(smaller.indices.len(), g.indices.len() - 3);
+        assert_sound(&smaller, 1.0);
+        assert!(len_before > 0.0);
+        // A vertex that only those triangles used is gone.
+        assert!(smaller.positions.len() <= g.positions.len());
+        assert_eq!(remove_edge(&g, 0, 8), Err(EditError::NoSuchEdge));
+        assert_eq!(remove_edge(&g, 0, 99), Err(EditError::BadVertex));
+        // The last triangle cannot go.
+        let one = Geometry {
+            positions: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2],
+        };
+        assert_eq!(remove_edge(&one, 0, 1), Err(EditError::NothingLeft));
+    }
+
+    #[test]
+    fn removing_the_edge_of_a_corner_triangle_drops_its_corner_vertex() {
+        let g = Geometry {
+            positions: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        // Triangle 0 1 2 goes: vertex 1 is in no other triangle.
+        let out = remove_edge(&g, 0, 1).unwrap();
+        assert_eq!(out.positions, vec![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        assert_eq!(out.indices, vec![0, 1, 2]);
     }
 
     #[test]
