@@ -340,7 +340,11 @@ keyform-editing = 編集中のキー
 keyform-off = キー位置にいません
 mirror-source = 反転コピー元
 mirror-paste = ここへ反転して貼り付け
-mirror-center = 反転の中心線 x（空欄 = モデル中心）
+mirror-center = 中心線 x
+mirror-center-empty = モデル中心
+mirror-title = 反転コピー
+keys-axis-row = 行
+keys-axis-column = 列
 mirror-err-no-source = 先に反転コピー元を選んでください。
 mirror-err-no-key = この要素にはこのキーのキーフォームがありません。
 mirror-err-kind = 反転コピーは同じ種類の要素どうしでのみできます。

@@ -344,7 +344,11 @@ keyform-editing = Editing key
 keyform-off = Not on a key
 mirror-source = Mirror source
 mirror-paste = Paste mirrored here
-mirror-center = Mirror line x (blank = model centre)
+mirror-center = Center line x
+mirror-center-empty = Model center
+mirror-title = Mirror copy
+keys-axis-row = Row
+keys-axis-column = Column
 mirror-err-no-source = Pick a mirror source first.
 mirror-err-no-key = The element has no keyform at this key.
 mirror-err-kind = Mirror copy needs two elements of the same kind.

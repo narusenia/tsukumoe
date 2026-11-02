@@ -51,6 +51,18 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
     let range = p.max - p.min;
     ui.horizontal(|ui| {
+        if button(ui, &t("param-bind"), Variant::Secondary).clicked() {
+            outs.push(match param_ops::bind(model, name, selection) {
+                Ok(op) => Out::Op(op),
+                Err(e) => Out::Error(e.key()),
+            });
+        }
+        if keys.is_some() && button(ui, &t("param-unbind"), Variant::Secondary).clicked() {
+            outs.push(match param_ops::unbind(model, name, selection) {
+                Ok(op) => Out::Confirm(Kind::Unbind, name.to_owned(), op),
+                Err(e) => Out::Error(e.key()),
+            });
+        }
         let step = |dir: i32, view: &mut ViewState| {
             if let Some(k) = keys
                 .as_deref()
@@ -74,18 +86,6 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         if icon_button(ui, Icon::Minus, &t("param-key-remove"), Variant::Ghost).clicked() {
             outs.push(match param_ops::remove_key(model, name, value, selection) {
                 Ok(op) => Out::Confirm(Kind::Key, name.to_owned(), op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if button(ui, &t("param-bind"), Variant::Secondary).clicked() {
-            outs.push(match param_ops::bind(model, name, selection) {
-                Ok(op) => Out::Op(op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if keys.is_some() && button(ui, &t("param-unbind"), Variant::Secondary).clicked() {
-            outs.push(match param_ops::unbind(model, name, selection) {
-                Ok(op) => Out::Confirm(Kind::Unbind, name.to_owned(), op),
                 Err(e) => Out::Error(e.key()),
             });
         }
@@ -146,10 +146,22 @@ fn pad_section(
             .unwrap_or(from)
     };
     ui.horizontal_wrapped(|ui| {
-        if button(ui, &format!("\u{2195} {}", name_of(r)), Variant::Ghost).clicked() {
+        if button(
+            ui,
+            &format!("{}: {}", t("keys-axis-row"), name_of(r)),
+            Variant::Ghost,
+        )
+        .clicked()
+        {
             r = next(r, c);
         }
-        if button(ui, &format!("\u{2194} {}", name_of(c)), Variant::Ghost).clicked() {
+        if button(
+            ui,
+            &format!("{}: {}", t("keys-axis-column"), name_of(c)),
+            Variant::Ghost,
+        )
+        .clicked()
+        {
             c = next(c, r);
         }
         if icon_button(ui, Icon::ArrowUpDown, &t("param-axes-swap"), Variant::Ghost).clicked() {
@@ -336,26 +348,38 @@ fn mirror_row(
 ) {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    ui.horizontal(|ui| {
-        if button(ui, &t("mirror-source"), Variant::Secondary).clicked()
-            && let Err(key) = mirror::set_source(model, view, element)
-        {
-            outs.push(Out::Error(key));
-        }
-        if button(ui, &t("mirror-paste"), Variant::Secondary).clicked() {
-            outs.push(match mirror::paste(model, view, element) {
-                Ok(op) => Out::Op(op),
-                Err(key) => Out::Error(key),
+    egui::CollapsingHeader::new(t("mirror-title"))
+        .id_salt("keys-mirror")
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if button(ui, &t("mirror-source"), Variant::Secondary).clicked()
+                    && let Err(key) = mirror::set_source(model, view, element)
+                {
+                    outs.push(Out::Error(key));
+                }
+                if button(ui, &t("mirror-paste"), Variant::Secondary).clicked() {
+                    outs.push(match mirror::paste(model, view, element) {
+                        Ok(op) => Out::Op(op),
+                        Err(key) => Out::Error(key),
+                    });
+                }
             });
-        }
-    });
-    let hint_text = t("mirror-center");
-    text_input(ui, &mut view.mirror_center, &hint_text, &hint_text);
-    if let Some((source, key)) = &view.mirror_source {
-        let (ElementRef::Mesh { name } | ElementRef::Deformer { name } | ElementRef::Glue { name }) =
-            source;
-        hint(ui, format!("{}: {name} {key:?}", t("mirror-source")));
-    }
+            ui.horizontal(|ui| {
+                ui.label(t("mirror-center"));
+                let hint_text = t("mirror-center-empty");
+                text_input(ui, &mut view.mirror_center, &hint_text, &t("mirror-center"));
+            });
+            if let Some((source, key)) = &view.mirror_source {
+                let (ElementRef::Mesh { name }
+                | ElementRef::Deformer { name }
+                | ElementRef::Glue { name }) = source;
+                let key: Vec<String> = key.iter().map(|k| (k + 1).to_string()).collect();
+                hint(
+                    ui,
+                    format!("{}: {name} ({})", t("mirror-source"), key.join(", ")),
+                );
+            }
+        });
 }
 
 #[cfg(test)]
