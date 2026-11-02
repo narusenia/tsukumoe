@@ -60,7 +60,12 @@ pub fn number_or(
     if response.gained_focus() {
         ui.data_mut(|d| d.insert_temp(start_id, *value));
     }
-    if response.double_clicked()
+    // The first click already turned the field into a text edit, whose own response
+    // may not report the second one, so read the pointer instead.
+    if ui.input(|i| {
+        i.pointer
+            .button_double_clicked(egui::PointerButton::Primary)
+    }) && ui.rect_contains_pointer(response.rect)
         && let Some(d) = default
     {
         *value = d;
