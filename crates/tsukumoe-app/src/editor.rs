@@ -17,7 +17,7 @@ use crate::menu;
 use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::options::Options;
 use crate::panels::palette::Palette;
-use crate::panels::{history, inspector, keys, parameters, titlebar, tree, viewport};
+use crate::panels::{history, inspector, keys, parameters, splash, titlebar, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
 use crate::tree_model::{self, TreeView};
@@ -1841,7 +1841,11 @@ impl PanelHost for Panels<'_> {
         let editor = &mut *self.editor;
         let Some(doc) = editor.doc.as_mut() else {
             match id {
-                "viewport" => viewport::placeholder(ui, false),
+                "viewport" => {
+                    for action in splash::show(ui, editor.recent.paths()) {
+                        editor.run_action(&ctx, &action);
+                    }
+                }
                 _ => {
                     hint(ui, tr(&ctx, "history-empty"));
                 }
