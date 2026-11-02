@@ -16,6 +16,7 @@ use super::*;
 pub enum SettingsTab {
     General,
     Controls,
+    Pie,
     Shortcuts,
     View,
     Edit,
@@ -23,9 +24,10 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::General,
         Self::Controls,
+        Self::Pie,
         Self::Shortcuts,
         Self::View,
         Self::Edit,
@@ -36,6 +38,7 @@ impl SettingsTab {
         match self {
             Self::General => "settings-tab-general",
             Self::Controls => "settings-tab-controls",
+            Self::Pie => "settings-tab-pie",
             Self::Shortcuts => "settings-tab-shortcuts",
             Self::View => "settings-tab-view",
             Self::Edit => "settings-tab-edit",
@@ -49,12 +52,14 @@ pub struct SettingsState {
     pub tab: SettingsTab,
     texts: Vec<String>,
     error: Option<String>,
+    /// The pie settings being edited: 0 the common slots, then one per tool.
+    pie_mode: usize,
 }
 
-const WIDTH: f32 = 680.0;
+const WIDTH: f32 = 800.0;
 const TAB_COLUMN: f32 = 140.0;
 const BODY_MIN: f32 = 320.0;
-const BODY_MAX: f32 = 720.0;
+const BODY_MAX: f32 = 900.0;
 
 impl Editor {
     /// Opens the settings dialog on `tab`.
@@ -71,6 +76,7 @@ impl Editor {
             tab,
             texts,
             error: None,
+            pie_mode: 0,
         })));
     }
 
@@ -82,7 +88,7 @@ impl Editor {
     ) {
         let t = |key: &str| tr(ctx, key);
         // Tall enough for the longest tab, but never more than the window allows.
-        let body_height = (ctx.content_rect().height() * 0.7).clamp(BODY_MIN, BODY_MAX);
+        let body_height = (ctx.content_rect().height() * 0.8).clamp(BODY_MIN, BODY_MAX);
         tsukumoe_ui::dialog_sized(
             ctx,
             "dialog-settings",
@@ -118,12 +124,10 @@ impl Editor {
                                     section_header(ui, &t("drag-title"));
                                     self.drag_contents(ctx, ui);
                                     ui.add_space(12.0);
-                                    section_header(ui, &t("pie-title"));
-                                    self.pie_contents(ctx, ui);
-                                    ui.add_space(12.0);
                                     section_header(ui, &t("confirm-settings-title"));
                                     self.confirm_contents(ctx, ui);
                                 }
+                                SettingsTab::Pie => self.pie_contents(ctx, ui, &mut state.pie_mode),
                                 SettingsTab::Shortcuts => {
                                     self.keymap_contents(
                                         ctx,
@@ -271,13 +275,17 @@ impl Editor {
     }
 
     /// The pie menu's settings alone, for the snapshot test.
-    pub fn pie_settings(&mut self, ctx: &Context, ui: &mut Ui) {
-        self.pie_contents(ctx, ui);
+    pub fn pie_settings(&mut self, ctx: &Context, ui: &mut Ui, mode: &mut usize) {
+        self.pie_contents(ctx, ui, mode);
     }
 
-    fn pie_contents(&mut self, ctx: &Context, ui: &mut Ui) {
+    /// The pie menu: which slots each mode opens, laid out like the pie. Mode 0
+    /// is the common set; a tool can have slots of its own.
+    fn pie_contents(&mut self, ctx: &Context, ui: &mut Ui, mode: &mut usize) {
+        use crate::actions::Tool;
         let t = |key: &str| tr(ctx, key);
         let before = self.pie_config.clone();
+        let tools = [Tool::Select, Tool::Mesh, Tool::Deformer];
         let names: Vec<(String, String)> = ACTIONS
             .iter()
             .map(|a| ((*a).to_owned(), t(&actions::label_key(a))))
@@ -285,7 +293,63 @@ impl Editor {
         let options: Vec<(String, &str)> =
             names.iter().map(|(a, n)| (a.clone(), n.as_str())).collect();
         hint(ui, t("pie-hint"));
-        fn slots(
+        // Which mode's slots are edited.
+        let labels = [
+            t("pie-mode-common"),
+            t("pie-mode-select"),
+            t("pie-mode-mesh"),
+            t("pie-mode-deformer"),
+        ];
+        let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+        tsukumoe_ui::tabs(ui, mode, &label_refs);
+        *mode = (*mode).min(tools.len());
+        let tool_key = (*mode > 0).then(|| tools[*mode - 1].key().to_owned());
+        if let Some(key) = &tool_key {
+            let mut own = self.pie_config.tools.contains_key(key);
+            if tsukumoe_ui::checkbox(ui, &mut own, &t("pie-mode-own")).changed() {
+                if own {
+                    let copy = self.pie_config.items.clone();
+                    self.pie_config.tools.insert(key.clone(), copy);
+                } else {
+                    self.pie_config.tools.remove(key);
+                }
+            }
+            if !own {
+                hint(ui, t("pie-mode-uses-common"));
+            }
+        }
+        let editable = tool_key
+            .as_ref()
+            .is_none_or(|k| self.pie_config.tools.contains_key(k));
+        if editable {
+            let items = match &tool_key {
+                Some(k) => self.pie_config.tools.get_mut(k).expect("checked above"),
+                None => &mut self.pie_config.items,
+            };
+            Self::pie_slots(ui, items, &options, &t);
+        }
+        if button(ui, &t("pie-reset"), Variant::Secondary).clicked() {
+            self.pie_config = PieConfig::default();
+        }
+        if self.pie_config != before
+            && let Some(dir) = &self.settings_dir
+            && let Err(e) = settings::write(dir, PIE_FILE, &self.pie_config.to_json())
+        {
+            self.toasts.push(ctx, Tone::Error, e);
+        }
+    }
+
+    /// The slots of one set, one per spot around a ring (1 at the top, going
+    /// clockwise), then the slots inside each group, and the add / remove buttons.
+    fn pie_slots(
+        ui: &mut Ui,
+        items: &mut Vec<Entry>,
+        options: &[(String, &str)],
+        t: &dyn Fn(&str) -> String,
+    ) {
+        const MAX_SLOTS: usize = 12;
+        const SLOT_WIDTH: f32 = 170.0;
+        fn rows(
             ui: &mut Ui,
             entries: &mut [Entry],
             options: &[(String, &str)],
@@ -300,31 +364,31 @@ impl Editor {
                     }
                     Entry::Group { label: name, items } => {
                         label(ui, t(name));
-                        ui.indent(id.clone(), |ui| slots(ui, items, options, &id, t));
+                        ui.indent(id.clone(), |ui| rows(ui, items, options, &id, t));
                     }
                 }
             }
         }
-        // The top level as the pie itself: slot 1 at the top, going clockwise.
-        let n = self.pie_config.items.len().max(1);
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width().min(460.0), 300.0),
-            egui::Sense::hover(),
-        );
-        let (rx, ry) = (rect.width() / 2.0 - 80.0, rect.height() / 2.0 - 24.0);
-        let theme = tsukumoe_ui::Theme::get(ctx);
+        let n = items.len().max(1);
+        let width = ui.available_width().min(640.0);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 340.0), egui::Sense::hover());
+        // The slots sit on an ellipse, kept inside the area whole.
+        let rx = (rect.width() - SLOT_WIDTH) / 2.0;
+        let ry = rect.height() / 2.0 - 20.0;
+        let theme = tsukumoe_ui::Theme::get(ui.ctx());
         ui.painter().circle_stroke(
             rect.center(),
-            ry.min(rx) * 0.45,
+            ry.min(rx) * 0.4,
             egui::Stroke::new(1.0, theme.colors.border),
         );
-        for (i, entry) in self.pie_config.items.iter_mut().enumerate() {
+        for (i, entry) in items.iter_mut().enumerate() {
             let a = i as f32 * std::f32::consts::TAU / n as f32;
             let at = rect.center() + egui::vec2(rx * a.sin(), -ry * a.cos());
-            let slot = egui::Rect::from_center_size(at, egui::vec2(150.0, 24.0));
+            let slot = egui::Rect::from_center_size(at, egui::vec2(SLOT_WIDTH, 24.0));
             // A child at a fixed spot: it must not move the parent's cursor.
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(slot));
             let ui = &mut child;
+            ui.set_width(SLOT_WIDTH);
             match entry {
                 Entry::Action { action } => {
                     tsukumoe_ui::select(
@@ -332,7 +396,7 @@ impl Editor {
                         format!("pie/{i}"),
                         &format!("{}", i + 1),
                         action,
-                        &options,
+                        options,
                     );
                 }
                 Entry::Group { label: name, .. } => {
@@ -341,23 +405,33 @@ impl Editor {
             }
         }
         // The slots inside a group, listed under the pie.
-        for (i, entry) in self.pie_config.items.iter_mut().enumerate() {
+        for (i, entry) in items.iter_mut().enumerate() {
             if let Entry::Group { label: name, items } = entry {
                 label(ui, format!("{}. {}", i + 1, t(name)));
                 ui.indent(format!("pie/{i}"), |ui| {
-                    slots(ui, items, &options, &format!("pie/{i}"), &t)
+                    rows(ui, items, options, &format!("pie/{i}"), t)
                 });
             }
         }
-        if button(ui, &t("pie-reset"), Variant::Secondary).clicked() {
-            self.pie_config = PieConfig::default();
-        }
-        if self.pie_config != before
-            && let Some(dir) = &self.settings_dir
-            && let Err(e) = settings::write(dir, PIE_FILE, &self.pie_config.to_json())
-        {
-            self.toasts.push(ctx, Tone::Error, e);
-        }
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    items.len() < MAX_SLOTS,
+                    egui::Button::new(t("pie-slot-add")),
+                )
+                .clicked()
+            {
+                items.push(Entry::Action {
+                    action: "view.palette".to_owned(),
+                });
+            }
+            if ui
+                .add_enabled(items.len() > 1, egui::Button::new(t("pie-slot-remove")))
+                .clicked()
+            {
+                items.pop();
+            }
+        });
     }
 
     fn drag_contents(&mut self, ctx: &Context, ui: &mut Ui) {

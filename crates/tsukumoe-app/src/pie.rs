@@ -29,6 +29,10 @@ pub enum Entry {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct PieConfig {
     pub items: Vec<Entry>,
+    /// Slots of their own for a tool (`select`, `mesh`, `deformer`); a tool
+    /// with no entry uses `items`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub tools: std::collections::BTreeMap<String, Vec<Entry>>,
 }
 
 fn action(name: &str) -> Entry {
@@ -40,6 +44,7 @@ fn action(name: &str) -> Entry {
 impl Default for PieConfig {
     fn default() -> Self {
         Self {
+            tools: Default::default(),
             items: vec![
                 action("tool.select"),
                 action("edit.undo"),
@@ -76,6 +81,15 @@ impl PieConfig {
     /// The menu items. Actions the editor does not know (a hand-edited file)
     /// are dropped, as are groups that end up empty; groups are one level deep.
     pub fn build_items(&self, text: &dyn Fn(&str) -> String) -> Vec<PieItem> {
+        self.build_entries(&self.items, text)
+    }
+
+    /// The slots a tool shows: its own when it has them, else the common ones.
+    pub fn entries_for(&self, tool: &str) -> &[Entry] {
+        self.tools.get(tool).map_or(&self.items, Vec::as_slice)
+    }
+
+    fn build_entries(&self, entries: &[Entry], text: &dyn Fn(&str) -> String) -> Vec<PieItem> {
         fn build(entries: &[Entry], text: &dyn Fn(&str) -> String, depth: usize) -> Vec<PieItem> {
             entries
                 .iter()
@@ -92,16 +106,34 @@ impl PieConfig {
                 })
                 .collect()
         }
-        build(&self.items, text, 0)
+        build(entries, text, 0)
     }
 
-    pub fn items(&self, ctx: &egui::Context) -> Vec<PieItem> {
-        self.build_items(&|key| tr(ctx, key))
+    /// The menu to open while `tool` is the active tool.
+    pub fn items(&self, ctx: &egui::Context, tool: &str) -> Vec<PieItem> {
+        let items = self.build_entries(self.entries_for(tool), &|key| tr(ctx, key));
+        if items.is_empty() {
+            self.build_items(&|key| tr(ctx, key))
+        } else {
+            items
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tool_with_its_own_slots_uses_them_and_others_use_the_common_ones() {
+        let mut c = PieConfig::default();
+        c.tools.insert("mesh".into(), vec![action("edit.undo")]);
+        assert_eq!(c.entries_for("mesh"), [action("edit.undo")]);
+        assert_eq!(c.entries_for("select"), c.items.as_slice());
+        // An old file without `tools` still loads, and `tools` round-trips.
+        assert_eq!(PieConfig::from_json(&c.to_json()), c);
+        let old = PieConfig::from_json(r#"{"items":[{"action":"edit.undo"}]}"#);
+        assert!(old.tools.is_empty());
+    }
+
     use super::*;
 
     fn ids(items: &[PieItem]) -> Vec<&str> {
@@ -138,6 +170,7 @@ mod tests {
     fn it_round_trips_and_damage_gives_the_default() {
         let c = PieConfig {
             items: vec![action("edit.undo"), action("edit.redo")],
+            tools: Default::default(),
         };
         assert_eq!(PieConfig::from_json(&c.to_json()), c);
         for bad in [

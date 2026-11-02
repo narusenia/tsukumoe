@@ -974,7 +974,10 @@ impl Editor {
             "view.pie-menu" => {
                 if self.pie.is_none() {
                     let at = ctx.pointer_latest_pos().unwrap_or_default();
-                    self.pie = Some(tsukumoe_ui::PieMenu::open(at, self.pie_config.items(ctx)));
+                    self.pie = Some(tsukumoe_ui::PieMenu::open(
+                        at,
+                        self.pie_config.items(ctx, self.view.tool.key()),
+                    ));
                 }
             }
             "mesh.delete-vertices"

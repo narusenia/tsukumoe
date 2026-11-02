@@ -969,7 +969,7 @@ fn keyform_caption_in_the_light_theme() {
 #[test]
 fn pie_settings_in_the_light_theme() {
     let mut harness = Harness::builder()
-        .with_size(egui::vec2(520.0, 520.0))
+        .with_size(egui::vec2(700.0, 600.0))
         .wgpu()
         .build_ui_state(
             |ui, editor: &mut Editor| {
@@ -977,7 +977,8 @@ fn pie_settings_in_the_light_theme() {
                 tsukumoe_ui::install_cjk_font(&ctx);
                 set_language(&ctx, Language::En);
                 set_mode(&ctx, Mode::Light);
-                editor.pie_settings(&ctx, ui);
+                let mut mode = 0;
+                editor.pie_settings(&ctx, ui, &mut mode);
             },
             Editor::new(None),
         );

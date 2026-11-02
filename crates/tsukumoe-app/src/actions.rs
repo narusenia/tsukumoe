@@ -82,6 +82,15 @@ pub enum Tool {
 }
 
 impl Tool {
+    /// The name a pie menu setting uses for this tool.
+    pub fn key(self) -> &'static str {
+        match self {
+            Tool::Select => "select",
+            Tool::Mesh => "mesh",
+            Tool::Deformer => "deformer",
+        }
+    }
+
     pub fn action(self) -> &'static str {
         match self {
             Tool::Select => "tool.select",
