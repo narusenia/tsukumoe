@@ -176,16 +176,16 @@ impl Theme {
                 background: rgb(0x0e0e0e),
                 surface: rgb(0x151515),
                 surface_raised: rgb(0x1c1c1c),
-                border: rgb(0x242424),
-                border_strong: rgb(0x343434),
+                border: rgb(0x2e2e2e),
+                border_strong: rgb(0x484848),
                 text: rgb(0xe8e8e8),
-                text_muted: rgb(0x888888),
+                text_muted: rgb(0x9a9a9a),
                 accent: rgb(0x6c7ae0),
                 accent_text: rgb(0xffffff),
-                control: rgb(0x1d1d1d),
-                control_hover: rgb(0x262626),
-                control_active: rgb(0x303030),
-                disabled: rgb(0x4a4a4a),
+                control: rgb(0x2a2a2a),
+                control_hover: rgb(0x353535),
+                control_active: rgb(0x404040),
+                disabled: rgb(0x5e5e5e),
                 error: rgb(0xf0616d),
                 warning: rgb(0xe5a946),
                 success: rgb(0x4cc38a),
@@ -202,16 +202,16 @@ impl Theme {
                 background: rgb(0xfafafa),
                 surface: rgb(0xffffff),
                 surface_raised: rgb(0xffffff),
-                border: rgb(0xebebeb),
-                border_strong: rgb(0xd6d6d6),
+                border: rgb(0xdcdcdc),
+                border_strong: rgb(0xbdbdbd),
                 text: rgb(0x1a1a1a),
                 text_muted: rgb(0x6b6b6b),
                 accent: rgb(0x4f5bd5),
                 accent_text: rgb(0xffffff),
-                control: rgb(0xf1f1f1),
-                control_hover: rgb(0xe8e8e8),
-                control_active: rgb(0xdddddd),
-                disabled: rgb(0xb0b0b0),
+                control: rgb(0xe6e6e6),
+                control_hover: rgb(0xdadada),
+                control_active: rgb(0xcecece),
+                disabled: rgb(0x9e9e9e),
                 error: rgb(0xd6303f),
                 warning: rgb(0xb7791f),
                 success: rgb(0x1f8f5f),
@@ -293,7 +293,8 @@ impl Theme {
         ] {
             state.bg_fill = fill;
             state.weak_bg_fill = fill;
-            state.bg_stroke = Stroke::NONE;
+            // A thin edge so a control reads on any surface, even one of its own tone.
+            state.bg_stroke = Stroke::new(1.0, c.border);
             state.fg_stroke = Stroke::new(1.0, c.text);
         }
         // The slider rail and checkbox frames use this fill; buttons use the weak one.
@@ -451,6 +452,36 @@ impl Preferences {
 
 #[cfg(test)]
 mod tests {
+    /// WCAG relative luminance contrast of two colors.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let lum = |c: Color32| {
+            let f = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b())
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn a_control_stands_out_from_every_surface_it_sits_on() {
+        for theme in [Theme::dark(), Theme::light()] {
+            let c = theme.colors;
+            for surface in [c.background, c.surface, c.surface_raised] {
+                assert!(contrast(c.control, surface) >= 1.15, "dark: {}", theme.dark);
+            }
+            // Text is readable on the control, the muted text on a surface.
+            assert!(contrast(c.text, c.control) >= 7.0);
+            assert!(contrast(c.text_muted, c.surface_raised) >= 4.5);
+        }
+    }
+
     use super::*;
 
     #[test]
