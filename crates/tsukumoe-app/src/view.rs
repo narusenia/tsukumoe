@@ -80,6 +80,9 @@ impl Camera {
 pub struct ViewState {
     /// What is selected; with several, the one chosen last.
     pub selection: Option<Selection>,
+    /// Only this part, mesh or deformer (and what is under it) is drawn in the
+    /// viewport; nothing in the model changes. Not saved.
+    pub solo: Option<Selection>,
     /// The other selected items, and the `selection` they were chosen next
     /// to: when anything else sets `selection`, they no longer count.
     others: Vec<Selection>,
@@ -236,36 +239,21 @@ impl ViewState {
     /// (down the whole tree); each once.
     pub fn meshes_of(&self, model: &tsukumoe_core::model::Model) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
-        let mut add = |names: Vec<String>| {
-            for n in names {
+        for item in self.selected() {
+            for n in meshes_of_item(model, &item) {
                 if !out.contains(&n) {
                     out.push(n);
                 }
             }
-        };
-        for item in self.selected() {
-            match item {
-                Selection::Mesh(n) => add(vec![n]),
-                Selection::Part(name) => add(crate::tree_model::meshes_under_part(model, &name)),
-                Selection::Warp(name) | Selection::Rotation(name) => {
-                    add(crate::tree_model::meshes_under_deformer(model, &name));
-                }
-                Selection::Glue(name) => {
-                    if let Some(g) = model
-                        .glues()
-                        .find(&name)
-                        .and_then(|id| model.glues().get(id))
-                    {
-                        add([g.mesh_a, g.mesh_b]
-                            .iter()
-                            .filter_map(|&m| model.meshes().name(m).map(str::to_owned))
-                            .collect());
-                    }
-                }
-                Selection::Parameter(_) => {}
-            }
         }
         out
+    }
+
+    /// The meshes that stay visible while soloing, `None` when not soloing (or
+    /// when the soloed element is gone or holds no mesh).
+    pub fn solo_meshes(&self, model: &tsukumoe_core::model::Model) -> Option<Vec<String>> {
+        let names = meshes_of_item(model, self.solo.as_ref()?);
+        (!names.is_empty()).then_some(names)
     }
 
     pub fn revision(&self) -> u64 {
@@ -345,11 +333,75 @@ impl ViewState {
     }
 }
 
+/// The meshes one selected item stands for: the mesh itself, every mesh under
+/// a part, those hanging from a deformer (down the whole tree), the two a glue joins.
+pub fn meshes_of_item(model: &tsukumoe_core::model::Model, item: &Selection) -> Vec<String> {
+    match item {
+        Selection::Mesh(n) => vec![n.clone()],
+        Selection::Part(name) => crate::tree_model::meshes_under_part(model, name),
+        Selection::Warp(name) | Selection::Rotation(name) => {
+            crate::tree_model::meshes_under_deformer(model, name)
+        }
+        Selection::Glue(name) => model
+            .glues()
+            .find(name)
+            .and_then(|id| model.glues().get(id))
+            .map(|g| {
+                [g.mesh_a, g.mesh_b]
+                    .iter()
+                    .filter_map(|&m| model.meshes().name(m).map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        Selection::Parameter(_) => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const FIT: [f32; 4] = [-1.0, -1.0, 1.0, 1.0];
+
+    #[test]
+    fn soloing_a_folder_keeps_every_mesh_under_it_and_nothing_else() {
+        use tsukumoe_core::command::Command;
+        use tsukumoe_core::model::Model;
+        let mut m = Model::new();
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let part = |name: &str, parent: Option<&str>| Command::AddPart {
+            name: name.into(),
+            parent: parent.map(Into::into),
+        };
+        let mesh = |name: &str, part: &str| Command::AddMesh {
+            name: name.into(),
+            part: part.into(),
+            positions: tri.clone(),
+            uvs: tri.clone(),
+            indices: vec![0, 1, 2],
+        };
+        for c in [
+            part("Head", None),
+            part("Hair", Some("Head")),
+            part("Body", None),
+            mesh("Face", "Head"),
+            mesh("Fringe", "Hair"),
+            mesh("Shirt", "Body"),
+        ] {
+            m.apply(c).unwrap();
+        }
+        let mut view = ViewState::default();
+        assert_eq!(view.solo_meshes(&m), None);
+        view.solo = Some(Selection::Part("Head".into()));
+        let mut kept = view.solo_meshes(&m).unwrap();
+        kept.sort();
+        assert_eq!(kept, ["Face", "Fringe"]);
+        view.solo = Some(Selection::Mesh("Shirt".into()));
+        assert_eq!(view.solo_meshes(&m), Some(vec!["Shirt".to_owned()]));
+        // An element that is gone, or holds no mesh, means no solo.
+        view.solo = Some(Selection::Part("Nope".into()));
+        assert_eq!(view.solo_meshes(&m), None);
+    }
 
     #[test]
     fn the_default_camera_shows_the_fitted_view() {

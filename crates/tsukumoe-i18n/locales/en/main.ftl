@@ -401,3 +401,5 @@ settings-autosave-hint = The project file is not overwritten; a .autosave file i
 settings-autosave = Auto-save
 settings-autosave-minutes = Interval (minutes)
 settings-open-folder = Open the settings folder
+tree-solo = Solo (press again to end)
+viewport-solo = Solo

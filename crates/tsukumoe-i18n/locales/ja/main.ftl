@@ -397,3 +397,5 @@ settings-autosave-hint = 本体のファイルは上書きせず、横の .autos
 settings-autosave = 自動保存
 settings-autosave-minutes = 間隔（分）
 settings-open-folder = 設定フォルダを開く
+tree-solo = ソロ表示（もう一度押すと解除）
+viewport-solo = ソロ表示中

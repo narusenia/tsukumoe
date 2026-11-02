@@ -326,7 +326,14 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                 vec2(control, rect.height()),
             );
             let hovered = response.hovered() || ui.rect_contains_pointer(more_rect);
-            let right = if hovered {
+            // The solo button sits left of the "..." button: on a hovered row, and
+            // always on the row that is soloed.
+            let solo_ok = row.kind != Kind::Glue;
+            let is_solo = solo_ok && view.solo.as_ref() == Some(&row.selection());
+            let solo_rect = more_rect.translate(vec2(-control, 0.0));
+            let right = if hovered && solo_ok || is_solo {
+                solo_rect.left()
+            } else if hovered {
                 more_rect.left()
             } else {
                 rect.right() - 4.0
@@ -448,6 +455,28 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                             theme.colors.disabled,
                         );
                     }
+                }
+            }
+            if solo_ok && (hovered || is_solo) && !renaming_here {
+                let solo = ui.interact(solo_rect, response.id.with("solo"), Sense::click());
+                let color = if is_solo {
+                    theme.colors.accent
+                } else if solo.hovered() {
+                    theme.colors.text
+                } else {
+                    theme.colors.text_muted
+                };
+                Icon::Locate.image(color, icon_size).paint_at(
+                    ui,
+                    Rect::from_center_size(solo_rect.center(), vec2(icon_size, icon_size)),
+                );
+                let solo_label = tr(&ctx, "tree-solo");
+                solo.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, solo_label.clone())
+                });
+                if solo.on_hover_text(&solo_label).clicked() {
+                    view.solo = (!is_solo).then(|| row.selection());
+                    view.touch();
                 }
             }
             // The "..." button, with what the right-click menu has.

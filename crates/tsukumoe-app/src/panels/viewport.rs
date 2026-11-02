@@ -67,6 +67,8 @@ pub struct Viewport {
     doc_id: u64,
     model_revision: u64,
     view_revision: u64,
+    /// The meshes the scene was built to show alone (see `ViewState::solo`).
+    solo: Option<Vec<String>>,
     scene: Option<Scene>,
     renderer: Renderer,
     target: Option<Target>,
@@ -99,6 +101,7 @@ impl Viewport {
             doc_id: doc.id,
             model_revision: u64::MAX,
             view_revision: u64::MAX,
+            solo: None,
             scene: None,
             renderer,
             target: None,
@@ -190,8 +193,9 @@ impl Viewport {
 
         // Rebuild the evaluated model when the edited model changed.
         let model_rev = doc.dispatcher.revision();
-        if self.scene.is_none() || self.model_revision != model_rev {
-            match Scene::new(doc.dispatcher.model()) {
+        let solo = view.solo_meshes(doc.dispatcher.model());
+        if self.scene.is_none() || self.model_revision != model_rev || self.solo != solo {
+            match Scene::new_solo(doc.dispatcher.model(), solo.as_deref()) {
                 Ok(scene) => {
                     self.scene = Some(scene);
                     self.error = None;
@@ -199,6 +203,7 @@ impl Viewport {
                 Err(e) => self.error = Some(e),
             }
             self.model_revision = model_rev;
+            self.solo = solo;
             self.view_revision = u64::MAX;
         }
         if self.view_revision != view.revision() {
@@ -297,6 +302,9 @@ impl Viewport {
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
+        }
+        if self.solo.is_some() {
+            paint_solo_badge(ui, rect, view);
         }
         let (ops, mut actions) = match view.tool {
             Tool::Mesh => {
@@ -1008,6 +1016,34 @@ pub fn placeholder(ui: &mut Ui, has_doc: bool) {
         "app-no-project"
     };
     hint(ui, tr(ui.ctx(), key));
+}
+
+/// A note in the corner that only part of the model is drawn.
+fn paint_solo_badge(ui: &Ui, rect: Rect, view: &ViewState) {
+    let name = match &view.solo {
+        Some(
+            Selection::Part(n) | Selection::Mesh(n) | Selection::Warp(n) | Selection::Rotation(n),
+        ) => n.as_str(),
+        _ => return,
+    };
+    let theme = Theme::get(ui.ctx());
+    let text = format!("{}: {name}", tr(ui.ctx(), "viewport-solo"));
+    let painter = ui.painter_at(rect);
+    let galley = painter.layout_no_wrap(
+        text,
+        egui::FontId::proportional(theme.metrics.text),
+        theme.colors.accent_text,
+    );
+    let badge = Rect::from_min_size(
+        rect.left_top() + egui::vec2(8.0, 8.0),
+        galley.size() + egui::vec2(16.0, 6.0),
+    );
+    painter.rect_filled(badge, badge.height() / 2.0, theme.colors.accent);
+    painter.galley(
+        badge.min + egui::vec2(8.0, 3.0),
+        galley,
+        theme.colors.accent_text,
+    );
 }
 
 /// What is behind the picture: nothing (the theme's surface), a flat colour, or a checker.
