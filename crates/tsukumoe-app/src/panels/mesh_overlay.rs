@@ -7,7 +7,7 @@
 //! pointer handling is in the viewport.
 
 use egui::{Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2};
-use tsukumoe_core::contour::ContourMode;
+use tsukumoe_core::contour::{self, ContourMode};
 use tsukumoe_core::elements::Point;
 use tsukumoe_ui::{Icon, Theme, Variant};
 
@@ -249,8 +249,16 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static s
             });
         } else {
             // Under the rows, at their left edge: it belongs to the whole outline.
-            tsukumoe_ui::checkbox(ui, &mut c.precise, &t("mesh-edit-contour-precise"))
-                .on_hover_text(t("mesh-edit-contour-precise-hint"));
+            let turned_on =
+                tsukumoe_ui::checkbox(ui, &mut c.precise, &t("mesh-edit-contour-precise"))
+                    .on_hover_text(t("mesh-edit-contour-precise-hint"))
+                    .changed()
+                    && c.precise;
+            // The tracing is exact to a fraction of a pixel, so a coarse thinning
+            // would throw that away: bring the tolerance down with it.
+            if turned_on {
+                c.simplify = c.simplify.min(contour::PRECISE_SIMPLIFY);
+            }
         }
         // The spacing is 0 (none) or at least 4.
         if c.spacing > 0.0 && c.spacing < 4.0 {

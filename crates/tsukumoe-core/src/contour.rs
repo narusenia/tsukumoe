@@ -24,6 +24,10 @@ use crate::mesh_edit::{self, Geometry, in_circle};
 /// The most points (outline and lattice together) one island may have.
 pub const MAX_POINTS: usize = 3000;
 
+/// The thinning tolerance (pixels) that goes with `precise`: a coarser one cuts
+/// more off the outline than the tracing gains.
+pub const PRECISE_SIMPLIFY: f32 = 0.5;
+
 /// An 8-bit alpha image, row by row from the top.
 #[derive(Clone, Copy, Debug)]
 pub struct Alpha<'a> {
@@ -1352,5 +1356,47 @@ mod tests {
                 .sum();
             assert!((area > 0.0) != flipped, "winding kept");
         }
+    }
+
+    #[test]
+    fn a_precise_outline_with_the_precise_tolerance_stays_within_half_a_pixel() {
+        // An anti-aliased disc: alpha is the coverage of the pixel.
+        let (n, r) = (200usize, 70.3f64);
+        let mut data = vec![0u8; n * n];
+        for y in 0..n {
+            for x in 0..n {
+                let d = (x as f64 + 0.5 - 100.0).hypot(y as f64 + 0.5 - 100.0) - r;
+                data[y * n + x] = (255.0 * (0.5 - d).clamp(0.0, 1.0)) as u8;
+            }
+        }
+        let a = alpha(n as u32, n as u32, &data);
+        let worst = |p: &ContourParams| {
+            let pieces = islands(&a, p).unwrap();
+            let ring = &pieces[0].outline;
+            // How far the polygon's edges are from the true circle: sample each edge.
+            let mut worst = 0.0f64;
+            for i in 0..ring.len() {
+                let (u, v) = (ring[i], ring[(i + 1) % ring.len()]);
+                for k in 0..=8 {
+                    let t = f64::from(k) / 8.0;
+                    let x = f64::from(u[0]) * (1.0 - t) + f64::from(v[0]) * t;
+                    let y = f64::from(u[1]) * (1.0 - t) + f64::from(v[1]) * t;
+                    worst = worst.max(((x - 100.0).hypot(y - 100.0) - r).abs());
+                }
+            }
+            worst
+        };
+        let coarse = worst(&ContourParams {
+            offset: 0.0,
+            ..ContourParams::default()
+        });
+        let fine = worst(&ContourParams {
+            offset: 0.0,
+            precise: true,
+            simplify: PRECISE_SIMPLIFY,
+            ..ContourParams::default()
+        });
+        assert!(fine < 0.8, "{fine}");
+        assert!(fine < coarse / 2.0, "{fine} vs {coarse}");
     }
 }
