@@ -99,6 +99,11 @@ pub struct ViewState {
     hover_since: f64,
     /// The texture pages for the mesh pictures; loaded by the editor. Not saved.
     pub atlas: crate::atlas::Atlas,
+    /// A grid was just laid: the wheel adds `grid_steps` to its size instead of zooming. Not saved.
+    pub grid_live: bool,
+    pub grid_steps: Vec<i32>,
+    /// Wheel travel not yet worth a step.
+    pub grid_wheel: f32,
     /// The parts panel and the deformers panel.
     pub parts: TreeView,
     pub deformers: TreeView,

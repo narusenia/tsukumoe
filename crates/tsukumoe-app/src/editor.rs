@@ -108,6 +108,8 @@ pub struct Editor {
     live_edit: Option<(String, u64)>,
     /// The key of a live edit the model refused: the rest of that drag is skipped.
     live_blocked: Option<String>,
+    /// The mesh a grid was just laid on and its shape before: +/- and the wheel re-lay it as one undo step.
+    grid_live: Option<(String, tsukumoe_core::mesh_edit::Geometry)>,
     /// When the project was last auto-saved (or opened), and the dispatcher revision then.
     autosave: (std::time::Instant, Option<u64>),
     /// Language, theme and density, shared with the host's `preferences.json`.
@@ -188,6 +190,7 @@ impl Editor {
             options,
             live_edit: None,
             live_blocked: None,
+            grid_live: None,
             autosave: (std::time::Instant::now(), None),
             prefs: Default::default(),
             config_dir: None,
@@ -807,7 +810,43 @@ impl Editor {
             }
             _ => self.mesh_tool.flip_selected(&name, &g),
         };
+        let filled = action == "mesh.fill-grid" && op.is_ok();
         self.apply_mesh_op(ctx, op);
+        if filled {
+            self.live_edit = self
+                .doc
+                .as_ref()
+                .map(|d| (format!("grid:{name}"), d.dispatcher.revision()));
+            self.grid_live = Some((name, g));
+        }
+    }
+
+    /// Changes the grid just laid by `step` rows and columns, replacing it.
+    /// Does nothing once anything else was done after the fill.
+    fn nudge_grid(&mut self, ctx: &Context, step: i32) -> bool {
+        let Some((name, g)) = self.grid_live.clone() else {
+            return false;
+        };
+        let key = format!("grid:{name}");
+        let revision = self.doc.as_ref().map(|d| d.dispatcher.revision());
+        let live = self
+            .live_edit
+            .as_ref()
+            .is_some_and(|(k, r)| *k == key && Some(*r) == revision);
+        if !live || self.view.tool != Tool::Mesh {
+            self.grid_live = None;
+            return false;
+        }
+        let (c, r) = self.mesh_tool.grid;
+        let bump = |n: u32| n.saturating_add_signed(step).clamp(2, 64);
+        self.mesh_tool.grid = (bump(c), bump(r));
+        self.mesh_tool.grid_auto = false;
+        let op = self.mesh_tool.fill_grid(&name, &g);
+        match op {
+            Ok((command, _)) => self.submit_live(ctx, Some(command), key, false),
+            Err(e) => self.toasts.push(ctx, Tone::Error, tr(ctx, e.key())),
+        }
+        true
     }
 
     /// The alpha of the texture the mesh `name` uses; `None` when it cannot be read.
@@ -948,6 +987,9 @@ impl Editor {
                 self.reset_deformers(ctx, &items);
             }
             "viewport.zoom-in" | "viewport.zoom-out" => {
+                if self.nudge_grid(ctx, if action.ends_with("in") { 1 } else { -1 }) {
+                    return true;
+                }
                 let f = if action.ends_with("in") { 1.25 } else { 0.8 };
                 self.view.camera.zoom_at(f, [0.5, 0.5]);
                 self.view.touch();
@@ -1239,6 +1281,10 @@ impl Editor {
             &[]
         };
         self.viewport_hovered = false;
+        for step in std::mem::take(&mut self.view.grid_steps) {
+            self.nudge_grid(&ctx, step);
+        }
+        self.view.grid_live = self.grid_live.is_some();
         // A dialog is modal: shortcuts wait until it is closed.
         if self.dialog.is_none() {
             for action in self.keymap.triggered(&ctx, active) {
@@ -2390,6 +2436,16 @@ mod tests {
             Some("mesh_fill_grid: MeshEditGrid")
         );
         assert!(count(d) > 9);
+        let laid = count(d);
+        // + and - re-lay the grid as that same one step.
+        assert!(editor.run_action(&ctx, "viewport.zoom-in"));
+        let d = &editor.doc.as_ref().unwrap().dispatcher;
+        assert_eq!(d.log().len(), steps + 1);
+        assert!(count(d) > laid);
+        assert!(editor.run_action(&ctx, "viewport.zoom-out"));
+        let d = &mut editor.doc.as_mut().unwrap().dispatcher;
+        assert_eq!(d.log().len(), steps + 1);
+        assert_eq!(count(d), laid);
         assert!(d.undo());
         assert_eq!(count(d), 9);
         // Other tools ignore the keys.

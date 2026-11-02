@@ -1030,6 +1030,15 @@ impl Viewport {
             } else {
                 0.0
             };
+            if view.grid_live && wheel != 0.0 {
+                view.grid_wheel += wheel;
+                while view.grid_wheel.abs() >= 40.0 {
+                    view.grid_steps.push(view.grid_wheel.signum() as i32);
+                    view.grid_wheel -= 40.0 * view.grid_wheel.signum();
+                }
+                self.wake();
+                return;
+            }
             let factor = (wheel * 0.002).exp() * pinch;
             if (factor - 1.0).abs() > 1e-4
                 && let Some(p) = hover
