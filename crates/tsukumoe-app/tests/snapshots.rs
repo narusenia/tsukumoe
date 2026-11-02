@@ -186,6 +186,8 @@ fn menu_snapshot(mode: Mode, name: &str) {
                     "mesh.flip-edge" => Some("F".to_owned()),
                     "mesh.edge-pen" => Some("P".to_owned()),
                     "mesh.delete-edge" => Some("X".to_owned()),
+                    "mesh.weld" => Some("J".to_owned()),
+                    "mesh.weld-near" => Some("Shift+J".to_owned()),
                     "mesh.delete-vertices" => Some("Delete".to_owned()),
                     "deformer.create-warp" => Some("W".to_owned()),
                     "deformer.create-rotation" => Some("R".to_owned()),

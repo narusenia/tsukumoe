@@ -87,6 +87,23 @@ pub fn paint(
         }
     }
     painter.extend(shapes);
+    if let Some(path) = tool.lasso_path() {
+        let points: Vec<Pos2> = path.iter().map(|p| pos2(p[0], p[1])).collect();
+        painter.add(Shape::convex_polygon(
+            points.clone(),
+            c.accent.gamma_multiply(0.15),
+            Stroke::NONE,
+        ));
+        painter.add(Shape::closed_line(points, Stroke::new(1.0, c.accent)));
+    }
+    if tool.symmetry {
+        let top = m.to_screen([tool.center, m.view[3]]);
+        let bottom = m.to_screen([tool.center, m.view[1]]);
+        painter.line_segment(
+            [pos2(top[0], top[1]), pos2(bottom[0], bottom[1])],
+            Stroke::new(1.0, c.warning.gamma_multiply(0.7)),
+        );
+    }
     if let Some((a, b)) = tool.rect() {
         let rect = Rect::from_two_pos(pos2(a[0], a[1]), pos2(b[0], b[1]));
         painter.rect_filled(rect, 0.0, c.accent.gamma_multiply(0.15));
@@ -175,6 +192,16 @@ pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
                                 tool.pen = pen;
                                 tool.cancel();
                             }
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let variant = if tool.symmetry {
+                            Variant::Primary
+                        } else {
+                            Variant::Secondary
+                        };
+                        if tsukumoe_ui::button(ui, &t("mesh-edit-symmetry"), variant).clicked() {
+                            tool.symmetry = !tool.symmetry;
                         }
                     });
                     ui.horizontal(|ui| {
@@ -275,7 +302,7 @@ mod tests {
 
     fn menu_harness(tool: MeshTool) -> Harness<'static, (MeshTool, Option<&'static str>)> {
         Harness::builder()
-            .with_size(vec2(420.0, 280.0))
+            .with_size(vec2(420.0, 340.0))
             .build_ui_state(
                 |ui, (tool, chosen): &mut (MeshTool, Option<&'static str>)| {
                     tsukumoe_ui::init(ui.ctx());

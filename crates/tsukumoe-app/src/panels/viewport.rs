@@ -301,6 +301,7 @@ impl Viewport {
                 .deformer_tool_frame(ui, &response, rect, doc, view, drag, deformer, size, keymap),
             Tool::Select => {
                 self.select_tool_frame(ui, &response, rect, view, drag, size);
+                self.select_lasso(ui, &response, rect, view, drag, size);
                 (Vec::new(), Vec::new())
             }
         };
@@ -436,6 +437,77 @@ impl Viewport {
                 view.touch();
             }
             None => {}
+        }
+    }
+
+    /// The select tool's lasso: a drag on the viewport draws a curve, and the
+    /// meshes whose centre it encloses become the selection (Shift adds).
+    fn select_lasso(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        size: (u32, u32),
+    ) {
+        let Some(scene) = &self.scene else {
+            return;
+        };
+        let modifiers = ui.input(|i| i.modifiers);
+        let id = response.id.with("select-lasso");
+        let primary = PointerButton::Primary;
+        if response.dragged_by(primary)
+            && !drag.modifier_down(modifiers)
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let path = ui.data_mut(|d| {
+                let path = d.get_temp_mut_or_default::<Vec<[f32; 2]>>(id);
+                if path
+                    .last()
+                    .is_none_or(|l| (p.x - l[0]).hypot(p.y - l[1]) >= 2.0)
+                {
+                    path.push([p.x, p.y]);
+                }
+                path.clone()
+            });
+            let theme = Theme::get(ui.ctx());
+            let painter = ui.painter_at(rect);
+            let points: Vec<egui::Pos2> = path.iter().map(|q| pos2(q[0], q[1])).collect();
+            painter.add(egui::Shape::convex_polygon(
+                points.clone(),
+                theme.colors.accent.gamma_multiply(0.15),
+                egui::Stroke::NONE,
+            ));
+            painter.add(egui::Shape::closed_line(
+                points,
+                egui::Stroke::new(1.0, theme.colors.accent),
+            ));
+        }
+        if response.drag_stopped_by(primary) {
+            let path = ui.data_mut(|d| d.remove_temp::<Vec<[f32; 2]>>(id));
+            let Some(path) = path.filter(|p| p.len() > 2) else {
+                return;
+            };
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            let inside =
+                mesh_tool::pick_in_lasso(&scene.frame.draw_list(&scene.model), &mapper, &path);
+            let mut items: Vec<Selection> = if modifiers.shift {
+                view.selected()
+            } else {
+                Vec::new()
+            };
+            for name in inside {
+                let s = Selection::Mesh(name);
+                if !items.contains(&s) {
+                    items.push(s);
+                }
+            }
+            view.select_all(items);
         }
     }
 
@@ -659,6 +731,7 @@ impl Viewport {
         let tool_input = !drag.modifier_down(modifiers);
         if let Some((name, mesh)) = &mesh {
             tool.sanitize(mesh.positions.len());
+            tool.center = crate::mirror::center(model, &view.mirror_center);
             if escape {
                 tool.cancel();
             }
@@ -689,6 +762,7 @@ impl Viewport {
                     && response.drag_started_by(primary)
                     && let Some(at) = pressed
                 {
+                    tool.lasso = modifiers.command;
                     tool.press(&shown, &mesh.indices, &mapper, at, modifiers.shift);
                 }
                 if response.dragged_by(primary)

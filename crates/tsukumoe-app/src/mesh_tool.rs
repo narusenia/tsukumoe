@@ -26,6 +26,12 @@ pub const VERTEX_RADIUS: f32 = 8.0;
 pub const EDGE_RADIUS: f32 = 5.0;
 /// A press that moves less than this many points is a click.
 const DRAG_THRESHOLD: f32 = 3.0;
+/// A lasso takes a new point once the pointer is this far (screen points) from the last.
+const LASSO_STEP: f32 = 2.0;
+/// `mesh.weld-near` joins vertices closer than this share of the mesh's diagonal.
+const WELD_NEAR_RATIO: f32 = 0.01;
+/// A vertex and its mirror image may be off by this share of the mesh's width.
+const MIRROR_TOLERANCE: f32 = 0.02;
 
 /// Model space (y up) to the viewport's screen rectangle (points, y down).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,6 +74,8 @@ pub enum Hit {
 pub enum ToolError {
     NeedVertices,
     NeedTwoVertices,
+    /// A weld needs two vertices or more.
+    NeedSeveral,
     NeedEdge,
     /// Re-triangulating would change nothing.
     NoChange,
@@ -85,6 +93,7 @@ impl ToolError {
         match self {
             Self::NeedVertices => "mesh-edit-need-vertices",
             Self::NeedTwoVertices => "mesh-edit-need-two",
+            Self::NeedSeveral => "mesh-edit-need-several",
             Self::NeedEdge => "mesh-edit-need-edge",
             Self::NoChange => "mesh-edit-no-change",
             Self::NoTexture => "mesh-edit-no-texture",
@@ -134,7 +143,7 @@ impl From<EditError> for ToolError {
 
 /// The actions of the right-click menu, in order. Each one is run through
 /// `Editor::run_action`, so the menu has no logic of its own.
-pub const MENU_ACTIONS: [&str; 10] = [
+pub const MENU_ACTIONS: [&str; 12] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
@@ -142,6 +151,8 @@ pub const MENU_ACTIONS: [&str; 10] = [
     "mesh.flip-edge",
     "mesh.edge-pen",
     "mesh.delete-edge",
+    "mesh.weld",
+    "mesh.weld-near",
     "mesh.delete-vertices",
     "deformer.create-warp",
     "deformer.create-rotation",
@@ -153,7 +164,12 @@ pub type Op = (Command, String);
 #[derive(Clone, Debug, PartialEq)]
 enum Gesture {
     /// Pressed, not yet moved far enough to be a drag.
-    Pending { at: [f32; 2], hit: Hit, shift: bool },
+    Pending {
+        at: [f32; 2],
+        hit: Hit,
+        shift: bool,
+        lasso: bool,
+    },
     /// Dragging the selected vertices; `from` and `to` are screen points.
     Move { from: [f32; 2], to: [f32; 2] },
     /// Dragging a box.
@@ -162,6 +178,8 @@ enum Gesture {
         to: [f32; 2],
         add: bool,
     },
+    /// Dragging a free curve; `points` are screen points.
+    Lasso { points: Vec<[f32; 2]>, add: bool },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -182,6 +200,29 @@ pub struct MeshTool {
     pub proportional: Proportional,
     /// The drawn points at the press, kept while proportional edit is on.
     snapshot: Option<Snapshot>,
+    /// The next press on empty space drags a lasso instead of a box; the
+    /// viewport sets it from the Mod key.
+    pub lasso: bool,
+    /// Moving a vertex moves its mirror image about `center` too; kept across meshes.
+    pub symmetry: bool,
+    /// The x of the mirror line in the drawing space; the viewport sets it.
+    pub center: f32,
+}
+
+/// Whether `p` is inside the polygon `poly` (even-odd rule).
+pub fn in_polygon(poly: &[[f32; 2]], p: [f32; 2]) -> bool {
+    let mut inside = false;
+    let mut j = poly.len().wrapping_sub(1);
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[j]);
+        if (a[1] > p[1]) != (b[1] > p[1])
+            && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]
+        {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
 
 fn dist_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -297,6 +338,28 @@ pub fn pick_drawn(list: &tsukumoe_core::draw::DrawList, at: Point) -> Option<Str
     })
 }
 
+/// The meshes drawn with their centre inside the lasso `path` (screen points),
+/// back to front.
+pub fn pick_in_lasso(
+    list: &tsukumoe_core::draw::DrawList,
+    m: &Mapper,
+    path: &[[f32; 2]],
+) -> Vec<String> {
+    list.order()
+        .iter()
+        .filter_map(|&mesh| {
+            let d = list.drawable(mesh as usize);
+            let p = d.positions.as_chunks::<2>().0;
+            if d.opacity <= 0.0 || p.is_empty() {
+                return None;
+            }
+            let n = p.len() as f32;
+            let sum = p.iter().fold([0.0; 2], |s, q| [s[0] + q[0], s[1] + q[1]]);
+            in_polygon(path, m.to_screen([sum[0] / n, sum[1] / n])).then(|| d.name.to_owned())
+        })
+        .collect()
+}
+
 /// The mesh `name` as a [`Geometry`].
 pub fn geometry_of(model: &Model, name: &str) -> Option<Geometry> {
     let m = model.meshes().get(model.meshes().find(name)?)?;
@@ -370,6 +433,9 @@ impl Default for MeshTool {
             contour: ContourParams::default(),
             proportional: Proportional::default(),
             snapshot: None,
+            lasso: false,
+            symmetry: false,
+            center: 0.0,
         }
     }
 }
@@ -388,6 +454,8 @@ impl MeshTool {
                 grid: self.grid,
                 contour: self.contour,
                 proportional: self.proportional,
+                symmetry: self.symmetry,
+                center: self.center,
                 ..Self::default()
             };
         }
@@ -409,7 +477,7 @@ impl MeshTool {
     pub fn is_dragging(&self) -> bool {
         matches!(
             self.gesture,
-            Some(Gesture::Move { .. } | Gesture::Rect { .. })
+            Some(Gesture::Move { .. } | Gesture::Rect { .. } | Gesture::Lasso { .. })
         )
     }
 
@@ -421,12 +489,21 @@ impl MeshTool {
         }
     }
 
+    /// The lasso being dragged, as screen points.
+    pub fn lasso_path(&self) -> Option<&[[f32; 2]]> {
+        match &self.gesture {
+            Some(Gesture::Lasso { points, .. }) => Some(points),
+            _ => None,
+        }
+    }
+
     /// Whether the menu item `action` can be used with the current selection:
     /// drawing an edge needs two vertices, flipping an edge, deleting some
     /// vertices; the whole-mesh actions always work.
     pub fn menu_enabled(&self, action: &str) -> bool {
         match action {
             "mesh.connect" => self.vertices.len() == 2,
+            "mesh.weld" => self.vertices.len() >= 2,
             "mesh.flip-edge" => self.edge.is_some(),
             "mesh.delete-vertices" => !self.vertices.is_empty() || self.edge.is_some(),
             "mesh.delete-edge" => self.edge.is_some(),
@@ -515,6 +592,19 @@ impl MeshTool {
         self.edge = None;
     }
 
+    /// Selects the vertices inside the screen curve (closed by a straight line).
+    fn select_in_lasso(&mut self, positions: &[Point], m: &Mapper, path: &[[f32; 2]], add: bool) {
+        if !add {
+            self.clear_selection();
+        }
+        for (i, &p) in positions.iter().enumerate() {
+            if in_polygon(path, m.to_screen(p)) {
+                self.vertices.insert(i as u32);
+            }
+        }
+        self.edge = None;
+    }
+
     /// A press at `at`. What it does waits for the pointer to move or release.
     pub fn press(
         &mut self,
@@ -529,15 +619,30 @@ impl MeshTool {
             positions: positions.to_vec(),
             edges: edges(indices),
         });
-        self.gesture = Some(Gesture::Pending { at, hit, shift });
+        self.gesture = Some(Gesture::Pending {
+            at,
+            hit,
+            shift,
+            lasso: self.lasso,
+        });
     }
 
     /// The pointer moved with the button down.
     pub fn drag(&mut self, to: [f32; 2]) {
         self.gesture = match self.gesture.take() {
-            Some(Gesture::Pending { at, hit, shift }) => {
+            Some(Gesture::Pending {
+                at,
+                hit,
+                shift,
+                lasso,
+            }) => {
                 if (to[0] - at[0]).hypot(to[1] - at[1]) < DRAG_THRESHOLD {
-                    Some(Gesture::Pending { at, hit, shift })
+                    Some(Gesture::Pending {
+                        at,
+                        hit,
+                        shift,
+                        lasso,
+                    })
                 } else if let Hit::Vertex(v) = hit {
                     // Dragging a vertex that is not selected selects it alone
                     // (with Shift, adds it); dragging a selected one moves them all.
@@ -549,6 +654,11 @@ impl MeshTool {
                     }
                     self.edge = None;
                     Some(Gesture::Move { from: at, to })
+                } else if lasso {
+                    Some(Gesture::Lasso {
+                        points: vec![at, to],
+                        add: shift,
+                    })
                 } else {
                     Some(Gesture::Rect {
                         from: at,
@@ -559,6 +669,15 @@ impl MeshTool {
             }
             Some(Gesture::Move { from, .. }) => Some(Gesture::Move { from, to }),
             Some(Gesture::Rect { from, add, .. }) => Some(Gesture::Rect { from, to, add }),
+            Some(Gesture::Lasso { mut points, add }) => {
+                if points
+                    .last()
+                    .is_none_or(|l| (to[0] - l[0]).hypot(to[1] - l[1]) >= LASSO_STEP)
+                {
+                    points.push(to);
+                }
+                Some(Gesture::Lasso { points, add })
+            }
             None => None,
         };
     }
@@ -609,12 +728,56 @@ impl MeshTool {
         let d = [b[0] - a[0], b[1] - a[1]];
         let mut out = positions.to_vec();
         let weights = self.weights(m);
-        for (i, k) in self.follow(weights.as_deref(), out.len()) {
+        let moved = self.follow(weights.as_deref(), out.len());
+        for &(i, k) in &moved {
             if let Some(p) = out.get_mut(i) {
                 *p = [p[0] + d[0] * k, p[1] + d[1] * k];
             }
         }
+        if self.symmetry {
+            self.mirror_moved(&mut out, positions, &moved, &|p| p, &|p| Some(p));
+        }
         out
+    }
+
+    /// Gives the mirror image of each moved vertex the mirrored place of the
+    /// moved one. `base` are the vertices before the move, `to_world` and
+    /// `from_world` turn them into the drawing space where the mirror line is,
+    /// and back. A vertex with no mirror image, or on the line, is left alone.
+    fn mirror_moved(
+        &self,
+        out: &mut [Point],
+        base: &[Point],
+        moved: &[(usize, f32)],
+        to_world: &dyn Fn(Point) -> Point,
+        from_world: &dyn Fn(Point) -> Option<Point>,
+    ) -> Option<()> {
+        let world: Vec<Point> = base.iter().map(|&p| to_world(p)).collect();
+        let (lo, hi) = world
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p[0]), h.max(p[0])));
+        let tolerance = ((hi - lo) * MIRROR_TOLERANCE).max(1e-4);
+        let c = self.center;
+        let mut done = BTreeSet::new();
+        for &(i, _) in moved {
+            if done.contains(&i) {
+                continue;
+            }
+            let at = [2.0 * c - world[i][0], world[i][1]];
+            let partner = (0..world.len()).filter(|&j| j != i).min_by(|&a, &b| {
+                let d = |j: usize| (world[j][0] - at[0]).hypot(world[j][1] - at[1]);
+                d(a).total_cmp(&d(b))
+            });
+            let Some(j) = partner.filter(|&j| {
+                (world[j][0] - at[0]).hypot(world[j][1] - at[1]) <= tolerance && !done.contains(&j)
+            }) else {
+                continue;
+            };
+            let w = to_world(out[i]);
+            out[j] = from_world([2.0 * c - w[0], w[1]])?;
+            done.extend([i, j]);
+        }
+        Some(())
     }
 
     /// `stored` with the selected vertices moved so that they are drawn the
@@ -631,13 +794,23 @@ impl MeshTool {
         let d = [b[0] - a[0], b[1] - a[1]];
         let mut out = stored.to_vec();
         let weights = self.weights(m);
-        for (i, k) in self.follow(weights.as_deref(), out.len()) {
+        let moved = self.follow(weights.as_deref(), out.len());
+        for &(i, k) in &moved {
             if let Some(p) = out.get_mut(i) {
                 let w = space.point_to_world(*p);
                 *p = space
                     .point_from_world([w[0] + d[0] * k, w[1] + d[1] * k])
                     .ok()?;
             }
+        }
+        if self.symmetry {
+            self.mirror_moved(
+                &mut out,
+                stored,
+                &moved,
+                &|p| space.point_to_world(p),
+                &|p| space.point_from_world(p).ok(),
+            )?;
         }
         Some(out)
     }
@@ -711,6 +884,11 @@ impl MeshTool {
             Gesture::Rect { from, to, add } => {
                 self.snapshot = None;
                 self.select_in(shown, m, from, to, add);
+                None
+            }
+            Gesture::Lasso { points, add } => {
+                self.snapshot = None;
+                self.select_in_lasso(shown, m, &points, add);
                 None
             }
             Gesture::Move { from, to } => {
@@ -897,6 +1075,32 @@ impl MeshTool {
         self.vertices.clear();
         self.edge = None;
         Ok(Some(geometry_op(name, label, out)))
+    }
+
+    /// Merges the selected vertices (two or more) into one at their centre.
+    pub fn weld_selected(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        if self.vertices.len() < 2 {
+            return Err(ToolError::NeedSeveral);
+        }
+        let ids: Vec<u32> = self.vertices.iter().copied().collect();
+        let out = mesh_edit::weld(g, &[ids])?;
+        self.clear_selection();
+        Ok(geometry_op(name, "mesh_weld", out))
+    }
+
+    /// Merges every set of vertices that lie almost on top of each other.
+    pub fn weld_near(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for p in &g.positions {
+            for k in 0..2 {
+                lo[k] = lo[k].min(p[k]);
+                hi[k] = hi[k].max(p[k]);
+            }
+        }
+        let tolerance = (hi[0] - lo[0]).hypot(hi[1] - lo[1]) * WELD_NEAR_RATIO;
+        let out = mesh_edit::weld_near(g, tolerance)?.ok_or(ToolError::NoChange)?;
+        self.clear_selection();
+        Ok(geometry_op(name, "mesh_weld_near", out))
     }
 
     /// Flips the selected edge; the selection is dropped, as the edge is gone.
@@ -1111,6 +1315,93 @@ mod tests {
         t.drag([10.0, 10.0]);
         t.cancel();
         assert!(t.release("Skin", &g.positions, &m).is_none());
+    }
+
+    #[test]
+    fn symmetry_moves_the_mirror_image_of_a_dragged_vertex_the_other_way() {
+        let (g, m) = square();
+        let mut t = tool();
+        t.symmetry = true;
+        t.center = 0.5;
+        click(&mut t, &g, &m, [100.0, 100.0], false);
+        t.press(&g.positions, &g.indices, &m, [100.0, 100.0], false);
+        t.drag([80.0, 80.0]);
+        let preview = t.preview(&g.positions, &m).unwrap();
+        assert!((preview[0][0] - 0.2).abs() < 1e-6 && (preview[0][1] - 0.2).abs() < 1e-6);
+        let Some((Command::SetMeshPositions { positions, .. }, _)) =
+            t.release("Skin", &g.positions, &m)
+        else {
+            panic!("a move");
+        };
+        assert!((positions[1][0] - 0.8).abs() < 1e-6);
+        assert!((positions[0][0] - 0.2).abs() < 1e-6 && (positions[0][1] - 0.2).abs() < 1e-6);
+        // The top corners are not touched.
+        assert_eq!(positions[2], g.positions[2]);
+        assert_eq!(positions[3], g.positions[3]);
+        // Off, only the dragged vertex moves.
+        t.symmetry = false;
+        t.press(&g.positions, &g.indices, &m, [100.0, 100.0], false);
+        t.drag([80.0, 80.0]);
+        assert_eq!(t.preview(&g.positions, &m).unwrap()[0], g.positions[0]);
+    }
+
+    #[test]
+    fn a_lasso_selects_the_vertices_inside_the_curve() {
+        let (g, m) = square();
+        let mut t = tool();
+        t.lasso = true;
+        // A triangle around the bottom left, left and bottom edges of the square
+        // (screen y is down): it holds (0,0) at (0,100) and not (1,0) at (100,100).
+        t.press(&g.positions, &g.indices, &m, [-20.0, 60.0], false);
+        for to in [[-20.0, 130.0], [60.0, 130.0], [60.0, 60.0]] {
+            t.drag(to);
+        }
+        assert!(t.is_dragging() && !t.is_moving() && t.rect().is_none());
+        assert_eq!(t.lasso_path().map(<[_]>::len), Some(4));
+        assert!(t.release("Skin", &g.positions, &m).is_none());
+        assert_eq!(t.vertices().iter().copied().collect::<Vec<_>>(), [0]);
+        // Shift adds: the same curve around the bottom right joins.
+        t.press(&g.positions, &g.indices, &m, [60.0, 60.0], true);
+        for to in [[60.0, 130.0], [130.0, 130.0], [130.0, 60.0]] {
+            t.drag(to);
+        }
+        t.release("Skin", &g.positions, &m);
+        assert_eq!(t.vertices().iter().copied().collect::<Vec<_>>(), [0, 1]);
+        assert!(in_polygon(
+            &[[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]],
+            [2.0, 2.0]
+        ));
+        assert!(!in_polygon(
+            &[[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]],
+            [8.0, 8.0]
+        ));
+    }
+
+    #[test]
+    fn weld_joins_the_selected_vertices_and_near_welds_the_close_ones() {
+        let (g, m) = square();
+        let mut t = tool();
+        assert_eq!(
+            t.weld_selected("Skin", &g).unwrap_err(),
+            ToolError::NeedSeveral
+        );
+        click(&mut t, &g, &m, [0.0, 100.0], false);
+        click(&mut t, &g, &m, [100.0, 100.0], true);
+        // Welding both bottom corners collapses the triangle 0 1 2 only.
+        let (
+            Command::SetMeshGeometry {
+                positions, indices, ..
+            },
+            label,
+        ) = t.weld_selected("Skin", &g).unwrap()
+        else {
+            panic!("a geometry");
+        };
+        assert_eq!(label, "mesh_weld: Skin");
+        assert_eq!(positions.len(), 3);
+        assert_eq!(indices.len(), 3);
+        assert!(t.vertices().is_empty());
+        assert_eq!(t.weld_near("Skin", &g).unwrap_err(), ToolError::NoChange);
     }
 
     /// A square of 4 corners with proportional edit on, a radius of 150 points
@@ -1482,32 +1773,36 @@ mod tests {
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, false, true, true
+                true, true, true, false, false, true, false, false, true, false, true, true
             ]
         );
         click(&mut t, &g, &m, [100.0, 100.0], false);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, true, true, true
+                true, true, true, false, false, true, false, false, true, true, true, true
             ]
         );
         click(&mut t, &g, &m, [0.0, 0.0], true);
         assert_eq!(
             enabled(&t),
-            [true, true, true, true, false, true, false, true, true, true]
+            [
+                true, true, true, true, false, true, false, true, true, true, true, true
+            ]
         );
         click(&mut t, &g, &m, [100.0, 0.0], true);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, true, true, true
+                true, true, true, false, false, true, false, true, true, true, true, true
             ]
         );
         click(&mut t, &g, &m, [50.0, 50.0], false);
         assert_eq!(
             enabled(&t),
-            [true, true, true, false, true, true, true, true, true, true]
+            [
+                true, true, true, false, true, true, true, false, true, true, true, true
+            ]
         );
     }
 
@@ -1625,6 +1920,7 @@ mod tests {
         let errors = [
             ToolError::NeedVertices,
             ToolError::NeedTwoVertices,
+            ToolError::NeedSeveral,
             ToolError::NeedEdge,
             ToolError::NoChange,
             ToolError::NoTexture,
