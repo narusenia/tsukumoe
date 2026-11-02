@@ -8,6 +8,7 @@
 //! `UPDATE_SNAPSHOTS=1 cargo test -p tsukumoe-ui --test snapshots`, and look
 //! at the images before committing them.
 
+use egui_kittest::kittest::Queryable;
 use egui_kittest::{Harness, SnapshotOptions, SnapshotResults};
 use tsukumoe_ui::showcase::{Section, Showcase};
 use tsukumoe_ui::{Density, Mode, Theme, set_density, set_mode};
@@ -200,4 +201,39 @@ fn pie_menu_labels_do_not_collide() {
         harness.snapshot_options(format!("pie_{tag}"), &options());
         results.extend_harness(&mut harness);
     }
+}
+
+/// Double-clicking a number field puts back its default.
+#[test]
+fn double_click_resets_a_number_to_its_default() {
+    let mut value = 0.8_f32;
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(200.0, 60.0))
+        // Both clicks must fall inside the double-click interval.
+        .with_step_dt(0.01)
+        .build_ui(move |ui| {
+            tsukumoe_ui::init(ui.ctx());
+            tsukumoe_ui::number_or(ui, &mut value, 0.0..=1.0, 0.01, "Value", Some(0.25));
+            ui.label(format!("now {value:.2}"));
+        });
+    harness.run();
+    let at = harness
+        .get_by_role(egui::accesskit::Role::SpinButton)
+        .rect()
+        .center();
+    harness.hover_at(at);
+    harness.run();
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+    }
+    harness.run();
+    harness.get_by_label("now 0.25");
 }

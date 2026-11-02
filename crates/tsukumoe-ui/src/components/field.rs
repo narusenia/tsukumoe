@@ -35,6 +35,18 @@ pub fn number(
     speed: f64,
     name: &str,
 ) -> Response {
+    number_or(ui, value, range, speed, name, None)
+}
+
+/// [`number`] that a double-click puts back to `default`, when there is one.
+pub fn number_or(
+    ui: &mut Ui,
+    value: &mut f32,
+    range: RangeInclusive<f32>,
+    speed: f64,
+    name: &str,
+    default: Option<f32>,
+) -> Response {
     let m = Theme::get(ui.ctx()).metrics;
     let fine = ui.input(|i| i.modifiers.shift);
     let start_id = Id::unique(("number-start", name, ui.next_auto_id()));
@@ -47,6 +59,13 @@ pub fn number(
     );
     if response.gained_focus() {
         ui.data_mut(|d| d.insert_temp(start_id, *value));
+    }
+    if response.double_clicked()
+        && let Some(d) = default
+    {
+        *value = d;
+        response.mark_changed();
+        response.surrender_focus();
     }
     if (response.has_focus() || response.lost_focus())
         && ui.input(|i| i.key_pressed(egui::Key::Escape))
