@@ -126,6 +126,7 @@ fn rich() -> Model {
                 columns: 1,
                 bezier: true,
                 base_points: GRID.to_vec(),
+                rest_points: Some(GRID.to_vec()),
                 keyforms: Some(KeyformGrid::new(
                     b3,
                     vec![warp_kf(-1.0), warp_kf(0.0), warp_kf(1.0)],
@@ -488,6 +489,39 @@ fn omitted_fields_take_their_defaults() {
     let (_, _, part) = model.parts().iter().next().unwrap();
     assert!(part.visible && part.opacity == 1.0);
     assert!(mesh.visible);
+}
+
+#[test]
+fn the_remembered_grid_is_optional_and_must_match_the_points() {
+    let warp = |rest: &str| {
+        format!(
+            r#"{{
+  "parts": [{{ "name": "Part" }}],
+  "warps": [{{ "name": "W", "part": "Part", "rows": 1, "columns": 1,
+    "base_points": [[0,0],[1,0],[0,1],[1,1]]{rest} }}]
+}}"#
+        )
+    };
+    // A file from before the field: no memory, nothing else different.
+    let old = read_model(&with_model_json(&warp(""))).unwrap();
+    let (_, _, w) = old.warps().iter().next().unwrap();
+    assert_eq!(w.rest_points, None);
+    // Written back, an absent memory stays absent (the key is not added).
+    let mut project = Project::new(Manifest::new(None));
+    write_model(&old, &mut project).unwrap();
+    assert!(!String::from_utf8_lossy(&project.files["model.json"]).contains("rest_points"));
+    let with = read_model(&with_model_json(&warp(
+        r#", "rest_points": [[0,0],[2,0],[0,2],[2,2]]"#,
+    )))
+    .unwrap();
+    let (_, _, w) = with.warps().iter().next().unwrap();
+    assert_eq!(
+        w.rest_points,
+        Some(vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]])
+    );
+    // A memory of the wrong length is a geometry error, not a panic later.
+    let bad = read_model(&with_model_json(&warp(r#", "rest_points": [[0,0]]"#)));
+    assert!(bad.is_err());
 }
 
 fn with_model_json(json: &str) -> Project {

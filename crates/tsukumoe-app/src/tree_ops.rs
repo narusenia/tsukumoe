@@ -666,6 +666,7 @@ mod tests {
                     columns: 1,
                     bezier: false,
                     base_points: grid,
+                    rest_points: None,
                     keyforms: Some(KeyformGrid::new(binding, vec![wk.clone(), wk])),
                 },
             )

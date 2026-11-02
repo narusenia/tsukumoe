@@ -972,6 +972,7 @@ mod tests {
                     columns: 1,
                     bezier: false,
                     base_points: bent.clone(),
+                    rest_points: None,
                     keyforms: Some(KeyformGrid::new(binding, vec![kf.clone(), kf.clone()])),
                 },
             )

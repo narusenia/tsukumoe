@@ -728,6 +728,7 @@ mod tests {
             columns: 1,
             bezier: false,
             base_points: points.to_vec(),
+            rest_points: None,
             keyforms: None,
         }
     }

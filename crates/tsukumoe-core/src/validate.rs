@@ -224,6 +224,9 @@ impl Model {
             if warp.rows == 0 || warp.columns == 0 || warp.base_points.len() != points {
                 r.geometry(&owner, "base_points");
             }
+            if warp.rest_points.as_ref().is_some_and(|p| p.len() != points) {
+                r.geometry(&owner, "rest_points");
+            }
             if let Some(grid) = &warp.keyforms {
                 self.check_grid_size(r, &owner, grid.binding, grid.keyforms.len());
                 if grid.keyforms.iter().any(|k| k.points.len() != points) {
@@ -487,6 +490,7 @@ mod tests {
                     columns: 1,
                     bezier: false,
                     base_points: vec![[0.0; 2]; 4],
+                    rest_points: None,
                     keyforms: None,
                 },
             )
@@ -716,6 +720,7 @@ mod tests {
                     columns: 2,
                     bezier: true,
                     base_points: vec![[0.0; 2]; 4],
+                    rest_points: None,
                     keyforms: None,
                 },
             )

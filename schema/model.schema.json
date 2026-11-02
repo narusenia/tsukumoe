@@ -899,6 +899,22 @@
         "part": {
           "type": "string"
         },
+        "rest_points": {
+          "description": "The grid as it was made, same length and space as `base_points`; an\neditor's reset goes back to it. Optional: absent means unknown.",
+          "items": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "rows": {
           "format": "uint32",
           "minimum": 0,

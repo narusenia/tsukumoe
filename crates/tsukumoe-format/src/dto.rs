@@ -204,6 +204,10 @@ pub struct WarpDto {
     pub bezier: bool,
     /// `(rows + 1) * (columns + 1)` control points, row by row.
     pub base_points: Vec<Point>,
+    /// The grid as it was made, same length and space as `base_points`; an
+    /// editor's reset goes back to it. Optional: absent means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rest_points: Option<Vec<Point>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keyforms: Option<GridDto<WarpKeyformDto>>,
 }

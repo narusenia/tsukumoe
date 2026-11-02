@@ -165,6 +165,10 @@ pub enum Command {
     },
     /// Replaces the base control points of a warp deformer; the count must stay `(rows + 1) * (columns + 1)`. Fails if it has keyforms.
     SetWarpBasePoints { name: String, points: Vec<Point> },
+    /// Drops the remembered original grid of a warp deformer (its reset then
+    /// goes back to an even grid over its current box). For when the space of
+    /// the base points changed under it.
+    ClearWarpRestPoints { name: String },
     /// Replaces the base shape of a rotation deformer. Fails if it has keyforms.
     SetRotationBase { name: String, base: RotationBase },
     /// Renames a part. Everything that refers to it keeps pointing at it.
@@ -459,6 +463,7 @@ impl Model {
                     columns: *columns,
                     bezier: false,
                     base_points: base_points.clone(),
+                    rest_points: Some(base_points.clone()),
                     keyforms: None,
                 };
                 self.insert(changes, name, warp)?;
@@ -491,7 +496,11 @@ impl Model {
                 match self.resolve_deformer(name)? {
                     DeformerRef::Warp(id) => {
                         self.reject_keyforms::<WarpDeformer>(id, name, |d| d.keyforms.is_some())?;
-                        self.modify(changes, id, |d| d.parent = parent);
+                        // The points keep their numbers but not their space.
+                        self.modify(changes, id, |d| {
+                            d.parent = parent;
+                            d.rest_points = None;
+                        });
                     }
                     DeformerRef::Rotation(id) => {
                         self.reject_keyforms::<RotationDeformer>(id, name, |d| {
@@ -511,6 +520,10 @@ impl Model {
                 let id = self.resolve::<WarpDeformer>(name)?;
                 self.reject_keyforms::<WarpDeformer>(id, name, |d| d.keyforms.is_some())?;
                 self.modify(changes, id, |d| d.base_points = points.clone());
+            }
+            Command::ClearWarpRestPoints { name } => {
+                let id = self.resolve::<WarpDeformer>(name)?;
+                self.modify(changes, id, |d| d.rest_points = None);
             }
             Command::SetRotationBase { name, base } => {
                 let id = self.resolve::<RotationDeformer>(name)?;
@@ -820,6 +833,9 @@ mod tests {
                 name: "Warp".into(),
                 points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 2.0], [1.0, 2.0]],
             },
+            Command::ClearWarpRestPoints {
+                name: "Warp".into(),
+            },
             Command::SetRotationBase {
                 name: "Rot".into(),
                 base: RotationBase {
@@ -908,6 +924,44 @@ mod tests {
             model.apply(command).unwrap();
         }
         model
+    }
+
+    #[test]
+    fn a_warp_remembers_the_grid_it_was_added_with_until_its_space_changes() {
+        let grid = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+        let rest = |m: &Model| {
+            let id = m.warps().find("Warp").unwrap();
+            m.warps().get(id).unwrap().rest_points.clone()
+        };
+        let mut model = built(vec![add_part("Face"), warp("Warp")]);
+        assert_eq!(rest(&model), Some(grid.clone()));
+        // Editing the points leaves the memory alone.
+        model
+            .apply(Command::SetWarpBasePoints {
+                name: "Warp".into(),
+                points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 1.0], [2.0, 1.0]],
+            })
+            .unwrap();
+        assert_eq!(rest(&model), Some(grid.clone()));
+        // A new parent changes the space the points are in: the memory goes, and undo brings it back.
+        model.apply(rotation("Spin", None)).unwrap();
+        model
+            .apply(Command::SetDeformerParent {
+                name: "Warp".into(),
+                parent: Some("Spin".into()),
+            })
+            .unwrap();
+        assert_eq!(rest(&model), None);
+        assert!(model.undo());
+        assert_eq!(rest(&model), Some(grid.clone()));
+        model
+            .apply(Command::ClearWarpRestPoints {
+                name: "Warp".into(),
+            })
+            .unwrap();
+        assert_eq!(rest(&model), None);
+        assert!(model.undo());
+        assert_eq!(rest(&model), Some(grid));
     }
 
     #[test]

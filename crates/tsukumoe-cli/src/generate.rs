@@ -194,6 +194,7 @@ pub fn model(table: &Table) -> Result<Model, String> {
                         columns: 2,
                         bezier: true,
                         base_points: warp_points(1.0),
+                        rest_points: None,
                         keyforms: Some(KeyformGrid::new(
                             warp_binding,
                             vec![keyform(1.0), keyform(1.0 + 0.02 * (k + 1) as f32)],

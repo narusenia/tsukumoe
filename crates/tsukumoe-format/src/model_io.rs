@@ -222,6 +222,7 @@ impl Writer<'_> {
                 columns: w.columns,
                 bezier: w.bezier,
                 base_points: w.base_points.clone(),
+                rest_points: w.rest_points.clone(),
                 keyforms: self.grid(&w.keyforms, |k| WarpKeyformDto {
                     points: k.points.clone(),
                     opacity: k.opacity,
@@ -664,6 +665,7 @@ impl Reader {
                 columns: d.columns,
                 bezier: d.bezier,
                 base_points: d.base_points.clone(),
+                rest_points: d.rest_points.clone(),
                 keyforms: self.grid(&d.keyforms, &owner, |k| WarpKeyform {
                     points: k.points.clone(),
                     opacity: k.opacity,
