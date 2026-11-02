@@ -160,6 +160,8 @@ mod tests {
             Command::SetWarpBezier { .. } => "set_warp_bezier",
             Command::RenameParameter { .. } => "rename_parameter",
             Command::SetParameterRepeat { .. } => "set_parameter_repeat",
+            Command::SetParameterGroup { .. } => "set_parameter_group",
+            Command::MoveParameter { .. } => "move_parameter",
             Command::BindParameter { .. } => "bind_parameter",
             Command::UnbindParameter { .. } => "unbind_parameter",
             Command::AddParameterKey { .. } => "add_parameter_key",
@@ -305,6 +307,14 @@ mod tests {
             Command::SetParameterRepeat {
                 name: "ParamAngleX".into(),
                 repeat: true,
+            },
+            Command::SetParameterGroup {
+                name: "ParamAngleX".into(),
+                group: Some("Head".into()),
+            },
+            Command::MoveParameter {
+                name: "ParamAngleX".into(),
+                to: 0,
             },
             Command::BindParameter {
                 parameter: "ParamAngleX".into(),

@@ -327,6 +327,19 @@ impl Model {
                 let id = self.resolve::<Parameter>(name)?;
                 self.modify(changes, id, |p| p.repeat = *repeat);
             }
+            Command::SetParameterGroup { name, group } => {
+                let id = self.resolve::<Parameter>(name)?;
+                self.modify(changes, id, |p| p.group = group.clone());
+            }
+            Command::MoveParameter { name, to } => {
+                let id = self.resolve::<Parameter>(name)?;
+                let from = self.parameters.position(id).expect("resolved");
+                let to = (*to).min(self.parameters.len() - 1);
+                if from != to {
+                    self.parameters.move_to(id, to);
+                    changes.push(Change::ParameterOrder { id, from, to });
+                }
+            }
             Command::BindParameter {
                 parameter,
                 elements,
@@ -1299,5 +1312,68 @@ mod tests {
         assert!(m.glues().get(id).unwrap().keyforms.is_none());
         assert!(m.undo());
         assert_eq!(intensity_at(&m, 0.5), 0.5);
+    }
+
+    fn parameter_names(m: &Model) -> Vec<String> {
+        m.parameters()
+            .iter()
+            .map(|(_, n, _)| n.to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_parameter_moves_and_the_move_undoes_and_redoes() {
+        let mut m = base();
+        for n in ["Q", "R"] {
+            m.apply(Command::AddParameter {
+                name: n.into(),
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+                repeat: false,
+            })
+            .unwrap();
+        }
+        m.apply(Command::MoveParameter {
+            name: "P".into(),
+            to: 99,
+        })
+        .unwrap();
+        assert_eq!(parameter_names(&m), ["Q", "R", "P"]);
+        assert_eq!(m.compile().unwrap().parameter_name(2), "P");
+        assert!(m.undo());
+        assert_eq!(parameter_names(&m), ["P", "Q", "R"]);
+        assert!(m.redo());
+        assert_eq!(parameter_names(&m), ["Q", "R", "P"]);
+        assert!(
+            m.apply(Command::MoveParameter {
+                name: "X".into(),
+                to: 0
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_parameter_group_is_set_cleared_and_undone() {
+        let mut m = base();
+        let group = |m: &Model| {
+            let id = m.parameters().find("P").unwrap();
+            m.parameters().get(id).unwrap().group.clone()
+        };
+        m.apply(Command::SetParameterGroup {
+            name: "P".into(),
+            group: Some("Head".into()),
+        })
+        .unwrap();
+        assert_eq!(group(&m).as_deref(), Some("Head"));
+        m.apply(Command::SetParameterGroup {
+            name: "P".into(),
+            group: None,
+        })
+        .unwrap();
+        assert_eq!(group(&m), None);
+        assert!(m.undo());
+        assert_eq!(group(&m).as_deref(), Some("Head"));
     }
 }

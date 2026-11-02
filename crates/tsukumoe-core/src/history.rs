@@ -66,6 +66,12 @@ pub(crate) enum Change {
     Warp(Box<Edit<WarpDeformer>>),
     Rotation(Edit<RotationDeformer>),
     Glue(Edit<Glue>),
+    /// A parameter moved in the iteration order, from position `from` to `to`.
+    ParameterOrder {
+        id: Id<Parameter>,
+        from: usize,
+        to: usize,
+    },
 }
 
 impl Change {
@@ -79,6 +85,9 @@ impl Change {
             Change::Warp(e) => e.set(&mut model.warps, &e.before),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.before),
             Change::Glue(e) => e.set(&mut model.glues, &e.before),
+            Change::ParameterOrder { id, from, .. } => {
+                model.parameters.move_to(*id, *from);
+            }
         }
     }
 
@@ -92,6 +101,9 @@ impl Change {
             Change::Warp(e) => e.set(&mut model.warps, &e.after),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.after),
             Change::Glue(e) => e.set(&mut model.glues, &e.after),
+            Change::ParameterOrder { id, to, .. } => {
+                model.parameters.move_to(*id, *to);
+            }
         }
     }
 }

@@ -435,6 +435,35 @@ Turns the wrap-around of a parameter on or off.
 {"type":"set_parameter_repeat","name":"ParamAngleX","repeat":true}
 ```
 
+### `set_parameter_group`
+
+Puts a parameter into a group (`None` takes it out of its group).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `group` | string or null | no |  |
+| `name` | string | yes |  |
+| `type` | `"set_parameter_group"` | yes |  |
+
+```json
+{"type":"set_parameter_group","name":"ParamAngleX","group":"Head"}
+```
+
+### `move_parameter`
+
+Moves a parameter to position `to` (counted from 0, clamped) in the
+parameter order.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `to` | integer | yes |  |
+| `type` | `"move_parameter"` | yes |  |
+
+```json
+{"type":"move_parameter","name":"ParamAngleX","to":0}
+```
+
 ### `bind_parameter`
 
 Binds elements without keyforms to a parameter: keys at its minimum,

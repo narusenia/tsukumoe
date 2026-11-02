@@ -200,6 +200,11 @@ pub enum Command {
     RenameParameter { name: String, new_name: String },
     /// Turns the wrap-around of a parameter on or off.
     SetParameterRepeat { name: String, repeat: bool },
+    /// Puts a parameter into a group (`None` takes it out of its group).
+    SetParameterGroup { name: String, group: Option<String> },
+    /// Moves a parameter to position `to` (counted from 0, clamped) in the
+    /// parameter order.
+    MoveParameter { name: String, to: usize },
     /// Binds elements without keyforms to a parameter: keys at its minimum,
     /// default and maximum (fewer when they coincide), every keyform a copy of
     /// the element's shape, so nothing drawn changes. Elements that get the
@@ -762,6 +767,8 @@ impl Model {
             }
             Command::RenameParameter { .. }
             | Command::SetParameterRepeat { .. }
+            | Command::SetParameterGroup { .. }
+            | Command::MoveParameter { .. }
             | Command::BindParameter { .. }
             | Command::UnbindParameter { .. }
             | Command::AddParameterKey { .. }
@@ -1163,6 +1170,14 @@ mod tests {
             Command::SetParameterRepeat {
                 name: "ParamAngleX".into(),
                 repeat: true,
+            },
+            Command::SetParameterGroup {
+                name: "ParamAngleX".into(),
+                group: Some("Head".into()),
+            },
+            Command::MoveParameter {
+                name: "ParamAngleX".into(),
+                to: 0,
             },
             Command::RenameParameter {
                 name: "ParamAngleX".into(),
