@@ -496,7 +496,10 @@ impl Editor {
         let model = doc.dispatcher.model();
         let warp = action == "deformer.create-warp";
         let result = if warp {
-            let (rows, columns) = self.deformer_tool.grid;
+            let (rows, columns) = match self.deformer_tool.grid_auto {
+                true => deformer_ops::auto_grid_of(model, &targets).unwrap_or((4, 4)),
+                false => self.deformer_tool.grid,
+            };
             deformer_ops::create_warp(model, &targets, rows, columns)
         } else {
             deformer_ops::create_rotation(model, &targets)
@@ -2526,6 +2529,7 @@ mod tests {
         // A mesh selected: one command, the warp is selected and the tool switches.
         editor.view.selection = Some(Selection::Mesh("DefMesh".into()));
         editor.deformer_tool.grid = (2, 3);
+        editor.deformer_tool.grid_auto = false;
         assert!(editor.run_action(&ctx, "deformer.create-warp"));
         assert_eq!(steps(&editor), base + 1);
         assert_eq!(editor.view.selection, Some(Selection::Warp("Warp".into())));

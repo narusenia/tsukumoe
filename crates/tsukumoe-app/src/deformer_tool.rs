@@ -276,6 +276,8 @@ pub struct DeformerTool {
     gesture: Option<Gesture>,
     /// Rows and columns of the warp `deformer.create-warp` makes; kept across deformers.
     pub grid: (u32, u32),
+    /// Take the grid from the shape of what the warp surrounds (`deformer_ops::auto_grid`).
+    pub grid_auto: bool,
     /// Cmd / Ctrl is held: dragging a rotation's origin moves everything
     /// under it too. Without it only the axis moves and what hangs from the
     /// rotation stays where it is drawn. Set by the viewport each frame.
@@ -291,6 +293,7 @@ impl Default for DeformerTool {
             points: BTreeSet::new(),
             gesture: None,
             grid: (4, 4),
+            grid_auto: true,
             whole: false,
             proportional: Proportional::default(),
         }

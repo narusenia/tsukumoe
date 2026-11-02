@@ -122,6 +122,25 @@ fn world_points(model: &Model, target: &Target) -> Result<Vec<Point>, OpError> {
     }
 }
 
+/// Rows and columns for a warp around a box `w` wide and `h` high: the longer
+/// side gets `AUTO_LONG` cells and the shorter one as many as keeps the cells
+/// about square (at least 1).
+pub fn auto_grid(w: f32, h: f32) -> (u32, u32) {
+    const AUTO_LONG: f32 = 5.0;
+    if w <= 0.0 || h <= 0.0 {
+        return (1, 1);
+    }
+    let long = w.max(h);
+    let cells = |side: f32| ((AUTO_LONG * side / long).round() as u32).max(1);
+    (cells(h), cells(w))
+}
+
+/// The grid `auto_grid` picks for the targets' bounds; `None` when they are flat.
+pub fn auto_grid_of(model: &Model, targets: &[Target]) -> Option<(u32, u32)> {
+    let b = bounds(model, targets).ok()?;
+    Some(auto_grid(b[2] - b[0], b[3] - b[1]))
+}
+
 /// `[x0, y0, x1, y1]` around all points of all targets.
 fn bounds(model: &Model, targets: &[Target]) -> Result<[f32; 4], OpError> {
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
@@ -670,6 +689,15 @@ pub fn set_parent(model: &Model, target: &Target, parent: Option<&str>) -> Resul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_auto_grid_keeps_cells_square_with_five_along_the_long_side() {
+        assert_eq!(auto_grid(2.0, 2.0), (5, 5));
+        // rows follow the height, columns the width
+        assert_eq!(auto_grid(4.0, 2.0), (3, 5));
+        assert_eq!(auto_grid(1.0, 10.0), (5, 1));
+        assert_eq!(auto_grid(0.0, 3.0), (1, 1));
+    }
+
     use super::*;
     use tsukumoe_core::compiled::CompiledModel;
     use tsukumoe_core::eval::Frame;

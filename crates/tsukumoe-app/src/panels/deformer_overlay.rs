@@ -155,11 +155,40 @@ pub fn options(ui: &mut egui::Ui, tool: &mut DeformerTool) -> Option<&'static st
         ui.horizontal(|ui| {
             ui.label(t("deformer-warp-grid"));
             let range = 1..=32u32;
-            ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
-                .accessible_name(t("deformer-warp-rows"));
+            let rows = ui
+                .add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
+                .accessible_name(t("deformer-warp-rows"))
+                .changed();
             ui.label("\u{d7}");
-            ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
-                .accessible_name(t("deformer-warp-columns"));
+            let columns = ui
+                .add(egui::DragValue::new(&mut tool.grid.1).range(range))
+                .accessible_name(t("deformer-warp-columns"))
+                .changed();
+            if rows || columns {
+                tool.grid_auto = false;
+            }
+        });
+        ui.horizontal(|ui| {
+            for n in [2, 4, 8] {
+                let on = !tool.grid_auto && tool.grid == (n, n);
+                let variant = if on {
+                    tsukumoe_ui::Variant::Primary
+                } else {
+                    tsukumoe_ui::Variant::Ghost
+                };
+                if tsukumoe_ui::button(ui, &format!("{n}\u{d7}{n}"), variant).clicked() {
+                    tool.grid = (n, n);
+                    tool.grid_auto = false;
+                }
+            }
+            let variant = if tool.grid_auto {
+                tsukumoe_ui::Variant::Primary
+            } else {
+                tsukumoe_ui::Variant::Ghost
+            };
+            if tsukumoe_ui::button(ui, &t("mesh-edit-grid-auto"), variant).clicked() {
+                tool.grid_auto = true;
+            }
         });
         ui.horizontal(|ui| {
             for (key, action) in [
