@@ -177,6 +177,75 @@ pub fn compile(
     result
 }
 
+/// True if `name` can be written in an expression as a parameter name.
+pub fn is_identifier(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.first()
+        .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_')
+}
+
+/// `source` with every use of the parameter `old` written as `new`: names
+/// that are not followed by `(` (function names are left alone) and numbers
+/// such as `1e3` are skipped by the same lexing rules as [`compile`].
+/// Returns `None` if `old` does not occur.
+pub fn rename_name(source: &str, old: &str, new: &str) -> Option<String> {
+    let b = source.as_bytes();
+    let mut out = String::with_capacity(source.len());
+    let mut changed = false;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_digit() || (c == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit)) {
+            let start = i;
+            while b.get(i).is_some_and(u8::is_ascii_digit) {
+                i += 1;
+            }
+            if b.get(i) == Some(&b'.') {
+                i += 1;
+                while b.get(i).is_some_and(u8::is_ascii_digit) {
+                    i += 1;
+                }
+            }
+            if matches!(b.get(i), Some(b'e' | b'E')) {
+                let sign = usize::from(matches!(b.get(i + 1), Some(b'+' | b'-')));
+                if b.get(i + 1 + sign).is_some_and(u8::is_ascii_digit) {
+                    i += 1 + sign;
+                    while b.get(i).is_some_and(u8::is_ascii_digit) {
+                        i += 1;
+                    }
+                }
+            }
+            out.push_str(&source[start..i]);
+        } else if c.is_ascii_alphabetic() || c == b'_' {
+            let start = i;
+            while b
+                .get(i)
+                .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+            {
+                i += 1;
+            }
+            let name = &source[start..i];
+            let call = b[i..]
+                .iter()
+                .find(|c| !c.is_ascii_whitespace())
+                .is_some_and(|c| *c == b'(');
+            if name == old && !call {
+                out.push_str(new);
+                changed = true;
+            } else {
+                out.push_str(name);
+            }
+        } else {
+            // Not ASCII-only text: copy whole characters.
+            let ch = source[i..].chars().next().expect("in range");
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    changed.then_some(out)
+}
+
 /// Runs a compiled expression. A result that is not finite becomes 0.
 pub fn eval<O: Copy + Into<Op>>(ops: &[O], values: &[f32]) -> f32 {
     let mut st = [0.0f32; MAX_STACK];
@@ -394,6 +463,22 @@ impl<F: Fn(&str) -> Option<usize>> Parser<'_, F> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn renaming_rewrites_names_but_not_functions_or_numbers() {
+        use super::rename_name;
+        assert_eq!(
+            rename_name("ParamA * 2 + sin(ParamA)", "ParamA", "Angle").as_deref(),
+            Some("Angle * 2 + sin(Angle)")
+        );
+        // A function with the old name, a longer name and an exponent are left alone.
+        assert_eq!(rename_name("e(1) + ParamAB + 1e3", "e", "x"), None);
+        assert_eq!(rename_name("1e3 + e", "e", "x").as_deref(), Some("1e3 + x"));
+        assert_eq!(rename_name("min(A,B)", "min", "m"), None);
+        assert_eq!(rename_name("", "A", "B"), None);
+        assert!(super::is_identifier("Param_1") && !super::is_identifier("1A"));
+        assert!(!super::is_identifier("a b") && !super::is_identifier(""));
+    }
+
     use super::*;
 
     const NAMES: [&str; 2] = ["A", "B"];

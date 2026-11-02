@@ -18,7 +18,19 @@ use crate::rig::{
     ArtMesh, BlendMode, DeformerRef, RotationDeformer, RotationKeyform, WarpDeformer,
 };
 use crate::table::InsertError;
+
+mod keyform;
 use crate::validate::ModelError;
+
+/// An element a keyform grid can sit on: a mesh, or a warp or rotation
+/// deformer (they share one namespace, so only the name is needed).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ElementRef {
+    Mesh { name: String },
+    Deformer { name: String },
+}
 
 /// The base shape of a rotation deformer: origin, angle in degrees, scale and
 /// reflections (the part of a rotation keyform that is not opacity).
@@ -169,6 +181,41 @@ pub enum Command {
     /// goes back to an even grid over its current box). For when the space of
     /// the base points changed under it.
     ClearWarpRestPoints { name: String },
+    /// Gives a parameter a new name. Expressions of drivers that read it are
+    /// rewritten to the new name; everything else refers to it by id.
+    RenameParameter { name: String, new_name: String },
+    /// Turns the wrap-around of a parameter on or off.
+    SetParameterRepeat { name: String, repeat: bool },
+    /// Binds elements without keyforms to a parameter: keys at its minimum,
+    /// default and maximum (fewer when they coincide), every keyform a copy of
+    /// the element's shape, so nothing drawn changes. Elements that get the
+    /// same keys share one binding. Fails for an element that already has keyforms.
+    BindParameter {
+        parameter: String,
+        elements: Vec<ElementRef>,
+    },
+    /// Takes elements off a parameter: the axis goes and the shape at the
+    /// parameter's default is kept; with no axis left the keyforms go and that
+    /// shape becomes the base shape.
+    UnbindParameter {
+        parameter: String,
+        elements: Vec<ElementRef>,
+    },
+    /// Adds a key at `value` on the axis of `parameter` of the element's
+    /// binding, filled with the interpolated shape (nothing drawn changes).
+    /// Every element on that binding gets the key.
+    AddParameterKey {
+        parameter: String,
+        value: f32,
+        element: ElementRef,
+    },
+    /// Removes the key at exactly `value` (and its keyforms) from the axis of
+    /// `parameter` of the element's binding, for every element on it. The last key stays.
+    RemoveParameterKey {
+        parameter: String,
+        value: f32,
+        element: ElementRef,
+    },
     /// Replaces the base shape of a rotation deformer. Fails if it has keyforms.
     SetRotationBase { name: String, base: RotationBase },
     /// Renames a part. Everything that refers to it keeps pointing at it.
@@ -212,6 +259,13 @@ pub enum CommandError {
         kind: &'static str,
         name: String,
     },
+    /// The command does not apply to this element or value; `reason` is a
+    /// short fixed key (`already-bound`, `not-bound`, `bad-key`, `no-such-key`,
+    /// `last-key`, `shared-with-other-kinds`, `not-an-identifier`, `bad-range`).
+    Refused {
+        name: String,
+        reason: &'static str,
+    },
     /// The command would leave the model with problems it did not have.
     Invalid(Vec<ModelError>),
 }
@@ -228,6 +282,7 @@ impl fmt::Display for CommandError {
                     "{kind} '{name}' has keyforms; its shape cannot be edited here"
                 )
             }
+            Self::Refused { name, reason } => write!(f, "'{name}': {reason}"),
             Self::Invalid(errors) => write!(f, "command would break the model: {errors:?}"),
         }
     }
@@ -573,6 +628,12 @@ impl Model {
                     self.run(command, changes)?;
                 }
             }
+            Command::RenameParameter { .. }
+            | Command::SetParameterRepeat { .. }
+            | Command::BindParameter { .. }
+            | Command::UnbindParameter { .. }
+            | Command::AddParameterKey { .. }
+            | Command::RemoveParameterKey { .. } => self.run_keyform(command, changes)?,
         }
         Ok(())
     }
@@ -888,6 +949,45 @@ mod tests {
             Command::SetDeformerPart {
                 name: "Turn".into(),
                 part: "Fringe".into(),
+            },
+            Command::BindParameter {
+                parameter: "ParamAngleX".into(),
+                elements: vec![
+                    ElementRef::Mesh {
+                        name: "Scalp".into(),
+                    },
+                    ElementRef::Deformer {
+                        name: "Turn".into(),
+                    },
+                ],
+            },
+            Command::AddParameterKey {
+                parameter: "ParamAngleX".into(),
+                value: 10.0,
+                element: ElementRef::Mesh {
+                    name: "Scalp".into(),
+                },
+            },
+            Command::RemoveParameterKey {
+                parameter: "ParamAngleX".into(),
+                value: 10.0,
+                element: ElementRef::Mesh {
+                    name: "Scalp".into(),
+                },
+            },
+            Command::SetParameterRepeat {
+                name: "ParamAngleX".into(),
+                repeat: true,
+            },
+            Command::RenameParameter {
+                name: "ParamAngleX".into(),
+                new_name: "AngleX".into(),
+            },
+            Command::UnbindParameter {
+                parameter: "AngleX".into(),
+                elements: vec![ElementRef::Mesh {
+                    name: "Scalp".into(),
+                }],
             },
         ]
     }

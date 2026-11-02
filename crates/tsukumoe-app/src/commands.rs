@@ -132,6 +132,7 @@ pub fn search<'a>(list: &'a [CommandInfo], query: &str) -> Vec<&'a CommandInfo> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tsukumoe_core::command::ElementRef;
 
     /// Adding a variant to `Command` makes this match fail to compile; add it
     /// here and the palette test below then checks the schema lists it.
@@ -155,6 +156,12 @@ mod tests {
             Command::SetMeshParent { .. } => "set_mesh_parent",
             Command::SetWarpBasePoints { .. } => "set_warp_base_points",
             Command::ClearWarpRestPoints { .. } => "clear_warp_rest_points",
+            Command::RenameParameter { .. } => "rename_parameter",
+            Command::SetParameterRepeat { .. } => "set_parameter_repeat",
+            Command::BindParameter { .. } => "bind_parameter",
+            Command::UnbindParameter { .. } => "unbind_parameter",
+            Command::AddParameterKey { .. } => "add_parameter_key",
+            Command::RemoveParameterKey { .. } => "remove_parameter_key",
             Command::SetRotationBase { .. } => "set_rotation_base",
             Command::RenamePart { .. } => "rename_part",
             Command::RenameMesh { .. } => "rename_mesh",
@@ -259,6 +266,45 @@ mod tests {
             },
             Command::ClearWarpRestPoints {
                 name: "FaceWarp".into(),
+            },
+            Command::SetParameterRepeat {
+                name: "ParamAngleX".into(),
+                repeat: true,
+            },
+            Command::BindParameter {
+                parameter: "ParamAngleX".into(),
+                elements: vec![
+                    ElementRef::Mesh {
+                        name: "Skin".into(),
+                    },
+                    ElementRef::Deformer {
+                        name: "FaceWarp".into(),
+                    },
+                ],
+            },
+            Command::AddParameterKey {
+                parameter: "ParamAngleX".into(),
+                value: 10.0,
+                element: ElementRef::Mesh {
+                    name: "Skin".into(),
+                },
+            },
+            Command::RemoveParameterKey {
+                parameter: "ParamAngleX".into(),
+                value: 10.0,
+                element: ElementRef::Mesh {
+                    name: "Skin".into(),
+                },
+            },
+            Command::UnbindParameter {
+                parameter: "ParamAngleX".into(),
+                elements: vec![ElementRef::Mesh {
+                    name: "Skin".into(),
+                }],
+            },
+            Command::RenameParameter {
+                name: "ParamAngleX".into(),
+                new_name: "AngleX".into(),
             },
             Command::SetRotationBase {
                 name: "HeadRotation".into(),
