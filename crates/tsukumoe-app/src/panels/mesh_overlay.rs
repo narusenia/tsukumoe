@@ -254,6 +254,8 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static s
                     .on_hover_text(t("mesh-edit-contour-precise-hint"))
                     .changed()
                     && c.precise;
+            tsukumoe_ui::checkbox(ui, &mut c.even, &t("mesh-edit-contour-even"))
+                .on_hover_text(t("mesh-edit-contour-even-hint"));
             // The tracing is exact to a fraction of a pixel, so a coarse thinning
             // would throw that away: bring the tolerance down with it.
             if turned_on {
@@ -266,6 +268,7 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static s
         }
         chosen = chosen.or(run(ui, "mesh-edit-make-contour", "mesh.contour"));
         ui.separator();
+        chosen = chosen.or(run(ui, "mesh-edit-even-outline", "mesh.even-outline"));
         chosen = chosen.or(run(ui, "mesh-edit-reset", "mesh.reset"));
     });
     chosen
@@ -369,10 +372,11 @@ pub fn menu_ui(
     chosen
 }
 
-const MENU_MESH: [&str; 4] = [
+const MENU_MESH: [&str; 5] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
+    "mesh.even-outline",
     "mesh.reset",
 ];
 const MENU_VERTICES: [&str; 6] = [

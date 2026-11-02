@@ -25,6 +25,7 @@
     { "action": "mesh.retriangulate", "context": "viewport", "keys": "D" },
     { "action": "mesh.fill-grid", "context": "viewport", "keys": "G" },
     { "action": "mesh.contour", "context": "viewport", "keys": "C" },
+    { "action": "mesh.even-outline", "context": "viewport", "keys": "Shift+C" },
     { "action": "deformer.create-warp", "context": "viewport", "keys": "W" },
     { "action": "deformer.create-rotation", "context": "viewport", "keys": "R" },
     { "action": "proportional.toggle", "context": "viewport", "keys": "O" },

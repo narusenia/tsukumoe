@@ -453,3 +453,7 @@ action-mesh-reset = Reset the mesh to its starting shape (a quad over its UV box
 mesh-edit-reset = Reset
 viewport-solo-end = End the solo
 action-viewport-solo = Solo the selection (again to end)
+action-mesh-even-outline = Space the outline points evenly (corners stay)
+mesh-edit-even-outline = Even out outline
+mesh-edit-contour-even = Space outline points evenly
+mesh-edit-contour-even-hint = Lays the points left after thinning at equal intervals along the outline. Corners do not move. The number of points stays.

@@ -155,10 +155,11 @@ impl From<EditError> for ToolError {
 
 /// The actions of the right-click menu, in order. Each one is run through
 /// `Editor::run_action`, so the menu has no logic of its own.
-pub const MENU_ACTIONS: [&str; 15] = [
+pub const MENU_ACTIONS: [&str; 16] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
+    "mesh.even-outline",
     "mesh.connect",
     "mesh.flip-edge",
     "mesh.edge-pen",
@@ -1021,6 +1022,13 @@ impl MeshTool {
         Ok(geometry_op(name, "mesh_reset", out))
     }
 
+    /// Spaces the points of the mesh's outline evenly (`contour::even_outline`).
+    pub fn even_outline(&mut self, name: &str, g: &Geometry) -> Result<Op, ToolError> {
+        let out = contour::even_outline(g)?;
+        self.clear_selection();
+        Ok(geometry_op(name, "mesh_even_outline", out))
+    }
+
     /// Makes the mesh again from the alpha of its texture: an outline per
     /// island and lattice points inside (`contour::contour_mesh`). `alpha` is
     /// `None` when the texture could not be read.
@@ -1822,40 +1830,40 @@ mod tests {
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, false, true, false, false, false,
-                true, true, true
+                true, true, true, true, false, false, true, false, false, true, false, false,
+                false, true, true, true
             ]
         );
         click(&mut t, &g, &m, [100.0, 100.0], false);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, false, true, true, true, true, true,
-                true, true
+                true, true, true, true, false, false, true, false, false, true, true, true, true,
+                true, true, true
             ]
         );
         click(&mut t, &g, &m, [0.0, 0.0], true);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, true, false, true, false, true, true, true, true, true, true,
-                true, true
+                true, true, true, true, true, false, true, false, true, true, true, true, true,
+                true, true, true
             ]
         );
         click(&mut t, &g, &m, [100.0, 0.0], true);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, true, true, true, true, true, true,
-                true, true
+                true, true, true, true, false, false, true, false, true, true, true, true, true,
+                true, true, true
             ]
         );
         click(&mut t, &g, &m, [50.0, 50.0], false);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, true, true, true, false, true, false, false, true, true,
-                true, true
+                true, true, true, true, false, true, true, true, false, true, false, false, true,
+                true, true, true
             ]
         );
     }

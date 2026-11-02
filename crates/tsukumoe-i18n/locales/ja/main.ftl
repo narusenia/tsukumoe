@@ -449,3 +449,7 @@ action-mesh-reset = メッシュを初期の形（UV の範囲を覆う四角形
 mesh-edit-reset = 初期化
 viewport-solo-end = ソロ表示を解除
 action-viewport-solo = 選択をソロ表示（もう一度で解除）
+action-mesh-even-outline = 輪郭の点を均等な間隔に並べ直す（角は残す）
+mesh-edit-even-outline = 輪郭を均等化
+mesh-edit-contour-even = 輪郭の点を均等に並べる
+mesh-edit-contour-even-hint = 間引いたあとの点を、輪郭に沿って同じ間隔に並べ直す。角は動かさない。点の数は変わらない。

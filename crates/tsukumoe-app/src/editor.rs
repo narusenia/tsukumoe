@@ -840,6 +840,7 @@ impl Editor {
                 self.mesh_tool.fill_grid(&name, &g)
             }
             "mesh.reset" => self.mesh_tool.reset(&name, &g),
+            "mesh.even-outline" => self.mesh_tool.even_outline(&name, &g),
             "mesh.contour" => {
                 let alpha = self.texture_alpha_of(&name);
                 self.mesh_tool.contour_mesh(&name, &g, alpha.as_ref())
@@ -1020,6 +1021,7 @@ impl Editor {
             | "mesh.retriangulate"
             | "mesh.fill-grid"
             | "mesh.reset"
+            | "mesh.even-outline"
             | "mesh.contour" => {
                 self.run_mesh_action(ctx, action);
             }
