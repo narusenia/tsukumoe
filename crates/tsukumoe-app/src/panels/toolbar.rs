@@ -5,13 +5,10 @@
 //! one for proportional edit. A button only names an action; the editor runs
 //! it like a key or a menu item, so the pressed state follows the view state.
 
-use egui::{Align2, Rect, Stroke, vec2};
-use tsukumoe_ui::{Icon, Keymap, Theme, Variant, icon_button, tr};
+use egui::{Rect, vec2};
+use tsukumoe_ui::{Icon, Keymap, Variant, icon_button, tr};
 
 use crate::actions::{Tool, label_key};
-
-/// Below the help line and the proportional options box.
-const TOP: f32 = 92.0;
 
 /// The buttons, top to bottom: the action, its icon, and whether it is pressed.
 pub fn buttons(tool: Tool, proportional: bool) -> [(&'static str, Icon, bool); 4] {
@@ -35,36 +32,24 @@ pub fn show(
     proportional: bool,
     keymap: &Keymap,
 ) -> Option<&'static str> {
-    let theme = Theme::get(ctx);
     let mut chosen = None;
-    egui::Area::new(egui::Id::unique("tsukumoe-toolbar"))
-        .fixed_pos(rect.left_top() + vec2(8.0, TOP))
-        .pivot(Align2::LEFT_TOP)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(theme.colors.surface_raised)
-                .stroke(Stroke::new(1.0, theme.colors.border))
-                .corner_radius(theme.metrics.radius)
-                .inner_margin(egui::Margin::same(3))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
-                    for (action, icon, pressed) in buttons(tool, proportional) {
-                        let mut name = tr(ctx, &label_key(action));
-                        if let Some(keys) = keymap.shortcut_text(ctx, action) {
-                            name = format!("{name} ({keys})");
-                        }
-                        let variant = if pressed {
-                            Variant::Primary
-                        } else {
-                            Variant::Ghost
-                        };
-                        if icon_button(ui, icon, &name, variant).clicked() {
-                            chosen = Some(action);
-                        }
-                    }
-                });
-        });
+    super::overlay::tools(ctx, rect, |ui| {
+        ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
+        for (action, icon, pressed) in buttons(tool, proportional) {
+            let mut name = tr(ctx, &label_key(action));
+            if let Some(keys) = keymap.shortcut_text(ctx, action) {
+                name = format!("{name} ({keys})");
+            }
+            let variant = if pressed {
+                Variant::Primary
+            } else {
+                Variant::Ghost
+            };
+            if icon_button(ui, icon, &name, variant).clicked() {
+                chosen = Some(action);
+            }
+        }
+    });
     chosen
 }
 

@@ -9,6 +9,7 @@ pub mod history;
 pub mod inspector;
 pub mod keys;
 pub mod mesh_overlay;
+pub mod overlay;
 pub mod palette;
 pub mod parameters;
 pub mod proportional_overlay;

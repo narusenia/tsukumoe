@@ -62,66 +62,52 @@ fn falloff_button(ui: &mut egui::Ui, falloff: &mut Falloff, name: &str) {
     response.on_hover_text(name);
 }
 
-/// The options box at the top left, under the help line. Returns true when
-/// anything changed.
-pub fn options(ctx: &egui::Context, rect: egui::Rect, p: &mut Proportional) -> bool {
-    let theme = Theme::get(ctx);
-    let m = theme.metrics;
+/// The options box: on or off, radius, falloff curve, distance kind. Returns
+/// true when anything changed.
+pub fn options(ui: &mut egui::Ui, p: &mut Proportional) -> bool {
+    let ctx = ui.ctx().clone();
     let before = *p;
-    egui::Area::new(egui::Id::unique("tsukumoe-proportional-options"))
-        .fixed_pos(rect.left_top() + vec2(8.0, 52.0))
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(theme.colors.surface_raised)
-                .stroke(Stroke::new(1.0, theme.colors.border))
-                .corner_radius(m.radius)
-                .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let variant = if p.on {
-                            Variant::Primary
-                        } else {
-                            Variant::Ghost
-                        };
-                        if icon_button(ui, Icon::Locate, &tr(ctx, "proportional-on"), variant)
-                            .clicked()
-                        {
-                            p.on = !p.on;
-                        }
-                        if !p.on {
-                            return;
-                        }
-                        ui.add(
-                            egui::DragValue::new(&mut p.radius)
-                                .range(RADIUS_RANGE.0..=RADIUS_RANGE.1)
-                                .speed(1.0)
-                                .max_decimals(0)
-                                .suffix(" pt"),
-                        )
-                        .accessible_name(tr(ctx, "proportional-radius"))
-                        .on_hover_text(tr(ctx, "proportional-radius"));
-                        let curve = format!(
-                            "{}: {}",
-                            tr(ctx, "proportional-falloff"),
-                            tr(ctx, falloff_key(p.falloff))
-                        );
-                        falloff_button(ui, &mut p.falloff, &curve);
-                        let (icon, key) = match p.distance {
-                            Distance::Path => (Icon::Grid, "proportional-distance-path"),
-                            Distance::Straight => (Icon::Minus, "proportional-distance-straight"),
-                        };
-                        let name =
-                            format!("{}: {}", tr(ctx, "proportional-distance"), tr(ctx, key));
-                        if icon_button(ui, icon, &name, Variant::Ghost).clicked() {
-                            p.distance = match p.distance {
-                                Distance::Path => Distance::Straight,
-                                Distance::Straight => Distance::Path,
-                            };
-                        }
-                    });
-                });
+    super::overlay::boxed(ui, |ui| {
+        ui.horizontal(|ui| {
+            let variant = if p.on {
+                Variant::Primary
+            } else {
+                Variant::Ghost
+            };
+            if icon_button(ui, Icon::Locate, &tr(&ctx, "proportional-on"), variant).clicked() {
+                p.on = !p.on;
+            }
+            if !p.on {
+                return;
+            }
+            ui.add(
+                egui::DragValue::new(&mut p.radius)
+                    .range(RADIUS_RANGE.0..=RADIUS_RANGE.1)
+                    .speed(1.0)
+                    .max_decimals(0)
+                    .suffix(" pt"),
+            )
+            .accessible_name(tr(&ctx, "proportional-radius"))
+            .on_hover_text(tr(&ctx, "proportional-radius"));
+            let curve = format!(
+                "{}: {}",
+                tr(&ctx, "proportional-falloff"),
+                tr(&ctx, falloff_key(p.falloff))
+            );
+            falloff_button(ui, &mut p.falloff, &curve);
+            let (icon, key) = match p.distance {
+                Distance::Path => (Icon::Grid, "proportional-distance-path"),
+                Distance::Straight => (Icon::Minus, "proportional-distance-straight"),
+            };
+            let name = format!("{}: {}", tr(&ctx, "proportional-distance"), tr(&ctx, key));
+            if icon_button(ui, icon, &name, Variant::Ghost).clicked() {
+                p.distance = match p.distance {
+                    Distance::Path => Distance::Straight,
+                    Distance::Straight => Distance::Path,
+                };
+            }
         });
+    });
     *p != before
 }
 
@@ -164,7 +150,7 @@ mod tests {
                 |ui, p: &mut Proportional| {
                     tsukumoe_ui::init(ui.ctx());
                     tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
-                    options(ui.ctx(), ui.max_rect(), p);
+                    options(ui, p);
                 },
                 p,
             )

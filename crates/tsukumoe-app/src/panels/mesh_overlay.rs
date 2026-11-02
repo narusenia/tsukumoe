@@ -6,7 +6,7 @@
 //! the picture behind. It only reads the tool and the mesh; the tool's
 //! pointer handling is in the viewport.
 
-use egui::{Align2, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
+use egui::{Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2};
 use tsukumoe_core::elements::Point;
 use tsukumoe_ui::{Icon, Theme, Variant};
 
@@ -111,45 +111,6 @@ pub fn paint(
     }
 }
 
-/// A line of help in the corner of the viewport.
-pub fn caption(painter: &Painter, theme: &Theme, rect: Rect, text: &str) {
-    painter.text(
-        rect.left_top() + vec2(8.0, 8.0),
-        Align2::LEFT_TOP,
-        text,
-        FontId::proportional(theme.metrics.text),
-        theme.colors.text_muted,
-    );
-}
-
-/// The key being edited under the help line (or, dimmed, that the sliders are
-/// not on one) for an element with keyforms.
-pub fn key_caption(
-    painter: &Painter,
-    theme: &Theme,
-    rect: Rect,
-    ctx: &egui::Context,
-    place: &crate::keyed::Place,
-) {
-    let (text, color) = match place {
-        crate::keyed::Place::Key { label, .. } => (
-            format!("{}: {label}", tsukumoe_ui::tr(ctx, "keyform-editing")),
-            theme.colors.text,
-        ),
-        crate::keyed::Place::Off { label } => (
-            format!("{}: {label}", tsukumoe_ui::tr(ctx, "keyform-off")),
-            theme.colors.text_muted,
-        ),
-    };
-    painter.text(
-        rect.left_top() + vec2(8.0, 28.0),
-        Align2::LEFT_TOP,
-        text,
-        FontId::proportional(theme.metrics.text),
-        color,
-    );
-}
-
 fn float(v: &mut f32, max: f32) -> egui::DragValue<'_> {
     egui::DragValue::new(v)
         .range(0.0..=max)
@@ -157,93 +118,80 @@ fn float(v: &mut f32, max: f32) -> egui::DragValue<'_> {
         .max_decimals(1)
 }
 
-/// The small options box in the top right corner: columns and rows of the
-/// grid `mesh.fill-grid` lays, and the settings of `mesh.contour`. The values
-/// live in the tool, not in the model.
-pub fn grid_options(ctx: &egui::Context, rect: Rect, tool: &mut MeshTool) {
-    let theme = Theme::get(ctx);
-    let m = theme.metrics;
-    let t = |key: &str| tsukumoe_ui::tr(ctx, key);
-    egui::Area::new(egui::Id::unique("tsukumoe-mesh-grid-options"))
-        .fixed_pos(rect.right_top() + vec2(-8.0, 8.0))
-        .pivot(Align2::RIGHT_TOP)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(theme.colors.surface_raised)
-                .stroke(Stroke::new(1.0, theme.colors.border))
-                .corner_radius(m.radius)
-                .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
-                .show(ui, |ui| {
-                    // The sub-tools of the mesh tool: the active one is filled.
-                    ui.horizontal(|ui| {
-                        for (pen, icon, key) in [
-                            (false, Icon::MousePointer, "mesh-edit-select"),
-                            (true, Icon::PenLine, "mesh-edit-pen"),
-                        ] {
-                            let variant = if tool.pen == pen {
-                                Variant::Primary
-                            } else {
-                                Variant::Secondary
-                            };
-                            if tsukumoe_ui::icon_button(ui, icon, &t(key), variant).clicked()
-                                && tool.pen != pen
-                            {
-                                tool.pen = pen;
-                                tool.cancel();
-                            }
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        let variant = if tool.symmetry {
-                            Variant::Primary
-                        } else {
-                            Variant::Secondary
-                        };
-                        if tsukumoe_ui::button(ui, &t("mesh-edit-symmetry"), variant).clicked() {
-                            tool.symmetry = !tool.symmetry;
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(t("mesh-edit-grid"));
-                        let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
-                        ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
-                            .accessible_name(t("mesh-edit-grid-cols"));
-                        ui.label("\u{d7}");
-                        ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
-                            .accessible_name(t("mesh-edit-grid-rows"));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(t("mesh-edit-contour"));
-                        let c = &mut tool.contour;
-                        let fields = [
-                            (
-                                ui.add(egui::DragValue::new(&mut c.threshold)),
-                                "mesh-edit-contour-threshold",
-                            ),
-                            (
-                                ui.add(float(&mut c.simplify, 50.0)),
-                                "mesh-edit-contour-simplify",
-                            ),
-                            (
-                                ui.add(float(&mut c.offset, 50.0)),
-                                "mesh-edit-contour-offset",
-                            ),
-                            (
-                                ui.add(float(&mut c.spacing, 512.0)),
-                                "mesh-edit-contour-spacing",
-                            ),
-                        ];
-                        for (response, key) in fields {
-                            response.accessible_name(t(key)).on_hover_text(t(key));
-                        }
-                        // The spacing is 0 (none) or at least 4.
-                        if c.spacing > 0.0 && c.spacing < 4.0 {
-                            c.spacing = 4.0;
-                        }
-                    });
-                });
+/// The options box of the mesh tool: its sub-tools, and the columns and rows
+/// of the grid `mesh.fill-grid` lays and the settings of `mesh.contour`. The
+/// values live in the tool, not in the model.
+pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) {
+    let ctx = ui.ctx().clone();
+    let t = |key: &str| tsukumoe_ui::tr(&ctx, key);
+    super::overlay::boxed(ui, |ui| {
+        // The sub-tools of the mesh tool: the active one is filled.
+        ui.horizontal(|ui| {
+            for (pen, icon, key) in [
+                (false, Icon::MousePointer, "mesh-edit-select"),
+                (true, Icon::PenLine, "mesh-edit-pen"),
+            ] {
+                let variant = if tool.pen == pen {
+                    Variant::Primary
+                } else {
+                    Variant::Secondary
+                };
+                if tsukumoe_ui::icon_button(ui, icon, &t(key), variant).clicked() && tool.pen != pen
+                {
+                    tool.pen = pen;
+                    tool.cancel();
+                }
+            }
         });
+        ui.horizontal(|ui| {
+            let variant = if tool.symmetry {
+                Variant::Primary
+            } else {
+                Variant::Secondary
+            };
+            if tsukumoe_ui::button(ui, &t("mesh-edit-symmetry"), variant).clicked() {
+                tool.symmetry = !tool.symmetry;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label(t("mesh-edit-grid"));
+            let range = 1..=tsukumoe_core::mesh_edit::MAX_GRID;
+            ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
+                .accessible_name(t("mesh-edit-grid-cols"));
+            ui.label("\u{d7}");
+            ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
+                .accessible_name(t("mesh-edit-grid-rows"));
+        });
+        ui.horizontal(|ui| {
+            ui.label(t("mesh-edit-contour"));
+            let c = &mut tool.contour;
+            let fields = [
+                (
+                    ui.add(egui::DragValue::new(&mut c.threshold)),
+                    "mesh-edit-contour-threshold",
+                ),
+                (
+                    ui.add(float(&mut c.simplify, 50.0)),
+                    "mesh-edit-contour-simplify",
+                ),
+                (
+                    ui.add(float(&mut c.offset, 50.0)),
+                    "mesh-edit-contour-offset",
+                ),
+                (
+                    ui.add(float(&mut c.spacing, 512.0)),
+                    "mesh-edit-contour-spacing",
+                ),
+            ];
+            for (response, key) in fields {
+                response.accessible_name(t(key)).on_hover_text(t(key));
+            }
+            // The spacing is 0 (none) or at least 4.
+            if c.spacing > 0.0 && c.spacing < 4.0 {
+                c.spacing = 4.0;
+            }
+        });
+    });
 }
 
 /// The edge pen's preview: the start vertex ringed, and a line from it to
@@ -296,6 +244,7 @@ pub fn menu_ui(
 mod tests {
     use super::*;
     use crate::mesh_tool::MENU_ACTIONS;
+    use egui::vec2;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use tsukumoe_i18n::{I18n, Language};

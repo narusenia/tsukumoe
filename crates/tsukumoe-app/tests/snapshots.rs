@@ -54,7 +54,7 @@ fn editor_in_the_light_theme() {
 fn mesh_overlay_snapshot(mode: Mode, name: &str) {
     use egui::Rect;
     use tsukumoe_app::mesh_tool::{Mapper, MeshTool};
-    use tsukumoe_app::panels::mesh_overlay;
+    use tsukumoe_app::panels::{mesh_overlay, overlay};
     use tsukumoe_ui::Theme;
 
     let mut positions = Vec::new();
@@ -135,7 +135,7 @@ fn mesh_overlay_snapshot(mode: Mode, name: &str) {
             painter.image(scene.id(), rect, uv, egui::Color32::WHITE);
             mesh_overlay::veil(&painter, &theme, rect, Some(focus.id()));
             mesh_overlay::paint(&painter, &theme, &mapper, &positions, &indices, tool, None);
-            mesh_overlay::grid_options(&ctx, rect, tool);
+            overlay::options_stack(&ctx, rect, |ui| mesh_overlay::grid_options(ui, tool));
         },
         tool,
     );
@@ -219,7 +219,7 @@ fn mesh_edit_menu_in_the_light_theme() {
 fn deformer_overlay_snapshot(mode: Mode, name: &str) {
     use tsukumoe_app::deformer_tool::{DeformerTool, Shape, related};
     use tsukumoe_app::mesh_tool::Mapper;
-    use tsukumoe_app::panels::deformer_overlay;
+    use tsukumoe_app::panels::{deformer_overlay, overlay};
     use tsukumoe_core::command::{Command, RotationBase};
     use tsukumoe_core::model::Model;
     use tsukumoe_ui::Theme;
@@ -294,7 +294,7 @@ fn deformer_overlay_snapshot(mode: Mode, name: &str) {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
             deformer_overlay::paint(&painter, &theme, &mapper, &shape, &related, tool);
-            deformer_overlay::options(&ctx, rect, tool);
+            overlay::options_stack(&ctx, rect, |ui| deformer_overlay::options(ui, tool));
         },
         tool,
     );
@@ -597,7 +597,7 @@ fn multi_selection_in_the_light_theme() {
 /// over the moved mesh without the GPU picture behind it.
 fn proportional_snapshot(mode: Mode, name: &str) {
     use tsukumoe_app::mesh_tool::{Mapper, MeshTool};
-    use tsukumoe_app::panels::{mesh_overlay, proportional_overlay};
+    use tsukumoe_app::panels::{mesh_overlay, overlay, proportional_overlay};
     use tsukumoe_app::proportional::Proportional;
     use tsukumoe_core::deformer_space::Space;
     use tsukumoe_ui::Theme;
@@ -662,7 +662,9 @@ fn proportional_snapshot(mode: Mode, name: &str) {
                 Some((&screen, &weights)),
             );
             let mut options = tool.proportional;
-            proportional_overlay::options(&ctx, rect, &mut options);
+            overlay::options_stack(&ctx, rect, |ui| {
+                proportional_overlay::options(ui, &mut options);
+            });
         },
         tool,
     );
@@ -913,15 +915,14 @@ fn keys_panel_in_the_light_theme() {
     keys_snapshot(Mode::Light, "keys_light");
 }
 
-/// The key being edited under the help line: on a key (top) and, dimmed, off
-/// one (bottom), over the proportional options box and the tool bar.
+/// The help box at the bottom left with the key being edited. The off-key
+/// line is covered by the unit test in `overlay`.
 fn keyform_caption_snapshot(mode: Mode, name: &str) {
-    use egui::Rect;
     use tsukumoe_app::keyed::Place;
-    use tsukumoe_app::panels::mesh_overlay;
+    use tsukumoe_app::panels::overlay;
     use tsukumoe_ui::Theme;
 
-    let size = egui::vec2(420.0, 220.0);
+    let size = egui::vec2(420.0, 110.0);
     let mut harness = Harness::builder()
         .with_size(size)
         .wgpu()
@@ -934,20 +935,17 @@ fn keyform_caption_snapshot(mode: Mode, name: &str) {
             let theme = Theme::get(&ctx);
             let painter = ui.painter_at(ui.max_rect());
             painter.rect_filled(ui.max_rect(), 0.0, theme.colors.background);
-            let top = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(size.x, 110.0));
-            let bottom = Rect::from_min_size(egui::pos2(0.0, 110.0), egui::vec2(size.x, 110.0));
-            mesh_overlay::caption(&painter, &theme, top, "Click to select, Shift to add.");
             let on = Place::Key {
                 key: vec![2],
                 flat: 2,
                 label: "ParamAngleX = 30.00".into(),
             };
-            mesh_overlay::key_caption(&painter, &theme, top, &ctx, &on);
-            mesh_overlay::caption(&painter, &theme, bottom, "Click to select, Shift to add.");
-            let off = Place::Off {
-                label: "ParamAngleX = 12.00".into(),
-            };
-            mesh_overlay::key_caption(&painter, &theme, bottom, &ctx, &off);
+            overlay::help(
+                &ctx,
+                ui.max_rect(),
+                "Click to select, Shift to add.",
+                Some(&on),
+            );
         });
     harness.run();
     harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));

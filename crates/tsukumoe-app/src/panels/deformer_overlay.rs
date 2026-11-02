@@ -7,7 +7,7 @@
 //! options box for new warps. It only reads the tool and the shapes; the
 //! pointer handling is in the viewport.
 
-use egui::{Align2, Painter, Pos2, Rect, Shape as Draw, Stroke, StrokeKind, pos2, vec2};
+use egui::{Painter, Pos2, Rect, Shape as Draw, Stroke, StrokeKind, pos2, vec2};
 use tsukumoe_ui::Theme;
 
 use crate::deformer_tool::{DeformerTool, Handle, Role, Shape};
@@ -144,37 +144,20 @@ pub fn paint(
     }
 }
 
-/// A line of help in the corner of the viewport.
-pub fn caption(painter: &Painter, theme: &Theme, rect: Rect, text: &str) {
-    super::mesh_overlay::caption(painter, theme, rect, text);
-}
-
-/// The options box in the top right corner: rows and columns of the warp that
+/// The options box of the deformer tool: rows and columns of the warp that
 /// `deformer.create-warp` makes. The values live in the tool, not in the model.
-pub fn options(ctx: &egui::Context, rect: Rect, tool: &mut DeformerTool) {
-    let theme = Theme::get(ctx);
-    let m = theme.metrics;
-    let t = |key: &str| tsukumoe_ui::tr(ctx, key);
-    egui::Area::new(egui::Id::unique("tsukumoe-deformer-options"))
-        .fixed_pos(rect.right_top() + vec2(-8.0, 8.0))
-        .pivot(Align2::RIGHT_TOP)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            egui::Frame::new()
-                .fill(theme.colors.surface_raised)
-                .stroke(Stroke::new(1.0, theme.colors.border))
-                .corner_radius(m.radius)
-                .inner_margin(egui::Margin::symmetric(m.pad as i8, 4))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(t("deformer-warp-grid"));
-                        let range = 1..=32u32;
-                        ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
-                            .accessible_name(t("deformer-warp-rows"));
-                        ui.label("\u{d7}");
-                        ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
-                            .accessible_name(t("deformer-warp-columns"));
-                    });
-                });
+pub fn options(ui: &mut egui::Ui, tool: &mut DeformerTool) {
+    let ctx = ui.ctx().clone();
+    let t = |key: &str| tsukumoe_ui::tr(&ctx, key);
+    super::overlay::boxed(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(t("deformer-warp-grid"));
+            let range = 1..=32u32;
+            ui.add(egui::DragValue::new(&mut tool.grid.0).range(range.clone()))
+                .accessible_name(t("deformer-warp-rows"));
+            ui.label("\u{d7}");
+            ui.add(egui::DragValue::new(&mut tool.grid.1).range(range))
+                .accessible_name(t("deformer-warp-columns"));
         });
+    });
 }

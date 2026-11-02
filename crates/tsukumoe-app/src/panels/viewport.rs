@@ -20,7 +20,7 @@ use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
 use crate::panels::{
-    deformer_overlay, mesh_overlay, proportional_overlay, selection_overlay, toolbar,
+    deformer_overlay, mesh_overlay, overlay, proportional_overlay, selection_overlay, toolbar,
 };
 use crate::project::Document;
 use crate::scene::{Preview, Scene, fit_view};
@@ -649,10 +649,12 @@ impl Viewport {
                     &related,
                     tool,
                 );
-                deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-hint"));
-                if let Some(place) = crate::keyed::deformer_place(model, name, &|id| param_at(id)) {
-                    mesh_overlay::key_caption(&painter, &theme, rect, ui.ctx(), &place);
-                }
+                overlay::help(
+                    ui.ctx(),
+                    rect,
+                    &tr(ui.ctx(), "deformer-hint"),
+                    crate::keyed::deformer_place(model, name, &|id| param_at(id)).as_ref(),
+                );
                 if tool.proportional.on && matches!(shape, deformer_tool::Shape::Warp { .. }) {
                     let screen: Vec<egui::Pos2> = preview
                         .as_ref()
@@ -679,10 +681,12 @@ impl Viewport {
                     );
                 }
             }
-            _ => deformer_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "deformer-pick")),
+            _ => overlay::help(ui.ctx(), rect, &tr(ui.ctx(), "deformer-pick"), None),
         }
-        deformer_overlay::options(ui.ctx(), rect, tool);
-        proportional_overlay::options(ui.ctx(), rect, &mut view.proportional);
+        overlay::options_stack(ui.ctx(), rect, |ui| {
+            deformer_overlay::options(ui, tool);
+            proportional_overlay::options(ui, &mut view.proportional);
+        });
         tool.proportional = view.proportional;
         (ops, actions)
     }
@@ -841,8 +845,10 @@ impl Viewport {
             }
         }
         if mesh.is_some() {
-            mesh_overlay::grid_options(ui.ctx(), rect, tool);
-            proportional_overlay::options(ui.ctx(), rect, &mut view.proportional);
+            overlay::options_stack(ui.ctx(), rect, |ui| {
+                mesh_overlay::grid_options(ui, tool);
+                proportional_overlay::options(ui, &mut view.proportional);
+            });
             tool.proportional = view.proportional;
         }
         // The right-click menu: a vertex or edge under the pointer is selected
@@ -913,12 +919,9 @@ impl Viewport {
                 } else {
                     "mesh-edit-hint"
                 };
-                mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), hint));
-                if let Some(place) = &place {
-                    mesh_overlay::key_caption(&painter, &theme, rect, ui.ctx(), place);
-                }
+                overlay::help(ui.ctx(), rect, &tr(ui.ctx(), hint), place.as_ref());
             }
-            None => mesh_overlay::caption(&painter, &theme, rect, &tr(ui.ctx(), "mesh-edit-pick")),
+            None => overlay::help(ui.ctx(), rect, &tr(ui.ctx(), "mesh-edit-pick"), None),
         }
         (ops, actions)
     }
@@ -1026,23 +1029,10 @@ fn paint_solo_badge(ui: &Ui, rect: Rect, view: &ViewState) {
         ) => n.as_str(),
         _ => return,
     };
-    let theme = Theme::get(ui.ctx());
-    let text = format!("{}: {name}", tr(ui.ctx(), "viewport-solo"));
-    let painter = ui.painter_at(rect);
-    let galley = painter.layout_no_wrap(
-        text,
-        egui::FontId::proportional(theme.metrics.text),
-        theme.colors.accent_text,
-    );
-    let badge = Rect::from_min_size(
-        rect.left_top() + egui::vec2(8.0, 8.0),
-        galley.size() + egui::vec2(16.0, 6.0),
-    );
-    painter.rect_filled(badge, badge.height() / 2.0, theme.colors.accent);
-    painter.galley(
-        badge.min + egui::vec2(8.0, 3.0),
-        galley,
-        theme.colors.accent_text,
+    overlay::status(
+        ui.ctx(),
+        rect,
+        &format!("{}: {name}", tr(ui.ctx(), "viewport-solo")),
     );
 }
 
