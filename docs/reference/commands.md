@@ -391,6 +391,21 @@ the base points changed under it.
 {"type":"clear_warp_rest_points","name":"FaceWarp"}
 ```
 
+### `set_warp_bezier`
+
+Switches a warp deformer between bilinear and bicubic (through the
+grid points) interpolation.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `bezier` | boolean | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_warp_bezier"` | yes |  |
+
+```json
+{"type":"set_warp_bezier","name":"FaceWarp","bezier":true}
+```
+
 ### `rename_parameter`
 
 Gives a parameter a new name. Expressions of drivers that read it are
