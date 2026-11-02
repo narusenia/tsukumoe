@@ -13,7 +13,7 @@
 
 use tsukumoe_core::command::{Command, ElementRef};
 use tsukumoe_core::elements::ParameterId;
-use tsukumoe_core::keyform::Binding;
+use tsukumoe_core::keyform::{Binding, KeyformGrid};
 use tsukumoe_core::model::Model;
 
 use crate::mesh_tool::Op;
@@ -89,6 +89,51 @@ pub fn binding_of<'a>(model: &'a Model, element: &ElementRef) -> Option<&'a Bind
     model.bindings().get(id)
 }
 
+/// The key index on every axis nearest to the slider values `at`.
+pub fn nearest_key(binding: &Binding, at: &dyn Fn(ParameterId) -> f32) -> Vec<usize> {
+    binding
+        .axes()
+        .iter()
+        .map(|a| {
+            let v = at(a.parameter);
+            (0..a.keys.len())
+                .min_by(|&i, &j| (a.keys[i] - v).abs().total_cmp(&(a.keys[j] - v).abs()))
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+/// For each keyform of `element` (dense order), whether it differs from the
+/// keyform at the parameters' defaults (the nearest keys): what an untouched
+/// bind leaves equal. `None` if the element has no keyforms.
+pub fn edited(model: &Model, element: &ElementRef) -> Option<Vec<bool>> {
+    fn flags<T: PartialEq>(model: &Model, grid: &KeyformGrid<T>) -> Option<Vec<bool>> {
+        let binding = model.bindings().get(grid.binding)?;
+        let default = |p| model.parameters().get(p).map_or(0.0, |p| p.default);
+        let reference = binding.index(&nearest_key(binding, &default))?;
+        let base = grid.keyforms.get(reference)?;
+        Some(grid.keyforms.iter().map(|k| k != base).collect())
+    }
+    match element {
+        ElementRef::Mesh { name } => flags(
+            model,
+            model
+                .meshes()
+                .get(model.meshes().find(name)?)?
+                .keyforms
+                .as_ref()?,
+        ),
+        ElementRef::Deformer { name } => {
+            if let Some(w) = model.warps().find(name) {
+                flags(model, model.warps().get(w)?.keyforms.as_ref()?)
+            } else {
+                let r = model.rotations().find(name)?;
+                flags(model, model.rotations().get(r)?.keyforms.as_ref()?)
+            }
+        }
+    }
+}
+
 /// The keys of the axis of `parameter` in `element`'s binding.
 pub fn keys_of(model: &Model, parameter: &str, element: &ElementRef) -> Option<Vec<f32>> {
     let pid = model.parameters().find(parameter)?;
@@ -139,7 +184,8 @@ pub fn neighbour(keys: &[f32], value: f32, range: f32, dir: i32) -> Option<f32> 
     }
 }
 
-/// Binds the selected elements that have no keyforms to `parameter`.
+/// Binds the selected elements to `parameter`: an element with no keyforms
+/// gets a one-axis grid, one that has them gets the parameter as one more axis.
 pub fn bind(model: &Model, parameter: &str, selection: &[Selection]) -> Result<Op, ParamError> {
     let all = elements(selection);
     if all.is_empty() {
@@ -147,7 +193,7 @@ pub fn bind(model: &Model, parameter: &str, selection: &[Selection]) -> Result<O
     }
     let free: Vec<ElementRef> = all
         .into_iter()
-        .filter(|e| binding_of(model, e).is_none())
+        .filter(|e| keys_of(model, parameter, e).is_none())
         .collect();
     if free.is_empty() {
         return Err(ParamError::AlreadyBound);
@@ -346,6 +392,48 @@ mod tests {
 
     fn apply(m: &mut Model, op: Result<Op, ParamError>) {
         m.apply(op.unwrap().0).unwrap();
+    }
+
+    #[test]
+    fn a_bound_element_can_take_a_second_parameter_but_not_the_same_twice() {
+        let mut m = model();
+        m.apply(Command::AddParameter {
+            name: "Q".into(),
+            min: 0.0,
+            max: 1.0,
+            default: 0.0,
+            repeat: false,
+        })
+        .unwrap();
+        let op = bind(&m, "P", &sel(&["A"]));
+        apply(&mut m, op);
+        let op = bind(&m, "Q", &sel(&["A"]));
+        apply(&mut m, op);
+        let a = ElementRef::Mesh { name: "A".into() };
+        assert_eq!(binding_of(&m, &a).unwrap().axes().len(), 2);
+        assert_eq!(bind(&m, "Q", &sel(&["A"])), Err(ParamError::AlreadyBound));
+    }
+
+    #[test]
+    fn edited_cells_are_those_that_differ_from_the_default_keyform() {
+        let mut m = model();
+        let op = bind(&m, "P", &sel(&["A"]));
+        apply(&mut m, op);
+        let a = ElementRef::Mesh { name: "A".into() };
+        assert_eq!(edited(&m, &a), Some(vec![false; 3]));
+        m.apply(Command::SetMeshKeyform {
+            name: "A".into(),
+            key: vec![2],
+            positions: vec![[5.0, 5.0], [6.0, 5.0], [5.0, 6.0]],
+            opacity: 1.0,
+            draw_order: 500.0,
+        })
+        .unwrap();
+        assert_eq!(edited(&m, &a), Some(vec![false, false, true]));
+        let b = ElementRef::Mesh { name: "B".into() };
+        assert_eq!(edited(&m, &b), None);
+        let binding = binding_of(&m, &a).unwrap();
+        assert_eq!(nearest_key(binding, &|_| 0.9), vec![2]);
     }
 
     #[test]

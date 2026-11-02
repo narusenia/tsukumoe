@@ -93,6 +93,9 @@ pub fn rename_in_map(
     }
 }
 
+/// Where the parameter links are kept in the project.
+pub const LINKS_PATH: &str = "editor/param-links.json";
+
 /// An open project: its files, the editing model behind the dispatcher, and
 /// where it was read from.
 pub struct Document {
@@ -177,6 +180,25 @@ impl Document {
                 .insert(tsukumoe_psd::MAP_PATH.to_owned(), bytes);
         }
         self.names = Names::of(self.dispatcher.model());
+    }
+
+    /// The parameter pairs the panel shows as one pad (view data kept with the
+    /// project; the model does not know them).
+    pub fn param_links(&self) -> Vec<(String, String)> {
+        self.project
+            .files
+            .get(LINKS_PATH)
+            .and_then(|b| serde_json::from_slice(b).ok())
+            .unwrap_or_default()
+    }
+
+    /// Stores the pairs; none removes the file.
+    pub fn set_param_links(&mut self, links: &[(String, String)]) {
+        if links.is_empty() {
+            self.project.files.remove(LINKS_PATH);
+        } else if let Ok(bytes) = serde_json::to_vec_pretty(links) {
+            self.project.files.insert(LINKS_PATH.to_owned(), bytes);
+        }
     }
 
     /// Adds or replaces a file of the project (a texture, the PSD map). It is
@@ -341,6 +363,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tsukumoe-app-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn parameter_links_are_kept_with_the_project_and_removed_when_empty() {
+        let mut doc = Document::open(&fixture()).unwrap();
+        assert!(doc.param_links().is_empty());
+        let links = vec![("A".to_owned(), "B".to_owned())];
+        doc.set_param_links(&links);
+        assert_eq!(doc.param_links(), links);
+        doc.set_param_links(&[]);
+        assert!(!doc.project().files.contains_key(LINKS_PATH));
     }
 
     #[test]

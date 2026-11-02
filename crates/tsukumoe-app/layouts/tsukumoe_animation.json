@@ -38,7 +38,8 @@
       "b": {
         "type": "tabs",
         "tabs": [
-          "inspector"
+          "inspector",
+          "keys"
         ],
         "active": 0
       }

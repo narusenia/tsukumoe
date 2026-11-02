@@ -11,7 +11,7 @@
 //! [`retarget`] turns them, at the one door every edit passes, into the
 //! keyform command for the key the sliders are on, or says why not.
 
-use tsukumoe_core::command::{Command, RotationBase};
+use tsukumoe_core::command::{Command, ElementRef, RotationBase};
 use tsukumoe_core::elements::{ParameterId, Point};
 use tsukumoe_core::keyform::{Binding, KeyformGrid};
 use tsukumoe_core::keyform_edit::sample_at;
@@ -115,6 +115,18 @@ pub fn deformer_place(model: &Model, name: &str, at: &dyn Fn(ParameterId) -> f32
     }
     let id = model.rotations().find(name)?;
     grid_place(model, model.rotations().get(id)?.keyforms.as_ref(), at)
+}
+
+/// Where the sliders are for a mesh or a deformer, `None` if it has no keyforms.
+pub fn element_place(
+    model: &Model,
+    element: &ElementRef,
+    at: &dyn Fn(ParameterId) -> f32,
+) -> Option<Place> {
+    match element {
+        ElementRef::Mesh { name } => mesh_place(model, name, at),
+        ElementRef::Deformer { name } => deformer_place(model, name, at),
+    }
 }
 
 /// The vertices of a mesh to edit: the keyform at the key the sliders are on,
@@ -413,7 +425,6 @@ pub fn retarget_op(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tsukumoe_core::command::ElementRef;
     use tsukumoe_core::eval::Frame;
 
     /// A mesh and a warp, both bound to `P` (-1, 0, 1).

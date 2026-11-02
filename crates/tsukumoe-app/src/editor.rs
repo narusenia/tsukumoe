@@ -15,7 +15,7 @@ use crate::drag::{AxisTarget, DragAssignment, Modifier};
 use crate::menu;
 use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::panels::palette::Palette;
-use crate::panels::{history, inspector, parameters, titlebar, tree, viewport};
+use crate::panels::{history, inspector, keys, parameters, titlebar, tree, viewport};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
 use crate::tree_model::{self, TreeView};
@@ -288,9 +288,11 @@ impl Editor {
     pub fn open(&mut self, path: &Path) -> Result<(), String> {
         match Document::open(path) {
             Ok(doc) => {
+                let links = doc.param_links();
                 self.doc = Some(doc);
                 self.store_tree_views();
                 self.view = ViewState::default();
+                self.view.param_links = links;
                 self.load_tree_views();
                 self.mesh_tool = MeshTool::default();
                 self.deformer_tool = DeformerTool::default();
@@ -302,6 +304,13 @@ impl Editor {
                 let _ = self.persist_state();
                 Err(e)
             }
+        }
+    }
+
+    /// Writes the parameter links of the view into the project's files.
+    fn save_links(&mut self) {
+        if let Some(doc) = self.doc.as_mut() {
+            doc.set_param_links(&self.view.param_links);
         }
     }
 
@@ -472,6 +481,7 @@ impl Editor {
                     && let Some(name) = deleted
                 {
                     self.view.forget_param(&name);
+                    self.save_links();
                 }
             }
             parameters::Out::Confirm(kind, name, op) => {
@@ -485,10 +495,15 @@ impl Editor {
                 if self.submit_labeled(ctx, command, Some(format!("param_rename: {from} -> {to}")))
                 {
                     self.view.rename_param(&from, &to);
+                    self.save_links();
                     // Drivers' expressions were rewritten; anything outside the editor was not.
                     let text = tr(ctx, "tree-rename-external");
                     self.toasts.push(ctx, Tone::Neutral, text);
                 }
+            }
+            parameters::Out::Links(links) => {
+                self.view.param_links = links;
+                self.save_links();
             }
             parameters::Out::Error(key) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
         }
@@ -528,6 +543,10 @@ impl Editor {
                     self.toasts.push(ctx, Tone::Neutral, text);
                 }
             }
+            tree::Out::Mirror(Ok((command, label))) => {
+                self.submit_labeled(ctx, command, Some(label));
+            }
+            tree::Out::Mirror(Err(key)) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
             tree::Out::Reset(items) => self.reset_deformers(ctx, &items),
             tree::Out::Delete(items) => {
                 let Some(doc) = &self.doc else { return };
@@ -1890,6 +1909,7 @@ impl PanelHost for Panels<'_> {
             "tree" => Icon::ListTree,
             "deformers" => Icon::Grid,
             "parameters" => Icon::Sliders,
+            "keys" => Icon::Grid,
             "inspector" => Icon::Info,
             "history" => Icon::History,
             "palette" => Icon::Search,
@@ -1924,6 +1944,11 @@ impl PanelHost for Panels<'_> {
             }
             "parameters" => {
                 for out in parameters::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    editor.apply_parameter_out(&ctx, out);
+                }
+            }
+            "keys" => {
+                for out in keys::show(ui, doc.dispatcher.model(), &mut editor.view) {
                     editor.apply_parameter_out(&ctx, out);
                 }
             }

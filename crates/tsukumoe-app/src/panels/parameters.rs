@@ -9,7 +9,7 @@ use egui::{Ui, Vec2};
 use tsukumoe_core::command::Command;
 use tsukumoe_core::elements::Parameter;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{Icon, Variant, button, hint, icon_button, number, slider, text_input, tr};
+use tsukumoe_ui::{Icon, Variant, button, icon_button, number, slider, text_input, tr};
 
 use crate::confirm::Kind;
 use crate::mesh_tool::Op;
@@ -30,6 +30,12 @@ pub fn names(model: &Model, filter: &str) -> Vec<String> {
 }
 
 const LABEL_WIDTH: f32 = 120.0;
+/// The width of the number field next to a slider or a pad.
+const NUMBER_WIDTH: f32 = 64.0;
+/// The width of the link button at the start of a row.
+const LINK_WIDTH: f32 = 24.0;
+/// The width of the reset button at the end of a row.
+const RESET_WIDTH: f32 = 24.0;
 /// A slider snaps to a key within this many points.
 const SNAP_POINTS: f32 = 6.0;
 
@@ -40,6 +46,8 @@ pub enum Out {
     Op(Op),
     /// A deletion the editor may ask about first: its kind, the parameter it is about, the op.
     Confirm(Kind, String, Op),
+    /// The new list of linked parameter pairs (kept with the project).
+    Links(Vec<(String, String)>),
     /// A parameter rename; the editor moves the view state along with it.
     Rename { from: String, to: String },
     /// Something that cannot be done, as a translation key for a toast.
@@ -85,18 +93,27 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         }
     });
     text_input(ui, &mut view.param_filter, &name, &name);
-    if let Some(focus) = view.param_focus.clone()
-        && let Some(id) = model.parameters().find(&focus)
-        && let Some(p) = model.parameters().get(id)
-    {
-        edit_section(ui, model, view, &focus, p, &selection, &mut outs);
-    }
     let shown = names(model, &view.param_filter);
     let shift = ui.input(|i| i.modifiers.shift);
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
+            let links: Vec<&(String, String)> = view
+                .param_links
+                .iter()
+                .filter(|(a, b)| {
+                    model.parameters().find(a).is_some() && model.parameters().find(b).is_some()
+                })
+                .collect();
+            let links: Vec<(String, String)> = links.into_iter().cloned().collect();
             for name in shown {
+                if links.iter().any(|(_, b)| *b == name) {
+                    continue;
+                }
+                if let Some((_, b)) = links.iter().find(|(a, _)| *a == name) {
+                    link_row(ui, model, view, &name, b, &selection, &mut outs);
+                    continue;
+                }
                 let Some(id) = model.parameters().find(&name) else {
                     continue;
                 };
@@ -106,28 +123,17 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                 let keys = param_ops::primary(model, &name, &selection).map(|(_, k)| k);
                 let mut value = view.param(&name, p);
                 let mut changed = false;
-                ui.horizontal(|ui| {
+                let bg = ui.painter().add(egui::Shape::Noop);
+                let row = ui.horizontal(|ui| {
+                    link_button(ui, model, view, &name, &mut outs);
                     ui.allocate_ui_with_layout(
                         Vec2::new(LABEL_WIDTH, m.control),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
-                            let focused = view.param_focus.as_deref() == Some(&name);
-                            let text = if focused {
-                                egui::RichText::new(&name).strong()
-                            } else {
-                                egui::RichText::new(&name)
-                            };
-                            let r = ui.add(
-                                egui::Label::new(text)
-                                    .truncate()
-                                    .sense(egui::Sense::click()),
-                            );
-                            if r.clicked() {
-                                view.param_focus = Some(name.clone());
-                            }
+                            name_label(ui, model, view, &name, &mut outs);
                         },
                     );
-                    let width = (ui.available_width() - 72.0).max(40.0);
+                    let width = (ui.available_width() - 72.0 - RESET_WIDTH).max(40.0);
                     let slider_rect = ui
                         .allocate_ui(Vec2::new(width, m.control), |ui| {
                             let r = slider(ui, &mut value, p.min..=p.max, &name);
@@ -146,29 +152,320 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     let speed = f64::from((p.max - p.min).abs()) / 200.0;
                     changed |=
                         number(ui, &mut value, p.min..=p.max, speed.max(1e-4), &name).changed();
+                    if reset_button(ui, value == p.default) {
+                        value = p.default;
+                        changed = true;
+                    }
                 });
+                highlight(
+                    ui,
+                    bg,
+                    row.response.rect,
+                    view.param_focus.as_deref() == Some(&name),
+                );
                 if changed {
                     view.set_param(&name, p, value);
                 }
             }
         });
+    // The settings window of one parameter (name, range, repeat, delete).
+    if let Some(name) = view.param_dialog.clone() {
+        let mut open = true;
+        let target = model
+            .parameters()
+            .find(&name)
+            .and_then(|id| model.parameters().get(id));
+        match target {
+            Some(p) => {
+                egui::Window::new(format!("{}: {name}", tr(&ctx, "param-settings")))
+                    .id(ui.make_persistent_id(("param-settings", &name)))
+                    .open(&mut open)
+                    .collapsible(false)
+                    .show(&ctx, |ui| settings_section(ui, model, &name, p, &mut outs));
+            }
+            None => open = false,
+        }
+        if !open {
+            view.param_dialog = None;
+        }
+    }
     outs
 }
 
-/// The section for the focused parameter: its name and range, and the keys of
-/// the selected element.
-fn edit_section(
+/// The button that puts a value back to its default; dimmed, and inert, when
+/// it is there already. True when it was clicked.
+fn reset_button(ui: &mut Ui, at_default: bool) -> bool {
+    let name = tr(ui.ctx(), "param-reset");
+    ui.add_enabled_ui(!at_default, |ui| {
+        icon_button(ui, Icon::RotateCcw, &name, Variant::Ghost).clicked()
+    })
+    .inner
+}
+
+/// A tint behind the row of the parameter the keys panel works on.
+fn highlight(ui: &Ui, bg: egui::layers::ShapeIdx, rect: egui::Rect, on: bool) {
+    if !on {
+        return;
+    }
+    let theme = tsukumoe_ui::Theme::get(ui.ctx());
+    ui.painter().set(
+        bg,
+        egui::epaint::RectShape::filled(
+            rect.expand2(Vec2::new(3.0, 1.0)),
+            3.0,
+            theme.colors.accent.gamma_multiply(0.22),
+        ),
+    );
+}
+
+/// The link button at the start of a row: for a free parameter it opens a
+/// list of the others to link with; for a linked one it unlinks the pair.
+fn link_button(ui: &mut Ui, model: &Model, view: &ViewState, name: &str, outs: &mut Vec<Out>) {
+    let ctx = ui.ctx().clone();
+    let linked = view.param_links.iter().any(|(a, b)| a == name || b == name);
+    if linked {
+        if icon_button(ui, Icon::Unlink, &tr(&ctx, "param-unlink"), Variant::Ghost).clicked() {
+            let mut links = view.param_links.clone();
+            links.retain(|(a, b)| a != name && b != name);
+            outs.push(Out::Links(links));
+        }
+        return;
+    }
+    let r = icon_button(ui, Icon::Link, &tr(&ctx, "param-link"), Variant::Ghost);
+    egui::Popup::from_toggle_button_response(&r).show(|ui| {
+        let free: Vec<String> = model
+            .parameters()
+            .iter()
+            .map(|(_, n, _)| n.to_owned())
+            .filter(|n| n != name && !view.param_links.iter().any(|(a, b)| a == n || b == n))
+            .collect();
+        for other in free {
+            if ui.button(&other).clicked() {
+                let mut links = view.param_links.clone();
+                links.push((name.to_owned(), other));
+                outs.push(Out::Links(links));
+                ui.close();
+            }
+        }
+    });
+}
+
+/// The parameter's name: a click focuses it (the keys panel works on it), a
+/// double click opens its settings; the menu also links it with another
+/// parameter or unlinks it.
+fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs: &mut Vec<Out>) {
+    let ctx = ui.ctx().clone();
+    let text = if view.param_focus.as_deref() == Some(name) {
+        egui::RichText::new(name).strong()
+    } else {
+        egui::RichText::new(name)
+    };
+    let r = ui.add(
+        egui::Label::new(text)
+            .truncate()
+            .sense(egui::Sense::click()),
+    );
+    if r.clicked() {
+        view.param_focus = Some(name.to_owned());
+    }
+    if r.double_clicked() {
+        view.param_dialog = Some(name.to_owned());
+    }
+    r.context_menu(|ui| {
+        if ui.button(tr(&ctx, "param-settings")).clicked() {
+            view.param_dialog = Some(name.to_owned());
+            ui.close();
+        }
+        let linked = view.param_links.iter().any(|(a, b)| a == name || b == name);
+        if linked {
+            if ui.button(tr(&ctx, "param-unlink")).clicked() {
+                let mut links = view.param_links.clone();
+                links.retain(|(a, b)| a != name && b != name);
+                outs.push(Out::Links(links));
+                ui.close();
+            }
+        } else {
+            ui.menu_button(tr(&ctx, "param-link"), |ui| {
+                let free: Vec<String> = model
+                    .parameters()
+                    .iter()
+                    .map(|(_, n, _)| n.to_owned())
+                    .filter(|n| {
+                        n != name && !view.param_links.iter().any(|(a, b)| a == n || b == n)
+                    })
+                    .collect();
+                for other in free {
+                    if ui.button(&other).clicked() {
+                        let mut links = view.param_links.clone();
+                        links.push((name.to_owned(), other));
+                        outs.push(Out::Links(links));
+                        ui.close();
+                    }
+                }
+            });
+        }
+    });
+}
+
+/// Keys to draw for `name`: the selected element's, else the range ends and the default.
+fn keys_for(model: &Model, name: &str, p: &Parameter, selection: &[Selection]) -> Vec<f32> {
+    param_ops::primary(model, name, selection)
+        .map(|(_, k)| k)
+        .unwrap_or_else(|| {
+            let mut k = vec![p.min, p.default, p.max];
+            k.sort_by(f32::total_cmp);
+            k.dedup();
+            k
+        })
+}
+
+/// Two linked parameters as one pad (the way Live2D shows a pair): white
+/// circles at the key combinations of the selected element, a dot at the
+/// values, two number fields on the right. Click or drag moves both values,
+/// snapping to a circle (Shift: no snap).
+fn link_row(
     ui: &mut Ui,
     model: &Model,
     view: &mut ViewState,
-    name: &str,
-    p: &Parameter,
+    a: &str,
+    b: &str,
     selection: &[Selection],
     outs: &mut Vec<Out>,
 ) {
+    let m = tsukumoe_ui::Theme::get(ui.ctx()).metrics;
+    let (Some(ia), Some(ib)) = (model.parameters().find(a), model.parameters().find(b)) else {
+        return;
+    };
+    let (Some(pa), Some(pb)) = (model.parameters().get(ia), model.parameters().get(ib)) else {
+        return;
+    };
+    let (xkeys, ykeys) = (
+        keys_for(model, a, pa, selection),
+        keys_for(model, b, pb, selection),
+    );
+    let (mut va, mut vb) = (view.param(a, pa), view.param(b, pb));
+    let mut changed = false;
+    let shift = ui.input(|i| i.modifiers.shift);
+    let row = Vec2::new(LABEL_WIDTH, m.control);
+    let gap = ui.spacing().item_spacing.y;
+    let focused = [a, b].contains(&view.param_focus.as_deref().unwrap_or_default());
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let whole = ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(LINK_WIDTH, 3.0 * m.control + 2.0 * gap),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                ui.add_space(m.control + gap);
+                link_button(ui, model, view, a, outs);
+            },
+        );
+        // The names and the number fields sit at the top and the bottom of the
+        // pad, each as high as a slider row.
+        ui.vertical(|ui| {
+            for (i, name) in [a, b].into_iter().enumerate() {
+                if i == 1 {
+                    ui.add_space(m.control);
+                }
+                ui.allocate_ui_with_layout(
+                    row,
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| name_label(ui, model, view, name, outs),
+                );
+            }
+        });
+        let width =
+            (ui.available_width() - NUMBER_WIDTH - RESET_WIDTH - 2.0 * ui.spacing().item_spacing.x)
+                .max(60.0);
+        let (rect, response) = ui.allocate_exact_size(
+            Vec2::new(width, 3.0 * m.control + 2.0 * gap),
+            egui::Sense::click_and_drag(),
+        );
+        let inner = rect.shrink2(Vec2::new(8.0, m.control / 2.0));
+        let to_screen = |x: f32, y: f32| {
+            egui::pos2(
+                inner.left() + (x - pa.min) / (pa.max - pa.min).max(1e-6) * inner.width(),
+                inner.bottom() - (y - pb.min) / (pb.max - pb.min).max(1e-6) * inner.height(),
+            )
+        };
+        let spots: Vec<(egui::Pos2, f32, f32)> = ykeys
+            .iter()
+            .flat_map(|&y| xkeys.iter().map(move |&x| (x, y)))
+            .map(|(x, y)| (to_screen(x, y), x, y))
+            .collect();
+        if (response.clicked() || response.dragged())
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            va = pa.min
+                + ((pointer.x - inner.left()) / inner.width()).clamp(0.0, 1.0) * (pa.max - pa.min);
+            vb = pb.min
+                + ((inner.bottom() - pointer.y) / inner.height()).clamp(0.0, 1.0)
+                    * (pb.max - pb.min);
+            if !shift
+                && let Some(&(_, x, y)) = spots
+                    .iter()
+                    .filter(|(pos, ..)| pos.distance(pointer) <= SNAP_POINTS * 1.5)
+                    .min_by(|s, t| s.0.distance(pointer).total_cmp(&t.0.distance(pointer)))
+            {
+                (va, vb) = (x, y);
+            }
+            changed = true;
+        }
+        let theme = tsukumoe_ui::Theme::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let dotted = egui::Stroke::new(1.0, theme.colors.border);
+        for &x in &xkeys {
+            painter.line_segment([to_screen(x, pb.max), to_screen(x, pb.min)], dotted);
+        }
+        for &y in &ykeys {
+            painter.line_segment([to_screen(pa.min, y), to_screen(pa.max, y)], dotted);
+        }
+        for (pos, ..) in &spots {
+            painter.circle(
+                *pos,
+                4.0,
+                theme.colors.surface_raised,
+                egui::Stroke::new(1.0, theme.colors.text_muted),
+            );
+        }
+        let now = to_screen(va.clamp(pa.min, pa.max), vb.clamp(pb.min, pb.max));
+        painter.circle_filled(now, 4.5, theme.colors.accent);
+        ui.vertical(|ui| {
+            let speed = |p: &Parameter| (f64::from(p.max - p.min) / 200.0).max(1e-4);
+            for (i, (v, p, name)) in [(&mut va, pa, a), (&mut vb, pb, b)].into_iter().enumerate() {
+                if i == 1 {
+                    ui.add_space(m.control);
+                }
+                ui.allocate_ui_with_layout(
+                    Vec2::new(NUMBER_WIDTH, m.control),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| changed |= number(ui, v, p.min..=p.max, speed(p), name).changed(),
+                );
+            }
+        });
+        // One button puts both back.
+        ui.allocate_ui_with_layout(
+            Vec2::new(RESET_WIDTH, 3.0 * m.control + 2.0 * gap),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                ui.add_space(m.control + gap);
+                if reset_button(ui, va == pa.default && vb == pb.default) {
+                    (va, vb) = (pa.default, pb.default);
+                    changed = true;
+                }
+            },
+        );
+    });
+    highlight(ui, bg, whole.response.rect, focused);
+    if changed {
+        view.set_param(a, pa, va);
+        view.set_param(b, pb, vb);
+    }
+}
+
+/// The settings of one parameter: its name and range, repeat and delete.
+fn settings_section(ui: &mut Ui, model: &Model, name: &str, p: &Parameter, outs: &mut Vec<Out>) {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    ui.separator();
     // The name: edited in a buffer, sent when the field is left.
     let buffer_id = ui.make_persistent_id(("param-name", name));
     let mut text: String = ui
@@ -246,67 +543,13 @@ fn edit_section(
             d.insert_temp(range_id, vals);
         }
     });
-    // The keys of the selected element.
-    let value = view.param(name, p);
-    let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
-    let range = p.max - p.min;
-    ui.horizontal(|ui| {
-        let step = |dir: i32, view: &mut ViewState| {
-            if let Some(k) = keys
-                .as_deref()
-                .and_then(|k| param_ops::neighbour(k, value, range, dir))
-            {
-                view.set_param(name, p, k);
-            }
-        };
-        if icon_button(ui, Icon::ChevronLeft, &t("param-key-prev"), Variant::Ghost).clicked() {
-            step(-1, view);
-        }
-        if icon_button(ui, Icon::ChevronRight, &t("param-key-next"), Variant::Ghost).clicked() {
-            step(1, view);
-        }
-        if icon_button(ui, Icon::Plus, &t("param-key-add"), Variant::Ghost).clicked() {
-            outs.push(match param_ops::add_key(model, name, value, selection) {
-                Ok(op) => Out::Op(op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if icon_button(ui, Icon::Minus, &t("param-key-remove"), Variant::Ghost).clicked() {
-            outs.push(match param_ops::remove_key(model, name, value, selection) {
-                Ok(op) => Out::Confirm(Kind::Key, name.to_owned(), op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if button(ui, &t("param-bind"), Variant::Secondary).clicked() {
-            outs.push(match param_ops::bind(model, name, selection) {
-                Ok(op) => Out::Op(op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if keys.is_some() && button(ui, &t("param-unbind"), Variant::Secondary).clicked() {
-            outs.push(match param_ops::unbind(model, name, selection) {
-                Ok(op) => Out::Confirm(Kind::Unbind, name.to_owned(), op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-    });
-    if let Some(keys) = &keys {
-        let on = param_ops::on_key(keys, value, range).is_some();
-        let text = keys
-            .iter()
-            .map(|k| format!("{k:.2}"))
-            .collect::<Vec<_>>()
-            .join("  ");
-        hint(ui, format!("{}{}", if on { "\u{25c6} " } else { "" }, text));
-    }
-    ui.separator();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use tsukumoe_core::command::Command;
 
     fn model() -> Model {
@@ -394,43 +637,9 @@ mod tests {
     }
 
     #[test]
-    fn the_buttons_send_bind_keys_and_a_new_parameter_through_the_param_ops() {
+    fn the_new_button_sends_an_add_parameter() {
         let mut h = harness(panel());
         h.run();
-        // Unbound: bind it.
-        h.get_by_label("Bind").click();
-        h.run();
-        let Out::Op((command, label)) = h.state().outs.last().unwrap().clone() else {
-            panic!("an op");
-        };
-        assert_eq!(label, "param_bind: ParamAngleX");
-        h.state_mut().model.apply(command).unwrap();
-        h.state_mut().outs.clear();
-        h.run();
-        // Bound: add a key at the slider (the default 0 is a key: refused with a message).
-        h.get_by_label("Add a key here").click();
-        h.run();
-        assert_eq!(
-            h.state().outs.last(),
-            Some(&Out::Error("param-err-key-exists"))
-        );
-        // Move off the keys and add.
-        let p = h
-            .state()
-            .model
-            .parameters()
-            .get(h.state().model.parameters().find("ParamAngleX").unwrap())
-            .unwrap()
-            .clone();
-        h.state_mut().view.set_param("ParamAngleX", &p, 0.5);
-        h.run();
-        h.get_by_label("Add a key here").click();
-        h.run();
-        assert!(matches!(
-            h.state().outs.last(),
-            Some(Out::Op((Command::AddParameterKey { value, .. }, _))) if (*value - 0.5).abs() < 1e-6
-        ));
-        // A new parameter.
         h.get_by_label("New parameter").click();
         h.run();
         assert!(matches!(
@@ -440,29 +649,20 @@ mod tests {
     }
 
     #[test]
-    fn previous_and_next_key_move_the_slider_to_the_neighbouring_key() {
-        let mut h = harness(panel());
+    fn the_reset_button_puts_one_parameter_back_and_is_inert_at_the_default() {
+        let mut p = panel();
+        let id = p.model.parameters().find("ParamAngleX").unwrap();
+        let param = p.model.parameters().get(id).unwrap().clone();
+        p.view.set_param("ParamAngleX", &param, 0.5);
+        let mut h = harness(p);
         h.run();
-        h.get_by_label("Bind").click();
+        let enabled: Vec<_> = h
+            .get_all_by_label("Reset to the default")
+            .filter(|n| !n.accesskit_node().is_disabled())
+            .collect();
+        assert_eq!(enabled.len(), 1, "only the moved parameter can be reset");
+        enabled[0].click();
         h.run();
-        let Out::Op((command, _)) = h.state().outs.last().unwrap().clone() else {
-            panic!("an op");
-        };
-        h.state_mut().model.apply(command).unwrap();
-        h.run();
-        let value = |h: &Harness<Panel>| {
-            let m = &h.state().model;
-            let p = m
-                .parameters()
-                .get(m.parameters().find("ParamAngleX").unwrap())
-                .unwrap();
-            h.state().view.param("ParamAngleX", p)
-        };
-        h.get_by_label("Next key").click();
-        h.run();
-        assert_eq!(value(&h), 1.0);
-        h.get_by_label("Previous key").click();
-        h.run();
-        assert_eq!(value(&h), 0.0);
+        assert_eq!(h.state().view.param("ParamAngleX", &param), param.default);
     }
 }
