@@ -133,6 +133,7 @@ pub fn search<'a>(list: &'a [CommandInfo], query: &str) -> Vec<&'a CommandInfo> 
 mod tests {
     use super::*;
     use tsukumoe_core::command::{ElementRef, RotationBase};
+    use tsukumoe_core::rig::GlueNode;
 
     /// Adding a variant to `Command` makes this match fail to compile; add it
     /// here and the palette test below then checks the schema lists it.
@@ -170,6 +171,9 @@ mod tests {
             Command::SetWarpKeyform { .. } => "set_warp_keyform",
             Command::SetRotationKeyform { .. } => "set_rotation_keyform",
             Command::SetRotationBase { .. } => "set_rotation_base",
+            Command::AddGlue { .. } => "add_glue",
+            Command::RemoveGlue { .. } => "remove_glue",
+            Command::SetGlueIntensity { .. } => "set_glue_intensity",
             Command::RenamePart { .. } => "rename_part",
             Command::RenameMesh { .. } => "rename_mesh",
             Command::RenameWarp { .. } => "rename_warp",
@@ -235,6 +239,24 @@ mod tests {
             Command::SetMeshPositions {
                 name: String::new(),
                 positions: vec![],
+            },
+            Command::AddGlue {
+                name: "Seam".into(),
+                mesh_a: "Skin".into(),
+                mesh_b: "Clip".into(),
+                nodes: vec![GlueNode {
+                    index_a: 0,
+                    index_b: 1,
+                    weight: 0.5,
+                }],
+                intensity: 1.0,
+            },
+            Command::RemoveGlue {
+                name: "Seam".into(),
+            },
+            Command::SetGlueIntensity {
+                name: "Seam".into(),
+                intensity: 0.5,
             },
             Command::AddWarpDeformer {
                 name: "FaceWarp".into(),

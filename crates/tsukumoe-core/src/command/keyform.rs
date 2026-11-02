@@ -102,7 +102,7 @@ enum Elem {
     Rotation(Id<RotationDeformer>),
 }
 
-fn refused(name: &str, reason: &'static str) -> CommandError {
+pub(super) fn refused(name: &str, reason: &'static str) -> CommandError {
     CommandError::Refused {
         name: name.to_owned(),
         reason,

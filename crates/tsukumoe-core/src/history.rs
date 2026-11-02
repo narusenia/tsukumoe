@@ -9,7 +9,7 @@ use crate::driver::Driver;
 use crate::elements::{Parameter, Part};
 use crate::keyform::Binding;
 use crate::model::Model;
-use crate::rig::{ArtMesh, RotationDeformer, WarpDeformer};
+use crate::rig::{ArtMesh, Glue, RotationDeformer, WarpDeformer};
 use crate::table::Table;
 
 /// One element's state before and after a command. `before` empty is an
@@ -65,6 +65,7 @@ pub(crate) enum Change {
     Mesh(Box<Edit<ArtMesh>>),
     Warp(Box<Edit<WarpDeformer>>),
     Rotation(Edit<RotationDeformer>),
+    Glue(Edit<Glue>),
 }
 
 impl Change {
@@ -77,6 +78,7 @@ impl Change {
             Change::Mesh(e) => e.set(&mut model.meshes, &e.before),
             Change::Warp(e) => e.set(&mut model.warps, &e.before),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.before),
+            Change::Glue(e) => e.set(&mut model.glues, &e.before),
         }
     }
 
@@ -89,6 +91,7 @@ impl Change {
             Change::Mesh(e) => e.set(&mut model.meshes, &e.after),
             Change::Warp(e) => e.set(&mut model.warps, &e.after),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.after),
+            Change::Glue(e) => e.set(&mut model.glues, &e.after),
         }
     }
 }
@@ -177,6 +180,19 @@ impl Editable for RotationDeformer {
     }
     fn change(edit: Edit<Self>) -> Change {
         Change::Rotation(edit)
+    }
+}
+
+impl Editable for Glue {
+    const KIND: &'static str = "glue";
+    fn table(model: &Model) -> &Table<Self> {
+        &model.glues
+    }
+    fn table_mut(model: &mut Model) -> &mut Table<Self> {
+        &mut model.glues
+    }
+    fn change(edit: Edit<Self>) -> Change {
+        Change::Glue(edit)
     }
 }
 

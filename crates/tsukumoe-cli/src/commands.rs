@@ -10,7 +10,7 @@ use std::fmt::Write;
 use schemars::schema_for;
 use serde_json::{Value, json};
 use tsukumoe_core::command::{Command, ElementRef, RotationBase};
-use tsukumoe_core::rig::BlendMode;
+use tsukumoe_core::rig::{BlendMode, GlueNode};
 
 /// One tool per `Command` variant, as `{name, description, inputSchema}`.
 /// The name is the variant's `type`; the schema is that variant's.
@@ -147,6 +147,24 @@ pub fn examples() -> Vec<Command> {
         Command::SetMeshPositions {
             name: "Skin".into(),
             positions: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]],
+        },
+        Command::AddGlue {
+            name: "Seam".into(),
+            mesh_a: "Skin".into(),
+            mesh_b: "Clip".into(),
+            nodes: vec![GlueNode {
+                index_a: 0,
+                index_b: 1,
+                weight: 0.5,
+            }],
+            intensity: 1.0,
+        },
+        Command::RemoveGlue {
+            name: "Seam".into(),
+        },
+        Command::SetGlueIntensity {
+            name: "Seam".into(),
+            intensity: 0.5,
         },
         Command::AddWarpDeformer {
             name: "FaceWarp".into(),
@@ -386,6 +404,9 @@ pub fn tag(command: &Command) -> &'static str {
         Command::SetWarpKeyform { .. } => "set_warp_keyform",
         Command::SetRotationKeyform { .. } => "set_rotation_keyform",
         Command::SetRotationBase { .. } => "set_rotation_base",
+        Command::AddGlue { .. } => "add_glue",
+        Command::RemoveGlue { .. } => "remove_glue",
+        Command::SetGlueIntensity { .. } => "set_glue_intensity",
         Command::RenamePart { .. } => "rename_part",
         Command::RenameMesh { .. } => "rename_mesh",
         Command::RenameWarp { .. } => "rename_warp",

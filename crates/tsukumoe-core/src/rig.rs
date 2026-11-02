@@ -173,7 +173,17 @@ pub struct RotationDeformer {
 }
 
 /// A weighted vertex pair joining two meshes.
-#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    bytemuck::Pod,
+    bytemuck::Zeroable,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[repr(C)]
 pub struct GlueNode {
     pub index_a: u32,
