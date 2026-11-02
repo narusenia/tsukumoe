@@ -367,6 +367,44 @@ pub fn create_parameter(model: &Model) -> Op {
     )
 }
 
+/// A copy of `name` (same range, default, wrap and group; no keys or bindings)
+/// named `name copy`, `name copy 2`, ..., placed right after it.
+pub fn duplicate(model: &Model, name: &str) -> Option<Op> {
+    let id = model.parameters().find(name)?;
+    let p = model.parameters().get(id)?;
+    let copy = (1..)
+        .map(|i| {
+            if i == 1 {
+                format!("{name} copy")
+            } else {
+                format!("{name} copy {i}")
+            }
+        })
+        .find(|n| model.parameters().find(n).is_none())
+        .expect("endless range");
+    let mut commands = vec![Command::AddParameter {
+        name: copy.clone(),
+        min: p.min,
+        max: p.max,
+        default: p.default,
+        repeat: p.repeat,
+    }];
+    if p.group.is_some() {
+        commands.push(Command::SetParameterGroup {
+            name: copy.clone(),
+            group: p.group.clone(),
+        });
+    }
+    commands.push(Command::MoveParameter {
+        name: copy.clone(),
+        to: model.parameters().position(id)? + 1,
+    });
+    Some((
+        Command::Batch { commands },
+        format!("param_duplicate: {copy}"),
+    ))
+}
+
 /// Drops `dragged` before or after the row `target`: it takes the group of
 /// `target` and the place next to it. `None` if nothing changes.
 pub fn move_beside(model: &Model, dragged: &str, target: &str, after: bool) -> Option<Op> {
@@ -637,6 +675,29 @@ mod tests {
             .unwrap();
         }
         m
+    }
+
+    #[test]
+    fn duplicating_copies_the_range_and_group_and_sits_after_the_source() {
+        let mut m = three();
+        m.apply(Command::SetParameterGroup {
+            name: "A".into(),
+            group: Some("G".into()),
+        })
+        .unwrap();
+        let (cmd, label) = duplicate(&m, "A").unwrap();
+        assert_eq!(label, "param_duplicate: A copy");
+        m.apply(cmd).unwrap();
+        assert_eq!(names(&m), ["A", "A copy", "B", "C"]);
+        let copy = m.parameters().find("A copy").unwrap();
+        assert_eq!(
+            m.parameters().get(copy).unwrap().group.as_deref(),
+            Some("G")
+        );
+        let (cmd, _) = duplicate(&m, "A").unwrap();
+        m.apply(cmd).unwrap();
+        assert!(m.parameters().find("A copy 2").is_some());
+        assert!(duplicate(&m, "none").is_none());
     }
 
     #[test]

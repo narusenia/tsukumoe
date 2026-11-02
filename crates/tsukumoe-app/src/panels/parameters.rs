@@ -10,7 +10,8 @@ use tsukumoe_core::command::Command;
 use tsukumoe_core::elements::Parameter;
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{
-    Arg, Icon, Variant, button, icon_button, number_or, slider, text_input, tr, tr_args,
+    Arg, Icon, Variant, button, icon_button, menu_item_icon, number_or, slider, text_input, tr,
+    tr_args,
 };
 
 use crate::confirm::Kind;
@@ -423,7 +424,7 @@ fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs
         view.param_dialog = Some(name.to_owned());
     }
     r.context_menu(|ui| {
-        if ui.button(tr(&ctx, "param-settings")).clicked() {
+        if menu_item_icon(ui, Icon::Settings, &tr(&ctx, "param-settings"), None, true).clicked() {
             view.param_dialog = Some(name.to_owned());
             ui.close();
         }
@@ -431,35 +432,52 @@ fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs
         if let Some(p) = id.and_then(|id| model.parameters().get(id)) {
             let value = view.param(name, p);
             let at_default = (value - p.default).abs() < 1e-6;
-            if ui
-                .add_enabled(!at_default, egui::Button::new(tr(&ctx, "param-reset")))
-                .clicked()
+            if menu_item_icon(
+                ui,
+                Icon::RotateCcw,
+                &tr(&ctx, "param-reset"),
+                None,
+                !at_default,
+            )
+            .clicked()
             {
                 view.set_param(name, p, p.default);
                 ui.close();
             }
             // Bind and key work on the selection, as the keys panel's buttons do.
             let selection = view.selected();
-            let mut op = |ui: &mut Ui, key: &str, result: Result<Op, param_ops::ParamError>| {
-                if ui.button(tr(&ctx, key)).clicked() {
-                    outs.push(match result {
-                        Ok(op) => Out::Op(op),
-                        Err(e) => Out::Error(e.key()),
-                    });
-                    ui.close();
-                }
-            };
-            op(ui, "param-bind", param_ops::bind(model, name, &selection));
+            let mut op =
+                |ui: &mut Ui, icon: Icon, key: &str, result: Result<Op, param_ops::ParamError>| {
+                    if menu_item_icon(ui, icon, &tr(&ctx, key), None, true).clicked() {
+                        outs.push(match result {
+                            Ok(op) => Out::Op(op),
+                            Err(e) => Out::Error(e.key()),
+                        });
+                        ui.close();
+                    }
+                };
             op(
                 ui,
+                Icon::Link,
+                "param-bind",
+                param_ops::bind(model, name, &selection),
+            );
+            op(
+                ui,
+                Icon::Unlink,
                 "param-unbind",
                 param_ops::unbind(model, name, &selection),
             );
             op(
                 ui,
+                Icon::Plus,
                 "param-key-add",
                 param_ops::add_key(model, name, value, &selection),
             );
+            if menu_item_icon(ui, Icon::Copy, &tr(&ctx, "param-duplicate"), None, true).clicked() {
+                outs.extend(param_ops::duplicate(model, name).map(Out::Op));
+                ui.close();
+            }
             let groups: std::collections::BTreeSet<String> = model
                 .parameters()
                 .iter()

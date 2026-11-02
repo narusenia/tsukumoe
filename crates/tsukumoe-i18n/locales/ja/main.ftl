@@ -453,3 +453,4 @@ action-mesh-even-outline = 輪郭の点を均等な間隔に並べ直す（角�
 mesh-edit-even-outline = 輪郭を均等化
 mesh-edit-contour-even = 輪郭の点を均等に並べる
 mesh-edit-contour-even-hint = 間引いたあとの点を、輪郭に沿って同じ間隔に並べ直す。角は動かさない。点の数は変わらない。
+param-duplicate = 複製（範囲・グループを引き継ぐ。キーとバインドは持たない）
