@@ -89,6 +89,9 @@ pub struct ViewState {
     others_of: Option<Selection>,
     /// Where a Shift click range starts.
     pub anchor: Option<Selection>,
+    /// What the pointer rests on in the viewport or a tree row, with the UI
+    /// pass it was set in; see `set_hover`. Not saved.
+    hover: Option<(Selection, u64)>,
     /// The parts panel and the deformers panel.
     pub parts: TreeView,
     pub deformers: TreeView,
@@ -184,6 +187,22 @@ impl ViewState {
     pub fn is_selected(&self, s: &Selection) -> bool {
         self.selection.as_ref() == Some(s)
             || (self.others_of == self.selection && self.others.contains(s))
+    }
+
+    /// Records that the pointer rests on `s` in this pass.
+    pub fn set_hover(&mut self, ctx: &egui::Context, s: Selection) {
+        // The panel drawn earlier in this pass has not seen it: draw once more.
+        if self.hover.as_ref().is_none_or(|(old, _)| *old != s) {
+            ctx.request_repaint();
+        }
+        self.hover = Some((s, ctx.cumulative_pass_nr()));
+    }
+
+    /// What the pointer rests on, if it did so in this pass or the one before
+    /// (the panel drawn later reads what the earlier one set).
+    pub fn hover(&self, ctx: &egui::Context) -> Option<&Selection> {
+        let (s, pass) = self.hover.as_ref()?;
+        (pass + 1 >= ctx.cumulative_pass_nr()).then_some(s)
     }
 
     /// Selects `s` alone.

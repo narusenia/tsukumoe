@@ -322,6 +322,21 @@ impl Viewport {
         {
             actions.push(action);
         }
+        // What the pointer rests on, in the viewport or in a tree row.
+        if selection_overlay::shown_with(view.tool)
+            && let Some(scene) = &self.scene
+            && let Some(hover) = view.hover(ui.ctx())
+        {
+            let names = selection_overlay::hover_meshes(doc.dispatcher.model(), hover);
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            let painter = ui.painter_at(rect);
+            let theme = Theme::get(ui.ctx());
+            selection_overlay::paint_hover(&painter, &theme, &mapper, scene, &names);
+        }
         // The box around the selection, where no vertex-level overlay is open.
         if selection_overlay::shown_with(view.tool)
             && let Some(scene) = &self.scene
@@ -436,9 +451,23 @@ impl Viewport {
         drag: &DragAssignment,
         size: (u32, u32),
     ) {
-        let (Some(scene), true) = (&self.scene, response.clicked_by(PointerButton::Primary)) else {
+        let Some(scene) = &self.scene else { return };
+        if let Some(at) = response.hover_pos() {
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            if let Some(name) = mesh_tool::pick_drawn(
+                &scene.frame.draw_list(&scene.model),
+                mapper.to_model([at.x, at.y]),
+            ) {
+                view.set_hover(ui.ctx(), Selection::Mesh(name));
+            }
+        }
+        if !response.clicked_by(PointerButton::Primary) {
             return;
-        };
+        }
         let modifiers = ui.input(|i| i.modifiers);
         let Some(p) = response.interact_pointer_pos() else {
             return;

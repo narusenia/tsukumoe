@@ -6,7 +6,9 @@
 //! It is shown only; there is nothing to drag.
 
 use egui::{Painter, Rect, Stroke, StrokeKind, pos2, vec2};
+use tsukumoe_core::elements::PartId;
 use tsukumoe_core::model::Model;
+use tsukumoe_core::rig::DeformerRef;
 use tsukumoe_ui::Theme;
 
 use crate::actions::Tool;
@@ -114,6 +116,83 @@ pub fn paint_outlines(
         } else {
             Stroke::new(1.0, c.accent.gamma_multiply(0.55))
         };
+        let screen = |v: u32| {
+            points.get(v as usize).map(|p| {
+                let s = m.to_screen(*p);
+                pos2(s[0], s[1])
+            })
+        };
+        let lines: Vec<egui::Shape> = boundary_edges(d.indices)
+            .into_iter()
+            .filter_map(|(a, b)| Some([screen(a)?, screen(b)?]))
+            .filter(|l| Rect::from_two_pos(l[0], l[1]).intersects(clip))
+            .map(|l| egui::Shape::line_segment(l, stroke))
+            .collect();
+        painter.extend(lines);
+    }
+}
+
+/// The meshes a hovered item stands for: the mesh itself, the meshes of a part
+/// (and of the parts under it), the meshes hanging from a deformer.
+pub fn hover_meshes(model: &Model, hover: &Selection) -> Vec<String> {
+    match hover {
+        Selection::Mesh(n) => vec![n.clone()],
+        Selection::Part(n) => {
+            let Some(root) = model.parts().find(n) else {
+                return Vec::new();
+            };
+            let under = |mut p: PartId| loop {
+                if p == root {
+                    return true;
+                }
+                match model.parts().get(p).and_then(|x| x.parent) {
+                    Some(up) => p = up,
+                    None => return false,
+                }
+            };
+            model
+                .meshes()
+                .iter()
+                .filter(|(_, _, m)| under(m.part))
+                .map(|(_, n, _)| n.to_owned())
+                .collect()
+        }
+        Selection::Warp(n) | Selection::Rotation(n) => {
+            let Some(r) = model
+                .warps()
+                .find(n)
+                .map(DeformerRef::Warp)
+                .or_else(|| model.rotations().find(n).map(DeformerRef::Rotation))
+            else {
+                return Vec::new();
+            };
+            model
+                .meshes()
+                .iter()
+                .filter(|(_, _, m)| m.parent == Some(r))
+                .map(|(_, n, _)| n.to_owned())
+                .collect()
+        }
+        Selection::Glue(_) | Selection::Parameter(_) => Vec::new(),
+    }
+}
+
+/// The outline of what the pointer rests on, in a brighter accent than a
+/// selection's, for meshes that are drawn.
+pub fn paint_hover(painter: &Painter, theme: &Theme, m: &Mapper, scene: &Scene, names: &[String]) {
+    let list = scene.frame.draw_list(&scene.model);
+    let shown = list.order();
+    let clip = painter.clip_rect().expand(2.0);
+    let stroke = Stroke::new(2.0, theme.colors.accent);
+    for name in names {
+        let Some(i) = scene.model.mesh_index(name) else {
+            continue;
+        };
+        if !shown.contains(&(i as u32)) {
+            continue;
+        }
+        let d = list.drawable(i);
+        let points = d.positions.as_chunks::<2>().0;
         let screen = |v: u32| {
             points.get(v as usize).map(|p| {
                 let s = m.to_screen(*p);
@@ -294,6 +373,22 @@ mod tests {
             other => view.selection = other,
         }
         selection_bounds(&scene, model, &view)
+    }
+
+    #[test]
+    fn a_hovered_item_stands_for_its_meshes() {
+        let m = model();
+        let names = |s: Selection| {
+            let mut v = hover_meshes(&m, &s);
+            v.sort();
+            v
+        };
+        assert_eq!(names(Selection::Mesh("C".into())), ["C"]);
+        // A part includes the meshes of the parts under it.
+        assert_eq!(names(Selection::Part("Head".into())), ["A", "B", "Under"]);
+        assert_eq!(names(Selection::Part("Hair".into())), ["B"]);
+        assert_eq!(names(Selection::Warp("W".into())), ["Under"]);
+        assert!(names(Selection::Part("Nope".into())).is_empty());
     }
 
     #[test]

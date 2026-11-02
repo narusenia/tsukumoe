@@ -253,8 +253,11 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
                     theme.metrics.radius,
                     Color32::from_rgba_unmultiplied(r, g, b, alpha),
                 );
-            } else if response.hovered() {
+            } else if response.hovered() || view.hover(&ctx) == Some(&selection) {
                 painter.rect_filled(rect, theme.metrics.radius, theme.colors.control_hover);
+            }
+            if response.hovered() {
+                view.set_hover(&ctx, selection.clone());
             }
             // Guide lines, one per indent; the ones above the selected row are stronger.
             for level in 1..=row.depth {
