@@ -395,6 +395,17 @@ mod tests {
                 name: String::new(),
                 blend_mode: tsukumoe_core::rig::BlendMode::Normal,
             },
+            Command::SetMeshColors {
+                name: String::new(),
+                multiply_color: [1.0; 3],
+                screen_color: [0.0; 3],
+            },
+            Command::SetMeshKeyformColors {
+                name: String::new(),
+                key: vec![],
+                multiply_color: [1.0; 3],
+                screen_color: [0.0; 3],
+            },
             Command::SetMeshOpacity {
                 name: String::new(),
                 opacity: 0.0,

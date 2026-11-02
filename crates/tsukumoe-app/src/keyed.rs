@@ -243,6 +243,24 @@ pub fn retarget(
             Ok(mesh_edit(model, &name, at, |k| k.opacity = opacity)?
                 .unwrap_or(Command::SetMeshOpacity { name, opacity }))
         }
+        Command::SetMeshColors {
+            name,
+            multiply_color,
+            screen_color,
+        } => match mesh_place(model, &name, at) {
+            None => Ok(Command::SetMeshColors {
+                name,
+                multiply_color,
+                screen_color,
+            }),
+            Some(Place::Off { label }) => Err(Refusal::OffKey(label)),
+            Some(Place::Key { key, .. }) => Ok(Command::SetMeshKeyformColors {
+                name,
+                key,
+                multiply_color,
+                screen_color,
+            }),
+        },
         Command::SetMeshDrawOrder { name, draw_order } => {
             Ok(mesh_edit(model, &name, at, |k| k.draw_order = draw_order)?
                 .unwrap_or(Command::SetMeshDrawOrder { name, draw_order }))
@@ -363,6 +381,24 @@ pub fn mesh_attrs(
             (kf.opacity, kf.draw_order)
         }
         None => (m.opacity, m.draw_order),
+    })
+}
+
+/// The multiply and screen colors of a mesh as drawn now (interpolated at the
+/// slider values when it has keyforms).
+pub fn mesh_colors(
+    model: &Model,
+    name: &str,
+    at: &dyn Fn(ParameterId) -> f32,
+) -> Option<([f32; 3], [f32; 3])> {
+    let m = model.meshes().get(model.meshes().find(name)?)?;
+    Some(match &m.keyforms {
+        Some(g) => {
+            let binding = model.bindings().get(g.binding)?;
+            let kf = sample_at(binding, &g.keyforms, at);
+            (kf.multiply_color, kf.screen_color)
+        }
+        None => (m.multiply_color, m.screen_color),
     })
 }
 
@@ -536,6 +572,28 @@ mod tests {
         // The base shape did not change.
         let g = m.meshes().get(m.meshes().find("Skin").unwrap()).unwrap();
         assert_eq!(g.positions[0], [0.0, 0.0]);
+    }
+
+    #[test]
+    fn colors_go_to_the_keyform_on_a_key_and_are_refused_between_keys() {
+        let mut m = model();
+        let set = Command::SetMeshColors {
+            name: "Skin".into(),
+            multiply_color: [0.5; 3],
+            screen_color: [0.0, 0.25, 0.0],
+        };
+        assert!(matches!(
+            retarget(&m, &at(&m, 0.3), set.clone()),
+            Err(Refusal::OffKey(_))
+        ));
+        let c = retarget(&m, &at(&m, 1.0), set).unwrap();
+        assert!(matches!(&c, Command::SetMeshKeyformColors { key, .. } if *key == [2]));
+        m.apply(c).unwrap();
+        let (mul, scr) = mesh_colors(&m, "Skin", &at(&m, 1.0)).unwrap();
+        assert_eq!((mul, scr), ([0.5; 3], [0.0, 0.25, 0.0]));
+        // Between keys the colors are interpolated.
+        let (mul, _) = mesh_colors(&m, "Skin", &at(&m, 0.5)).unwrap();
+        assert!(mul[0] < 1.0 && mul[0] > 0.5);
     }
 
     #[test]
