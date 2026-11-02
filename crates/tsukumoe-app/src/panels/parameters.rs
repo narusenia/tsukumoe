@@ -161,6 +161,10 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     .open(&mut open)
                     .collapsible(false)
                     .resizable(false)
+                    // Pinned from the outside too: whatever a row asks for, the window
+                    // stays this wide (content width plus the frame margins).
+                    .min_width(SETTINGS_WIDTH)
+                    .max_width(SETTINGS_WIDTH)
                     .show(&ctx, |ui| {
                         // A fixed width: the name field fills what is left, so an
                         // auto-sized window would grow on every frame.
@@ -908,7 +912,16 @@ mod tests {
     }
 
     fn harness_in(p: Panel, language: tsukumoe_ui::Language) -> Harness<'static, Panel> {
+        harness_scaled(p, language, 1.0)
+    }
+
+    fn harness_scaled(
+        p: Panel,
+        language: tsukumoe_ui::Language,
+        scale: f32,
+    ) -> Harness<'static, Panel> {
         Harness::builder()
+            .with_pixels_per_point(scale)
             .with_size(egui::vec2(420.0, 420.0))
             .build_ui_state(
                 move |ui, p: &mut Panel| {
@@ -940,6 +953,33 @@ mod tests {
             h.step();
         }
         assert!((width(&h) - before).abs() < 0.5, "the window grew");
+    }
+
+    #[test]
+    fn the_settings_window_keeps_its_width_on_a_high_density_screen() {
+        use egui_kittest::kittest::Queryable;
+        for scale in [1.5_f32, 2.0, 2.25] {
+            let mut p = panel();
+            p.view.param_dialog = Some("ParamAngleX".into());
+            let mut h = harness_scaled(p, tsukumoe_ui::Language::Ja, scale);
+            for _ in 0..3 {
+                h.run();
+            }
+            let width = |h: &Harness<'static, Panel>| {
+                h.get_by_role_and_label(egui::accesskit::Role::TextInput, "名前")
+                    .rect()
+                    .right()
+            };
+            let before = width(&h);
+            for _ in 0..40 {
+                h.step();
+            }
+            assert!(
+                (width(&h) - before).abs() < 0.5,
+                "grew at {scale}: {before} -> {}",
+                width(&h)
+            );
+        }
     }
 
     #[test]
