@@ -419,6 +419,57 @@ fn name_label(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs
             view.param_dialog = Some(name.to_owned());
             ui.close();
         }
+        let id = model.parameters().find(name);
+        if let Some(p) = id.and_then(|id| model.parameters().get(id)) {
+            let value = view.param(name, p);
+            let at_default = (value - p.default).abs() < 1e-6;
+            if ui
+                .add_enabled(!at_default, egui::Button::new(tr(&ctx, "param-reset")))
+                .clicked()
+            {
+                view.set_param(name, p, p.default);
+                ui.close();
+            }
+            // Bind and key work on the selection, as the keys panel's buttons do.
+            let selection = view.selected();
+            let mut op = |ui: &mut Ui, key: &str, result: Result<Op, param_ops::ParamError>| {
+                if ui.button(tr(&ctx, key)).clicked() {
+                    outs.push(match result {
+                        Ok(op) => Out::Op(op),
+                        Err(e) => Out::Error(e.key()),
+                    });
+                    ui.close();
+                }
+            };
+            op(ui, "param-bind", param_ops::bind(model, name, &selection));
+            op(
+                ui,
+                "param-unbind",
+                param_ops::unbind(model, name, &selection),
+            );
+            op(
+                ui,
+                "param-key-add",
+                param_ops::add_key(model, name, value, &selection),
+            );
+            let groups: std::collections::BTreeSet<String> = model
+                .parameters()
+                .iter()
+                .filter_map(|(_, _, p)| p.group.clone())
+                .filter(|g| p.group.as_ref() != Some(g))
+                .collect();
+            if !groups.is_empty() {
+                ui.menu_button(tr(&ctx, "param-move-to-group"), |ui| {
+                    for group in groups {
+                        if ui.button(&group).clicked() {
+                            outs.extend(param_ops::move_to_group(model, name, &group).map(Out::Op));
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            ui.separator();
+        }
         if ui.button(tr(&ctx, "param-keyforms-pick")).clicked() {
             view.param_source = Some(name.to_owned());
             ui.close();

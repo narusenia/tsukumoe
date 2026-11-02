@@ -262,18 +262,82 @@ pub fn menu_ui(
 ) -> Option<&'static str> {
     let ctx = ui.ctx().clone();
     let mut chosen = None;
-    for &action in actions {
+    let item = |ui: &mut egui::Ui, action: &'static str| -> Option<&'static str> {
         let label = tsukumoe_ui::tr(&ctx, &crate::actions::label_key(action));
         let mut button = egui::Button::new(label);
         if let Some(keys) = shortcut(action) {
             button = button.shortcut_text(keys);
         }
-        if ui.add_enabled(enabled(action), button).clicked() {
-            chosen = Some(action);
+        ui.add_enabled(enabled(action), button)
+            .clicked()
+            .then_some(action)
+    };
+    // Whole-mesh actions, then vertices and edges in sub-menus, then the
+    // deformer makers; an action in none of them (the deformer tool's) stays on top.
+    let has = |group: &[&'static str]| {
+        group
+            .iter()
+            .copied()
+            .filter(|a| actions.contains(a))
+            .collect::<Vec<_>>()
+    };
+    let known: Vec<&str> = MENU_MESH
+        .iter()
+        .chain(&MENU_VERTICES)
+        .chain(&MENU_EDGES)
+        .chain(&MENU_DEFORMERS)
+        .copied()
+        .collect();
+    for &action in actions.iter().filter(|a| !known.contains(a)) {
+        chosen = chosen.or(item(ui, action));
+    }
+    for action in has(&MENU_MESH) {
+        chosen = chosen.or(item(ui, action));
+    }
+    for (key, group) in [
+        ("menu-group-vertices", &MENU_VERTICES[..]),
+        ("menu-group-edges", &MENU_EDGES[..]),
+    ] {
+        let group = has(group);
+        if group.is_empty() {
+            continue;
+        }
+        let label = tsukumoe_ui::tr(&ctx, key);
+        let any = group.iter().any(|a| enabled(a));
+        let mut picked = None;
+        ui.add_enabled_ui(any, |ui| {
+            ui.menu_button(label, |ui| {
+                for action in group {
+                    picked = picked.or(item(ui, action));
+                }
+                if picked.is_some() {
+                    ui.close();
+                }
+            });
+        });
+        chosen = chosen.or(picked);
+    }
+    let deformers = has(&MENU_DEFORMERS);
+    if !deformers.is_empty() {
+        ui.separator();
+        for action in deformers {
+            chosen = chosen.or(item(ui, action));
         }
     }
     chosen
 }
+
+const MENU_MESH: [&str; 3] = ["mesh.retriangulate", "mesh.fill-grid", "mesh.contour"];
+const MENU_VERTICES: [&str; 6] = [
+    "mesh.connect",
+    "mesh.weld",
+    "mesh.weld-near",
+    "mesh.glue-source",
+    "mesh.glue",
+    "mesh.delete-vertices",
+];
+const MENU_EDGES: [&str; 3] = ["mesh.flip-edge", "mesh.edge-pen", "mesh.delete-edge"];
+const MENU_DEFORMERS: [&str; 2] = ["deformer.create-warp", "deformer.create-rotation"];
 
 #[cfg(test)]
 mod tests {
@@ -310,7 +374,24 @@ mod tests {
             // The whole-mesh items are enabled with nothing selected.
             let mut harness = menu_harness(MeshTool::default());
             harness.run();
-            harness.get_by_label(&label(action)).click();
+            // Vertex and edge items sit in a sub-menu; a group with nothing enabled stays shut.
+            let group = if MENU_VERTICES.contains(&action) {
+                Some("Vertices")
+            } else if MENU_EDGES.contains(&action) {
+                Some("Edges")
+            } else {
+                None
+            };
+            if let Some(group) = group {
+                harness.get_by_label(group).click();
+                harness.run();
+            }
+            let text = label(action);
+            let Some(node) = harness.query_by_label(&text) else {
+                assert!(!MeshTool::default().menu_enabled(action), "{action}");
+                continue;
+            };
+            node.click();
             harness.run();
             let expected = MeshTool::default().menu_enabled(action).then_some(action);
             assert_eq!(harness.state().1, expected, "{action}");

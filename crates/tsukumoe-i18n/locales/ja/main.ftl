@@ -411,3 +411,7 @@ card-vertices = 頂点
 card-parent = 親デフォーマ
 card-masks = マスク
 card-order = 描画順
+menu-group-vertices = 頂点
+menu-group-edges = 辺
+param-move-to-group = グループへ移動
+tree-children = 配下を…

@@ -753,7 +753,18 @@ pub fn row_menu(
             ui.close();
         }
     }
-    if ui.button(tr(&ctx, "tree-rename")).clicked() {
+    ui.separator();
+    let keyed = |key: &str, shortcut: egui::KeyboardShortcut| {
+        egui::Button::new(tr(&ctx, key)).shortcut_text(ctx.format_shortcut(&shortcut))
+    };
+    use egui::{Key, KeyboardShortcut, Modifiers};
+    if ui
+        .add(keyed(
+            "tree-rename",
+            KeyboardShortcut::new(Modifiers::NONE, Key::F2),
+        ))
+        .clicked()
+    {
         view.tree_mut(panel).renaming = Some(Renaming::new(row.kind, &row.name));
         ui.close();
     }
@@ -763,11 +774,24 @@ pub fn row_menu(
         outs.push(Out::Reset(targets.clone()));
         ui.close();
     }
-    if row.kind != Kind::Part && ui.button(tr(&ctx, "tree-duplicate")).clicked() {
+    if row.kind != Kind::Part
+        && ui
+            .add(keyed(
+                "tree-duplicate",
+                KeyboardShortcut::new(Modifiers::COMMAND, Key::D),
+            ))
+            .clicked()
+    {
         outs.push(Out::Duplicate(targets.clone()));
         ui.close();
     }
-    if ui.button(tr(&ctx, "tree-delete")).clicked() {
+    if ui
+        .add(keyed(
+            "tree-delete",
+            KeyboardShortcut::new(Modifiers::NONE, Key::Delete),
+        ))
+        .clicked()
+    {
         outs.push(Out::Delete(targets));
         ui.close();
     }
@@ -819,25 +843,30 @@ pub fn row_menu(
             }
         }
     });
-    if row.kind == Kind::Part && ui.button(tr(&ctx, "tree-select-children")).clicked() {
-        let meshes = tree_model::meshes_under_part(model, &row.name);
-        if !meshes.is_empty() {
-            view.select_meshes(meshes);
-        }
-        ui.close();
-    }
-    if row.expandable {
-        let key = row.key();
-        if ui.button(tr(&ctx, "tree-open-children")).clicked() {
-            view.tree_mut(panel)
-                .set_subtree_open(model, panel, &key, true);
-            ui.close();
-        }
-        if ui.button(tr(&ctx, "tree-close-children")).clicked() {
-            view.tree_mut(panel)
-                .set_subtree_open(model, panel, &key, false);
-            ui.close();
-        }
+    if row.kind == Kind::Part || row.expandable {
+        ui.separator();
+        ui.menu_button(tr(&ctx, "tree-children"), |ui| {
+            if row.kind == Kind::Part && ui.button(tr(&ctx, "tree-select-children")).clicked() {
+                let meshes = tree_model::meshes_under_part(model, &row.name);
+                if !meshes.is_empty() {
+                    view.select_meshes(meshes);
+                }
+                ui.close();
+            }
+            if row.expandable {
+                let key = row.key();
+                if ui.button(tr(&ctx, "tree-open-children")).clicked() {
+                    view.tree_mut(panel)
+                        .set_subtree_open(model, panel, &key, true);
+                    ui.close();
+                }
+                if ui.button(tr(&ctx, "tree-close-children")).clicked() {
+                    view.tree_mut(panel)
+                        .set_subtree_open(model, panel, &key, false);
+                    ui.close();
+                }
+            }
+        });
     }
 }
 
@@ -1289,7 +1318,7 @@ mod tests {
         // Right click on a selected row: both.
         h.get_by_label("a2").click_secondary();
         h.run();
-        h.get_by_label("Delete").click();
+        h.get_by_label_contains("Delete").click();
         h.run();
         let deleted = h.state().2.clone();
         assert_eq!(
@@ -1303,7 +1332,7 @@ mod tests {
         h.state_mut().2.clear();
         h.get_by_label("b1").click_secondary();
         h.run();
-        h.get_by_label("Duplicate").click();
+        h.get_by_label_contains("Duplicate").click();
         h.run();
         assert_eq!(
             h.state().2,
@@ -1313,7 +1342,9 @@ mod tests {
         h.state_mut().2.clear();
         h.get_by_label("Arm").click_secondary();
         h.run();
-        assert!(h.query_by_label("Duplicate").is_none());
+        assert!(h.query_by_label_contains("Duplicate").is_none());
+        h.get_by_label("Children...").click();
+        h.run();
         h.get_by_label("Select children").click();
         h.run();
         assert_eq!(h.state().1.selected_meshes().len(), 5);

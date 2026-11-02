@@ -415,3 +415,7 @@ card-vertices = Vertices
 card-parent = Parent deformer
 card-masks = Masks
 card-order = Draw order
+menu-group-vertices = Vertices
+menu-group-edges = Edges
+param-move-to-group = Move to group
+tree-children = Children...
