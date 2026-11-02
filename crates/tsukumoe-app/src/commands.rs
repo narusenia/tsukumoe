@@ -164,6 +164,8 @@ mod tests {
             Command::SetAxisOrder { .. } => "set_axis_order",
             Command::RemoveParameterKey { .. } => "remove_parameter_key",
             Command::SetMeshKeyform { .. } => "set_mesh_keyform",
+            Command::SetMeshKeyformColors { .. } => "set_mesh_keyform_colors",
+            Command::SetMeshColors { .. } => "set_mesh_colors",
             Command::SetWarpKeyform { .. } => "set_warp_keyform",
             Command::SetRotationKeyform { .. } => "set_rotation_keyform",
             Command::SetRotationBase { .. } => "set_rotation_base",
@@ -392,6 +394,17 @@ mod tests {
             Command::SetMeshBlendMode {
                 name: String::new(),
                 blend_mode: tsukumoe_core::rig::BlendMode::Normal,
+            },
+            Command::SetMeshColors {
+                name: String::new(),
+                multiply_color: [1.0; 3],
+                screen_color: [0.0; 3],
+            },
+            Command::SetMeshKeyformColors {
+                name: String::new(),
+                key: vec![],
+                multiply_color: [1.0; 3],
+                screen_color: [0.0; 3],
             },
             Command::SetMeshOpacity {
                 name: String::new(),

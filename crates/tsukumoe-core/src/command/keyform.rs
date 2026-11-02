@@ -457,6 +457,21 @@ impl Model {
                     }
                 });
             }
+            Command::SetMeshKeyformColors {
+                name,
+                key,
+                multiply_color,
+                screen_color,
+            } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                let at = self.key_index(self.meshes.get(id).and_then(|m| m.grid()), key, name)?;
+                self.modify(changes, id, |m| {
+                    if let Some(g) = m.keyforms.as_mut() {
+                        g.keyforms[at].multiply_color = *multiply_color;
+                        g.keyforms[at].screen_color = *screen_color;
+                    }
+                });
+            }
             Command::SetWarpKeyform {
                 name,
                 key,
@@ -994,6 +1009,27 @@ mod tests {
         }
         assert!(m.undo());
         assert_eq!(kf_of(&m, "A"), grid);
+    }
+
+    #[test]
+    fn a_color_command_changes_only_the_colors_of_its_key_and_undoes() {
+        let mut m = bent();
+        let blank = bent();
+        let before = kf_of(&m, "A");
+        m.apply(Command::SetMeshKeyformColors {
+            name: "A".into(),
+            key: vec![2],
+            multiply_color: [0.5, 0.5, 0.5],
+            screen_color: [0.0, 0.25, 0.0],
+        })
+        .unwrap();
+        let after = kf_of(&m, "A");
+        assert_eq!(after.keyforms[2].multiply_color, [0.5; 3]);
+        assert_eq!(after.keyforms[2].screen_color, [0.0, 0.25, 0.0]);
+        assert_eq!(after.keyforms[2].positions, before.keyforms[2].positions);
+        assert_eq!(after.keyforms[0], before.keyforms[0]);
+        assert!(m.undo());
+        assert!(m == blank);
     }
 
     #[test]

@@ -128,6 +128,13 @@ pub enum Command {
     SetMeshOpacity { name: String, opacity: f32 },
     /// Sets the draw order of a mesh (ascending order is back to front).
     SetMeshDrawOrder { name: String, draw_order: f32 },
+    /// Sets the multiply and screen colors (RGB, 0 to 1) of a mesh; a mesh with
+    /// keyforms is edited at a key by `SetMeshKeyformColors`.
+    SetMeshColors {
+        name: String,
+        multiply_color: [f32; 3],
+        screen_color: [f32; 3],
+    },
     /// Replaces the UVs of a mesh; the count must match its positions.
     SetMeshUvs { name: String, uvs: Vec<Point> },
     /// Sets the meshes that clip a mesh (by name) and whether the clip is inverted; an empty list removes the clipping.
@@ -238,6 +245,14 @@ pub enum Command {
         positions: Vec<Point>,
         opacity: f32,
         draw_order: f32,
+    },
+    /// Replaces the multiply and screen colors of one keyform of a mesh; the
+    /// shape, opacity and draw order of the keyform stay.
+    SetMeshKeyformColors {
+        name: String,
+        key: Vec<usize>,
+        multiply_color: [f32; 3],
+        screen_color: [f32; 3],
     },
     /// Replaces one keyform of a warp deformer: the control points and opacity
     /// at the key `key` (one key index per axis of its binding).
@@ -456,6 +471,17 @@ impl Model {
                 let id = self.resolve::<ArtMesh>(name)?;
                 self.modify(changes, id, |m| m.draw_order = *draw_order);
             }
+            Command::SetMeshColors {
+                name,
+                multiply_color,
+                screen_color,
+            } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                self.modify(changes, id, |m| {
+                    m.multiply_color = *multiply_color;
+                    m.screen_color = *screen_color;
+                });
+            }
             Command::SetMeshUvs { name, uvs } => {
                 let id = self.resolve::<ArtMesh>(name)?;
                 self.modify(changes, id, |m| m.uvs = uvs.clone());
@@ -670,6 +696,7 @@ impl Model {
             | Command::SetAxisOrder { .. }
             | Command::RemoveParameterKey { .. }
             | Command::SetMeshKeyform { .. }
+            | Command::SetMeshKeyformColors { .. }
             | Command::SetWarpKeyform { .. }
             | Command::SetRotationKeyform { .. } => self.run_keyform(command, changes)?,
         }
@@ -902,6 +929,11 @@ mod tests {
                 name: "Skin".into(),
                 draw_order: 700.0,
             },
+            Command::SetMeshColors {
+                name: "Skin".into(),
+                multiply_color: [0.5, 0.75, 1.0],
+                screen_color: [0.25, 0.0, 0.0],
+            },
             Command::SetMeshUvs {
                 name: "Skin".into(),
                 uvs: vec![[0.0, 0.0], [0.5, 0.0], [0.0, 0.5]],
@@ -1025,6 +1057,12 @@ mod tests {
                 positions: vec![[0.0, 0.0], [3.0, 0.0], [0.0, 3.0], [3.0, 3.0]],
                 opacity: 0.5,
                 draw_order: 600.0,
+            },
+            Command::SetMeshKeyformColors {
+                name: "Scalp".into(),
+                key: vec![2],
+                multiply_color: [0.5, 0.5, 0.5],
+                screen_color: [0.0, 0.25, 0.0],
             },
             Command::SetRotationKeyform {
                 name: "Turn".into(),

@@ -12,6 +12,7 @@ pub mod deformer_ops;
 pub mod deformer_tool;
 pub mod dispatcher;
 pub mod drag;
+pub mod draw_style;
 pub mod editor;
 pub mod keyed;
 pub mod menu;
