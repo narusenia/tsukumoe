@@ -77,6 +77,7 @@ pub const MENU: &[Def] = &[
             },
             item("view.pie-settings", "pie-title"),
             item("view.drag-settings", "drag-title"),
+            item("view.confirm-settings", "confirm-settings-title"),
             item("view.keymap-settings", "keymap-title"),
         ],
     },
