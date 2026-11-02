@@ -254,6 +254,21 @@ impl Model {
         }
     }
 
+    /// Position in the dense grid of the key `key` (one index per axis).
+    fn key_index<T>(
+        &self,
+        grid: Option<&KeyformGrid<T>>,
+        key: &[usize],
+        name: &str,
+    ) -> Result<usize, CommandError> {
+        let grid = grid.ok_or_else(|| refused(name, "not-bound"))?;
+        let binding = self
+            .bindings
+            .get(grid.binding)
+            .ok_or_else(|| refused(name, "not-bound"))?;
+        binding.index(key).ok_or_else(|| refused(name, "bad-key"))
+    }
+
     pub(super) fn run_keyform(
         &mut self,
         command: &Command,
@@ -375,6 +390,58 @@ impl Model {
                     self.rebuild_elem(changes, s, Some((nid, &next)), &|_| 0.0);
                 }
                 self.drop_unused(changes, &[bid]);
+            }
+            Command::SetMeshKeyform {
+                name,
+                key,
+                positions,
+                opacity,
+                draw_order,
+            } => {
+                let id = self.resolve::<ArtMesh>(name)?;
+                let at = self.key_index(self.meshes.get(id).and_then(|m| m.grid()), key, name)?;
+                self.modify(changes, id, |m| {
+                    if let Some(g) = m.keyforms.as_mut() {
+                        let kf = &mut g.keyforms[at];
+                        kf.positions = positions.clone();
+                        kf.opacity = *opacity;
+                        kf.draw_order = *draw_order;
+                    }
+                });
+            }
+            Command::SetWarpKeyform {
+                name,
+                key,
+                points,
+                opacity,
+            } => {
+                let id = self.resolve::<WarpDeformer>(name)?;
+                let at = self.key_index(self.warps.get(id).and_then(|w| w.grid()), key, name)?;
+                self.modify(changes, id, |w| {
+                    if let Some(g) = w.keyforms.as_mut() {
+                        g.keyforms[at] = WarpKeyform {
+                            points: points.clone(),
+                            opacity: *opacity,
+                        };
+                    }
+                });
+            }
+            Command::SetRotationKeyform {
+                name,
+                key,
+                base,
+                opacity,
+            } => {
+                let id = self.resolve::<RotationDeformer>(name)?;
+                let at =
+                    self.key_index(self.rotations.get(id).and_then(|r| r.grid()), key, name)?;
+                self.modify(changes, id, |r| {
+                    if let Some(g) = r.keyforms.as_mut() {
+                        let kf = &mut g.keyforms[at];
+                        base.apply_to(kf);
+                        kf.opacity = *opacity;
+                    }
+                });
             }
             _ => unreachable!("not a keyform command"),
         }
@@ -801,5 +868,165 @@ mod tests {
                 "element":{"kind":"deformer","name":"W"}})
         );
         assert_eq!(serde_json::from_value::<Command>(json).unwrap(), c);
+    }
+
+    #[test]
+    fn a_keyform_command_changes_only_its_key_and_undoes() {
+        let mut m = bent();
+        let blank = bent();
+        let id = m.meshes().find("A").unwrap();
+        let before = kf_of(&m, "A");
+        let moved = vec![[5.0, 5.0], [6.0, 5.0], [5.0, 6.0]];
+        m.apply(Command::SetMeshKeyform {
+            name: "A".into(),
+            key: vec![2],
+            positions: moved.clone(),
+            opacity: 0.25,
+            draw_order: 650.0,
+        })
+        .unwrap();
+        let after = kf_of(&m, "A");
+        assert_eq!(after.keyforms[2].positions, moved);
+        assert_eq!(after.keyforms[2].opacity, 0.25);
+        assert_eq!(after.keyforms[2].draw_order, 650.0);
+        assert_eq!(after.keyforms[0], before.keyforms[0]);
+        assert_eq!(after.keyforms[1], before.keyforms[1]);
+        assert_eq!(
+            after.keyforms[2].multiply_color,
+            before.keyforms[2].multiply_color
+        );
+        // At the key the picture shows it; B is untouched.
+        same(&drawn(&m, 1.0)[..6], &[5.0, 5.0, 6.0, 5.0, 5.0, 6.0]);
+        assert_eq!(kf_of(&m, "B"), kf_of(&blank, "B"));
+        let _ = id;
+        assert!(m.undo());
+        assert!(m == blank);
+    }
+
+    #[test]
+    fn keyform_commands_refuse_a_missing_key_an_unbound_element_and_a_wrong_size() {
+        let mut m = bent();
+        let set = |m: &mut Model, key: Vec<usize>| {
+            m.apply(Command::SetMeshKeyform {
+                name: "A".into(),
+                key,
+                positions: vec![[0.0, 0.0]; 3],
+                opacity: 1.0,
+                draw_order: 500.0,
+            })
+        };
+        assert!(matches!(
+            set(&mut m, vec![3]),
+            Err(CommandError::Refused {
+                reason: "bad-key",
+                ..
+            })
+        ));
+        assert!(matches!(
+            set(&mut m, vec![0, 0]),
+            Err(CommandError::Refused {
+                reason: "bad-key",
+                ..
+            })
+        ));
+        // Wrong vertex count: the model check refuses it.
+        assert!(
+            m.apply(Command::SetMeshKeyform {
+                name: "A".into(),
+                key: vec![0],
+                positions: vec![[0.0, 0.0]; 2],
+                opacity: 1.0,
+                draw_order: 500.0,
+            })
+            .is_err()
+        );
+        let mut plain = base();
+        assert!(matches!(
+            plain.apply(Command::SetMeshKeyform {
+                name: "A".into(),
+                key: vec![0],
+                positions: vec![[0.0, 0.0]; 3],
+                opacity: 1.0,
+                draw_order: 500.0,
+            }),
+            Err(CommandError::Refused {
+                reason: "not-bound",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn warp_and_rotation_keyforms_are_set_by_key_and_the_space_follows_the_values() {
+        use crate::deformer_space::Space;
+        let mut m = base();
+        m.apply(Command::AddWarpDeformer {
+            name: "W".into(),
+            part: "Part".into(),
+            parent: None,
+            rows: 1,
+            columns: 1,
+            base_points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        })
+        .unwrap();
+        bind(&mut m, vec![deformer_ref("W")]).unwrap();
+        // At P = 1 (key 2) the grid is twice as wide.
+        m.apply(Command::SetWarpKeyform {
+            name: "W".into(),
+            key: vec![2],
+            points: vec![[0.0, 0.0], [2.0, 0.0], [0.0, 1.0], [2.0, 1.0]],
+            opacity: 1.0,
+        })
+        .unwrap();
+        let w = crate::rig::DeformerRef::Warp(m.warps().find("W").unwrap());
+        let p = m.parameters().find("P").unwrap();
+        for (value, x) in [(0.0, 1.0), (1.0, 2.0), (0.5, 1.5)] {
+            let space = Space::of_at(&m, Some(w), &|id| if id == p { value } else { 0.0 }).unwrap();
+            let at = space.point_to_world([1.0, 0.0]);
+            assert!((at[0] - x).abs() < 1e-9, "{value}: {at:?}");
+        }
+        // The default-valued space is the key at the default.
+        let at_default = Space::of(&m, Some(w)).unwrap().point_to_world([1.0, 0.0]);
+        assert!((at_default[0] - 1.0).abs() < 1e-9);
+        m.apply(Command::AddRotationDeformer {
+            name: "R".into(),
+            part: "Part".into(),
+            parent: None,
+            base: crate::command::RotationBase {
+                origin: [0.0, 0.0],
+                angle_degrees: 0.0,
+                scale: 1.0,
+                reflect_x: false,
+                reflect_y: false,
+            },
+        })
+        .unwrap();
+        bind(&mut m, vec![deformer_ref("R")]).unwrap();
+        m.apply(Command::SetRotationKeyform {
+            name: "R".into(),
+            key: vec![0],
+            base: crate::command::RotationBase {
+                origin: [1.0, 0.0],
+                angle_degrees: 90.0,
+                scale: 1.0,
+                reflect_x: false,
+                reflect_y: false,
+            },
+            opacity: 0.5,
+        })
+        .unwrap();
+        let r = m.rotations().get(m.rotations().find("R").unwrap()).unwrap();
+        let kf = &r.keyforms.as_ref().unwrap().keyforms[0];
+        assert_eq!(
+            (kf.angle_degrees, kf.origin, kf.opacity),
+            (90.0, [1.0, 0.0], 0.5)
+        );
+        let rid = crate::rig::DeformerRef::Rotation(m.rotations().find("R").unwrap());
+        let space = Space::of_at(&m, Some(rid), &|_| -1.0).unwrap();
+        let at = space.point_to_world([1.0, 0.0]);
+        assert!(
+            (at[0] - 1.0).abs() < 1e-6 && (at[1] - 1.0).abs() < 1e-6,
+            "{at:?}"
+        );
     }
 }

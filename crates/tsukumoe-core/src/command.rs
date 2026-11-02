@@ -216,6 +216,33 @@ pub enum Command {
         value: f32,
         element: ElementRef,
     },
+    /// Replaces one keyform of a mesh: the vertices, opacity and draw order at
+    /// the key `key` (one key index per axis of its binding, in axis order).
+    /// The colors of the keyform stay. Fails if the mesh has no keyforms or
+    /// the key does not exist.
+    SetMeshKeyform {
+        name: String,
+        key: Vec<usize>,
+        positions: Vec<Point>,
+        opacity: f32,
+        draw_order: f32,
+    },
+    /// Replaces one keyform of a warp deformer: the control points and opacity
+    /// at the key `key` (one key index per axis of its binding).
+    SetWarpKeyform {
+        name: String,
+        key: Vec<usize>,
+        points: Vec<Point>,
+        opacity: f32,
+    },
+    /// Replaces one keyform of a rotation deformer: the shape and opacity at
+    /// the key `key` (one key index per axis of its binding).
+    SetRotationKeyform {
+        name: String,
+        key: Vec<usize>,
+        base: RotationBase,
+        opacity: f32,
+    },
     /// Replaces the base shape of a rotation deformer. Fails if it has keyforms.
     SetRotationBase { name: String, base: RotationBase },
     /// Renames a part. Everything that refers to it keeps pointing at it.
@@ -633,7 +660,10 @@ impl Model {
             | Command::BindParameter { .. }
             | Command::UnbindParameter { .. }
             | Command::AddParameterKey { .. }
-            | Command::RemoveParameterKey { .. } => self.run_keyform(command, changes)?,
+            | Command::RemoveParameterKey { .. }
+            | Command::SetMeshKeyform { .. }
+            | Command::SetWarpKeyform { .. }
+            | Command::SetRotationKeyform { .. } => self.run_keyform(command, changes)?,
         }
         Ok(())
     }
@@ -974,6 +1004,25 @@ mod tests {
                 element: ElementRef::Mesh {
                     name: "Scalp".into(),
                 },
+            },
+            Command::SetMeshKeyform {
+                name: "Scalp".into(),
+                key: vec![2],
+                positions: vec![[0.0, 0.0], [3.0, 0.0], [0.0, 3.0], [3.0, 3.0]],
+                opacity: 0.5,
+                draw_order: 600.0,
+            },
+            Command::SetRotationKeyform {
+                name: "Turn".into(),
+                key: vec![0],
+                base: RotationBase {
+                    origin: [0.1, 0.2],
+                    angle_degrees: 15.0,
+                    scale: 1.0,
+                    reflect_x: false,
+                    reflect_y: false,
+                },
+                opacity: 0.8,
             },
             Command::SetParameterRepeat {
                 name: "ParamAngleX".into(),
