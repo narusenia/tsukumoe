@@ -13,7 +13,7 @@ use egui::{
     Event, MouseWheelSource, MouseWheelUnit, PointerButton, Rect, Sense, TextureId, Ui, pos2,
 };
 use tsukumoe_gpu::{DrawOptions, Renderer, Texture};
-use tsukumoe_ui::{Keymap, Theme, hint, tr};
+use tsukumoe_ui::{Arg, Keymap, Theme, hint, tr, tr_args};
 
 use crate::actions::Tool;
 use crate::deformer_tool::{self, DeformerTool};
@@ -652,7 +652,7 @@ impl Viewport {
                 overlay::help(
                     ui.ctx(),
                     rect,
-                    &tr(ui.ctx(), "deformer-hint"),
+                    &with_mod(ui.ctx(), "deformer-hint"),
                     crate::keyed::deformer_place(model, name, &|id| param_at(id)).as_ref(),
                 );
                 if tool.proportional.on && matches!(shape, deformer_tool::Shape::Warp { .. }) {
@@ -919,7 +919,7 @@ impl Viewport {
                 } else {
                     "mesh-edit-hint"
                 };
-                overlay::help(ui.ctx(), rect, &tr(ui.ctx(), hint), place.as_ref());
+                overlay::help(ui.ctx(), rect, &with_mod(ui.ctx(), hint), place.as_ref());
             }
             None => overlay::help(ui.ctx(), rect, &tr(ui.ctx(), "mesh-edit-pick"), None),
         }
@@ -1067,6 +1067,13 @@ fn paint_background(painter: &egui::Painter, rect: Rect, background: crate::opti
             painter.extend(tiles);
         }
     }
+}
+
+/// A hint whose `{ $mod }` is the platform's command key as the user sees it
+/// (⌘ or Ctrl).
+fn with_mod(ctx: &egui::Context, key: &str) -> String {
+    let name = ctx.format_modifiers(egui::Modifiers::COMMAND);
+    tr_args(ctx, key, &[("mod", Arg::from(name.as_str()))])
 }
 
 #[cfg(test)]
