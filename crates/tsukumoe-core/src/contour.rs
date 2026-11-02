@@ -16,6 +16,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 
+mod stroke;
+
 use crate::elements::Point;
 use crate::mesh_edit::{self, Geometry, in_circle};
 
@@ -46,6 +48,20 @@ pub struct ContourParams {
     /// instead of at pixel edge midpoints: follows anti-aliased edges to a
     /// fraction of a pixel.
     pub precise: bool,
+    /// What the shape is: a filled area, or strokes (see [`ContourMode`]).
+    pub mode: ContourMode,
+    /// Line-art mode: the width of the strokes in pixels; 0 measures it from the image.
+    pub stroke_width: f32,
+}
+
+/// What the opaque pixels of the texture are taken to be.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContourMode {
+    /// A filled area: its outline, with a lattice inside.
+    #[default]
+    Outline,
+    /// Lines, such as hair strands or a line drawing: a strip along each.
+    Stroke,
 }
 
 impl Default for ContourParams {
@@ -57,6 +73,8 @@ impl Default for ContourParams {
             offset: 2.0,
             spacing: 64.0,
             precise: false,
+            mode: ContourMode::Outline,
+            stroke_width: 0.0,
         }
     }
 }
@@ -377,7 +395,11 @@ fn check(alpha: &Alpha, params: &ContourParams) -> Result<(), ContourError> {
     {
         return Err(ContourError::BadImage);
     }
-    if !(ok(params.min_island) && ok(params.simplify) && ok(params.offset) && ok(params.spacing))
+    if !(ok(params.min_island)
+        && ok(params.simplify)
+        && ok(params.offset)
+        && ok(params.spacing)
+        && ok(params.stroke_width))
         || (params.spacing != 0.0 && params.spacing < 4.0)
     {
         return Err(ContourError::BadParams);
@@ -390,6 +412,9 @@ fn check(alpha: &Alpha, params: &ContourParams) -> Result<(), ContourError> {
 /// Fails with `Empty` when no island is left.
 pub fn islands(alpha: &Alpha, params: &ContourParams) -> Result<Vec<Island>, ContourError> {
     check(alpha, params)?;
+    if params.mode == ContourMode::Stroke {
+        return stroke::islands(alpha, params);
+    }
     let min_area = f64::from(params.min_island) * f64::from(alpha.width) * f64::from(alpha.height);
     let mut outer: Vec<Vec<P>> = trace(alpha, params.threshold, params.precise)
         .into_iter()
@@ -1099,5 +1124,113 @@ mod tests {
             islands(&alpha(512, 512, &data), &p),
             Err(ContourError::TooManyPoints)
         );
+    }
+
+    /// A mesh covers `want` pixels of the stroke image within `slack`, and every
+    /// triangle's centre is on the stroke (the mesh does not wander off it).
+    fn stroke_mesh_check(data: &[u8], w: u32, h: u32, params: &ContourParams, slack: f64) {
+        let a = alpha(w, h, data);
+        let original = quad(w as f32, h as f32);
+        let out = contour_mesh(&original, &a, params).unwrap();
+        let mut total = 0.0;
+        let mut off = 0usize;
+        let mut count = 0usize;
+        for t in out.indices.as_chunks::<3>().0 {
+            let p = |i: u32| {
+                [
+                    f64::from(out.positions[i as usize][0]),
+                    f64::from(out.positions[i as usize][1]),
+                ]
+            };
+            total += cross(p(t[0]), p(t[1]), p(t[2])).abs() / 2.0;
+            let c = [
+                (p(t[0])[0] + p(t[1])[0] + p(t[2])[0]) / 3.0,
+                (p(t[0])[1] + p(t[1])[1] + p(t[2])[1]) / 3.0,
+            ];
+            let (x, y) = (c[0] as usize, c[1] as usize);
+            count += 1;
+            // Within one pixel of the stroke counts as on it.
+            let near = (y.saturating_sub(1)..=(y + 1).min(h as usize - 1)).any(|yy| {
+                (x.saturating_sub(1)..=(x + 1).min(w as usize - 1))
+                    .any(|xx| data[yy * w as usize + xx] >= params.threshold)
+            });
+            off += usize::from(!near);
+        }
+        let want = data.iter().filter(|&&v| v >= params.threshold).count() as f64;
+        assert!(count > 0);
+        assert!(
+            (total - want).abs() / want < slack,
+            "area {total} vs {want}"
+        );
+        assert_eq!(off, 0, "{off} of {count} triangles are off the stroke");
+    }
+
+    fn stroke_params() -> ContourParams {
+        ContourParams {
+            mode: ContourMode::Stroke,
+            offset: 0.0,
+            spacing: 16.0,
+            ..ContourParams::default()
+        }
+    }
+
+    #[test]
+    fn a_straight_line_gets_a_strip_along_it() {
+        // 4 px thick, 100 px long.
+        let data = image(128, 48, |x, y| {
+            (14.0..114.0).contains(&x) && (22.0..26.0).contains(&y)
+        });
+        stroke_mesh_check(&data, 128, 48, &stroke_params(), 0.25);
+        let islands = islands(&alpha(128, 48, &data), &stroke_params()).unwrap();
+        assert_eq!(islands.len(), 1, "one stroke, one piece");
+        assert!(!islands[0].inner.is_empty(), "points on the centre line");
+    }
+
+    #[test]
+    fn a_curved_stroke_follows_the_curve() {
+        // An arc of a circle, 3 px thick.
+        let data = image(128, 128, |x, y| {
+            let d = (x - 64.0).hypot(y - 64.0);
+            (d - 40.0).abs() < 1.5 && y < 70.0
+        });
+        stroke_mesh_check(&data, 128, 128, &stroke_params(), 0.3);
+    }
+
+    #[test]
+    fn a_branch_makes_a_piece_per_line_and_a_loop_still_works() {
+        // A T: two lines meeting.
+        let t = image(128, 128, |x, y| {
+            ((10.0..118.0).contains(&x) && (30.0..33.0).contains(&y))
+                || ((62.0..65.0).contains(&x) && (30.0..110.0).contains(&y))
+        });
+        let pieces = islands(&alpha(128, 128, &t), &stroke_params()).unwrap();
+        assert!(pieces.len() >= 2, "{} pieces", pieces.len());
+        // A ring of line.
+        let ring = image(128, 128, |x, y| {
+            ((x - 64.0).hypot(y - 64.0) - 30.0).abs() < 1.5
+        });
+        stroke_mesh_check(&ring, 128, 128, &stroke_params(), 0.3);
+        stroke_mesh_check(&t, 128, 128, &stroke_params(), 0.3);
+    }
+
+    #[test]
+    fn a_blank_image_in_stroke_mode_is_empty_and_the_width_can_be_set() {
+        let blank = vec![0u8; 64 * 64];
+        assert_eq!(
+            islands(&alpha(64, 64, &blank), &stroke_params()),
+            Err(ContourError::Empty)
+        );
+        let data = image(128, 48, |x, y| {
+            (14.0..114.0).contains(&x) && (23.0..25.0).contains(&y)
+        });
+        let wide = ContourParams {
+            stroke_width: 10.0,
+            ..stroke_params()
+        };
+        let out = islands(&alpha(128, 48, &data), &wide).unwrap();
+        let ys: Vec<f32> = out[0].outline.iter().map(|p| p[1]).collect();
+        let span = ys.iter().cloned().fold(f32::MIN, f32::max)
+            - ys.iter().cloned().fold(f32::MAX, f32::min);
+        assert!((span - 10.0).abs() < 1.0, "{span}");
     }
 }

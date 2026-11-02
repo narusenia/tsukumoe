@@ -7,6 +7,7 @@
 //! pointer handling is in the viewport.
 
 use egui::{Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2};
+use tsukumoe_core::contour::ContourMode;
 use tsukumoe_core::elements::Point;
 use tsukumoe_ui::{Icon, Theme, Variant};
 
@@ -201,6 +202,25 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static s
         ui.separator();
         ui.label(t("mesh-edit-contour"));
         let c = &mut tool.contour;
+        // What the shape is: an area (outline and lattice) or lines (a strip along each).
+        ui.horizontal(|ui| {
+            for (mode, key) in [
+                (ContourMode::Outline, "mesh-edit-contour-mode-outline"),
+                (ContourMode::Stroke, "mesh-edit-contour-mode-stroke"),
+            ] {
+                let variant = if c.mode == mode {
+                    tsukumoe_ui::Variant::Primary
+                } else {
+                    tsukumoe_ui::Variant::Ghost
+                };
+                if tsukumoe_ui::button(ui, &t(key), variant)
+                    .on_hover_text(t(&format!("{key}-hint")))
+                    .clicked()
+                {
+                    c.mode = mode;
+                }
+            }
+        });
         egui::Grid::new("tsukumoe-mesh-contour")
             .num_columns(2)
             .show(ui, |ui| {
@@ -220,9 +240,18 @@ pub fn grid_options(ui: &mut egui::Ui, tool: &mut MeshTool) -> Option<&'static s
                     ui.end_row();
                 }
             });
-        // Under the rows, at their left edge: it belongs to the whole outline.
-        tsukumoe_ui::checkbox(ui, &mut c.precise, &t("mesh-edit-contour-precise"))
-            .on_hover_text(t("mesh-edit-contour-precise-hint"));
+        if c.mode == ContourMode::Stroke {
+            ui.horizontal(|ui| {
+                let key = "mesh-edit-contour-stroke-width";
+                ui.label(t(key));
+                ui.add(float(&mut c.stroke_width, 200.0))
+                    .accessible_name(t(key));
+            });
+        } else {
+            // Under the rows, at their left edge: it belongs to the whole outline.
+            tsukumoe_ui::checkbox(ui, &mut c.precise, &t("mesh-edit-contour-precise"))
+                .on_hover_text(t("mesh-edit-contour-precise-hint"));
+        }
         // The spacing is 0 (none) or at least 4.
         if c.spacing > 0.0 && c.spacing < 4.0 {
             c.spacing = 4.0;
