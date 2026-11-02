@@ -164,15 +164,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) -> V
         .unwrap_or_default();
 
     let linked = tree_model::linked_keys(model, &view.selected(), panel);
-    let lists = Lists {
-        parts: model.parts().iter().map(|(_, n, _)| n.to_owned()).collect(),
-        deformers: model
-            .warps()
-            .iter()
-            .map(|(_, n, _)| n.to_owned())
-            .chain(model.rotations().iter().map(|(_, n, _)| n.to_owned()))
-            .collect(),
-    };
+    let lists = Lists::of(model);
     // Empty space below the rows clears the selection.
     let area = ui.available_rect_before_wrap();
     let background = ui.interact(area, ui.next_auto_id(), Sense::click());
@@ -690,9 +682,23 @@ pub fn activate(model: &Model, view: &mut ViewState, panel: Panel, row: &Row) {
 }
 
 /// The names the row menus offer as parents and parts.
-struct Lists {
+pub struct Lists {
     parts: Vec<String>,
     deformers: Vec<String>,
+}
+
+impl Lists {
+    pub fn of(model: &Model) -> Self {
+        Self {
+            parts: model.parts().iter().map(|(_, n, _)| n.to_owned()).collect(),
+            deformers: model
+                .warps()
+                .iter()
+                .map(|(_, n, _)| n.to_owned())
+                .chain(model.rotations().iter().map(|(_, n, _)| n.to_owned()))
+                .collect(),
+        }
+    }
 }
 
 /// What a row's menu (right click, or the "..." button) offers. It acts on
@@ -710,7 +716,7 @@ fn mirror_element(row: &Row) -> Option<ElementRef> {
     }
 }
 
-fn row_menu(
+pub fn row_menu(
     ui: &mut Ui,
     model: &Model,
     view: &mut ViewState,
@@ -727,6 +733,26 @@ fn row_menu(
         vec![me.clone()]
     };
     let target = target_of(row);
+    if let Some(visible) = row.visible
+        && let Some(command) = toggle_command(row)
+        && ui
+            .button(tr(&ctx, if visible { "tree-hide" } else { "tree-show" }))
+            .clicked()
+    {
+        outs.push(Out::Command(command));
+        ui.close();
+    }
+    if row.kind != Kind::Glue {
+        let is_solo = view.solo.as_ref() == Some(&me);
+        if ui
+            .selectable_label(is_solo, tr(&ctx, "tree-solo"))
+            .clicked()
+        {
+            view.solo = (!is_solo).then(|| me.clone());
+            view.touch();
+            ui.close();
+        }
+    }
     if ui.button(tr(&ctx, "tree-rename")).clicked() {
         view.tree_mut(panel).renaming = Some(Renaming::new(row.kind, &row.name));
         ui.close();

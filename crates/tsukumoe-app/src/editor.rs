@@ -1924,12 +1924,16 @@ impl PanelHost for Panels<'_> {
                             &mut editor.deformer_tool,
                             &editor.keymap,
                         );
+                        let menu_outs = std::mem::take(&mut vp.menu_outs);
                         editor.viewport_hovered = response.hovered();
                         for op in ops {
                             editor.apply_mesh_op(&ctx, op);
                         }
                         for action in actions {
                             editor.run_action(&ctx, action);
+                        }
+                        for out in menu_outs {
+                            editor.apply_tree_out(&ctx, out);
                         }
                     }
                 }

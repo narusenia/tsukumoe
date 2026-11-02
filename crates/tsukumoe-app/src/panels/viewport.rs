@@ -20,7 +20,7 @@ use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
 use crate::panels::{
-    deformer_overlay, mesh_overlay, overlay, proportional_overlay, selection_overlay, toolbar,
+    deformer_overlay, mesh_overlay, overlay, proportional_overlay, selection_overlay, toolbar, tree,
 };
 use crate::project::Document;
 use crate::scene::{Preview, Scene, fit_view};
@@ -82,6 +82,8 @@ pub struct Viewport {
     active_until: Instant,
     scroll: Scroll,
     pub error: Option<String>,
+    /// What the select tool's right-click menu asked of the tree; the editor sends it.
+    pub menu_outs: Vec<tree::Out>,
 }
 
 impl Viewport {
@@ -112,6 +114,7 @@ impl Viewport {
             active_until: Instant::now(),
             scroll: Scroll::Zoom,
             error: None,
+            menu_outs: Vec::new(),
         })
     }
 
@@ -315,7 +318,9 @@ impl Viewport {
             Tool::Select => {
                 self.select_tool_frame(ui, &response, rect, view, drag, size);
                 self.select_lasso(ui, &response, rect, view, drag, size);
-                (Vec::new(), Vec::new())
+                let mut actions = Vec::new();
+                self.select_menu(&response, rect, doc, view, size, &mut actions);
+                (Vec::new(), actions)
             }
         };
         if let Some(action) = toolbar::show(ui.ctx(), rect, view.tool, view.proportional.on, keymap)
@@ -443,6 +448,66 @@ impl Viewport {
             .unwrap_or_default(),
             Tool::Select => Vec::new(),
         }
+    }
+
+    /// The select tool's right-click menu: the mesh under the pointer is
+    /// selected first (unless it already is), then the row menu of the tree
+    /// acts on it, with the deformer makers below.
+    fn select_menu(
+        &mut self,
+        response: &egui::Response,
+        rect: Rect,
+        doc: &Document,
+        view: &mut ViewState,
+        size: (u32, u32),
+        actions: &mut Vec<&'static str>,
+    ) {
+        if response.secondary_clicked()
+            && let Some(scene) = &self.scene
+            && let Some(at) = response.interact_pointer_pos()
+        {
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            if let Some(name) = mesh_tool::pick_drawn(
+                &scene.frame.draw_list(&scene.model),
+                mapper.to_model([at.x, at.y]),
+            ) {
+                let item = Selection::Mesh(name);
+                if !view.is_selected(&item) {
+                    view.select_only(item);
+                }
+            }
+        }
+        let model = doc.dispatcher.model();
+        let panel = crate::tree_model::Panel::Parts;
+        let Some(item) = view.selection.clone() else {
+            // Nothing to act on: no menu (an empty menu would still pop up).
+            response.context_menu(|ui| ui.close());
+            return;
+        };
+        let rows = crate::tree_model::rows(model, view.tree(panel), panel);
+        let Some(row) = rows.iter().find(|r| r.selection() == item) else {
+            response.context_menu(|ui| ui.close());
+            return;
+        };
+        let lists = tree::Lists::of(model);
+        let ctx = response.ctx.clone();
+        response.context_menu(|ui| {
+            tree::row_menu(ui, model, view, panel, row, &lists, &mut self.menu_outs);
+            ui.separator();
+            for (key, action) in [
+                ("deformer-make-warp", "deformer.create-warp"),
+                ("deformer-make-rotation", "deformer.create-rotation"),
+            ] {
+                if ui.button(tr(&ctx, key)).clicked() {
+                    actions.push(action);
+                    ui.close();
+                }
+            }
+        });
     }
 
     /// The select tool: a click picks the front mesh under the pointer, Shift
