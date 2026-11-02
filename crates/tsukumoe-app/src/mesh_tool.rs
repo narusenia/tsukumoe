@@ -135,7 +135,7 @@ impl From<EditError> for ToolError {
 
 /// The actions of the right-click menu, in order. Each one is run through
 /// `Editor::run_action`, so the menu has no logic of its own.
-pub const MENU_ACTIONS: [&str; 12] = [
+pub const MENU_ACTIONS: [&str; 14] = [
     "mesh.retriangulate",
     "mesh.fill-grid",
     "mesh.contour",
@@ -145,6 +145,8 @@ pub const MENU_ACTIONS: [&str; 12] = [
     "mesh.delete-edge",
     "mesh.weld",
     "mesh.weld-near",
+    "mesh.glue-source",
+    "mesh.glue",
     "mesh.delete-vertices",
     "deformer.create-warp",
     "deformer.create-rotation",
@@ -496,6 +498,7 @@ impl MeshTool {
         match action {
             "mesh.connect" => self.vertices.len() == 2,
             "mesh.weld" => self.vertices.len() >= 2,
+            "mesh.glue-source" | "mesh.glue" => !self.vertices.is_empty(),
             "mesh.flip-edge" => self.edge.is_some(),
             "mesh.delete-vertices" => !self.vertices.is_empty() || self.edge.is_some(),
             "mesh.delete-edge" => self.edge.is_some(),
@@ -1765,35 +1768,40 @@ mod tests {
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, false, true, false, true, true
+                true, true, true, false, false, true, false, false, true, false, false, false,
+                true, true
             ]
         );
         click(&mut t, &g, &m, [100.0, 100.0], false);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, false, true, true, true, true
+                true, true, true, false, false, true, false, false, true, true, true, true, true,
+                true
             ]
         );
         click(&mut t, &g, &m, [0.0, 0.0], true);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, true, false, true, false, true, true, true, true, true
+                true, true, true, true, false, true, false, true, true, true, true, true, true,
+                true
             ]
         );
         click(&mut t, &g, &m, [100.0, 0.0], true);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, false, true, false, true, true, true, true, true
+                true, true, true, false, false, true, false, true, true, true, true, true, true,
+                true
             ]
         );
         click(&mut t, &g, &m, [50.0, 50.0], false);
         assert_eq!(
             enabled(&t),
             [
-                true, true, true, false, true, true, true, false, true, true, true, true
+                true, true, true, false, true, true, true, false, true, false, false, true, true,
+                true
             ]
         );
     }

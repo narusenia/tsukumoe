@@ -302,7 +302,7 @@ mod tests {
 
     fn menu_harness(tool: MeshTool) -> Harness<'static, (MeshTool, Option<&'static str>)> {
         Harness::builder()
-            .with_size(vec2(420.0, 340.0))
+            .with_size(vec2(420.0, 440.0))
             .build_ui_state(
                 |ui, (tool, chosen): &mut (MeshTool, Option<&'static str>)| {
                     tsukumoe_ui::init(ui.ctx());
