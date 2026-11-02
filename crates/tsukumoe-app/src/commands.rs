@@ -164,6 +164,8 @@ mod tests {
             Command::SetAxisOrder { .. } => "set_axis_order",
             Command::RemoveParameterKey { .. } => "remove_parameter_key",
             Command::SetMeshKeyform { .. } => "set_mesh_keyform",
+            Command::SetMeshKeyformColors { .. } => "set_mesh_keyform_colors",
+            Command::SetMeshColors { .. } => "set_mesh_colors",
             Command::SetWarpKeyform { .. } => "set_warp_keyform",
             Command::SetRotationKeyform { .. } => "set_rotation_keyform",
             Command::SetRotationBase { .. } => "set_rotation_base",

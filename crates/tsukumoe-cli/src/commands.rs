@@ -316,6 +316,17 @@ pub fn examples() -> Vec<Command> {
             name: "Skin".into(),
             draw_order: 700.0,
         },
+        Command::SetMeshColors {
+            name: "Skin".into(),
+            multiply_color: [0.5, 0.75, 1.0],
+            screen_color: [0.25, 0.0, 0.0],
+        },
+        Command::SetMeshKeyformColors {
+            name: "Skin".into(),
+            key: vec![1],
+            multiply_color: [0.5, 0.5, 0.5],
+            screen_color: [0.0, 0.25, 0.0],
+        },
         Command::SetMeshUvs {
             name: "Skin".into(),
             uvs: triangle.clone(),
@@ -365,6 +376,8 @@ pub fn tag(command: &Command) -> &'static str {
         Command::SetAxisOrder { .. } => "set_axis_order",
         Command::RemoveParameterKey { .. } => "remove_parameter_key",
         Command::SetMeshKeyform { .. } => "set_mesh_keyform",
+        Command::SetMeshKeyformColors { .. } => "set_mesh_keyform_colors",
+        Command::SetMeshColors { .. } => "set_mesh_colors",
         Command::SetWarpKeyform { .. } => "set_warp_keyform",
         Command::SetRotationKeyform { .. } => "set_rotation_keyform",
         Command::SetRotationBase { .. } => "set_rotation_base",
