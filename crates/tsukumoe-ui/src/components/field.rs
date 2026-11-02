@@ -12,7 +12,7 @@ use crate::theme::Theme;
 /// announces.
 pub fn slider(ui: &mut Ui, value: &mut f32, range: RangeInclusive<f32>, name: &str) -> Response {
     ui.scope(|ui| {
-        ui.spacing_mut().slider_width = ui.available_width().max(40.0);
+        ui.spacing_mut().slider_width = ui.available_width().max(24.0);
         // The thumb radius is a fraction of this height, so a short row gives a slim thumb.
         ui.spacing_mut().interact_size.y = 14.0;
         ui.add(
