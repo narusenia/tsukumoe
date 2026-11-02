@@ -169,7 +169,7 @@ fn menu_snapshot(mode: Mode, name: &str) {
     tool.set_mesh(Some("Skin"));
     tool.click(&positions, &indices, &mapper, [100.0, 100.0], false);
     let mut harness = Harness::builder()
-        .with_size(egui::vec2(330.0, 245.0))
+        .with_size(egui::vec2(330.0, 330.0))
         .wgpu()
         .build_ui_state(
             move |ui, tool: &mut MeshTool| {
@@ -183,6 +183,8 @@ fn menu_snapshot(mode: Mode, name: &str) {
                     "mesh.contour" => Some("C".to_owned()),
                     "mesh.connect" => Some("E".to_owned()),
                     "mesh.flip-edge" => Some("F".to_owned()),
+                    "mesh.edge-pen" => Some("P".to_owned()),
+                    "mesh.delete-edge" => Some("X".to_owned()),
                     "mesh.delete-vertices" => Some("Delete".to_owned()),
                     "deformer.create-warp" => Some("W".to_owned()),
                     "deformer.create-rotation" => Some("R".to_owned()),
