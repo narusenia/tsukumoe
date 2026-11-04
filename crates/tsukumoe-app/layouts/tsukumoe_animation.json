@@ -29,6 +29,7 @@
         "b": {
           "type": "tabs",
           "tabs": [
+            "timeline",
             "parameters",
             "history"
           ],

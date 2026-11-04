@@ -20,6 +20,7 @@ pub mod keyed;
 pub mod menu;
 pub mod mesh_tool;
 pub mod mirror;
+pub mod motion_import;
 #[cfg(target_os = "macos")]
 mod native;
 pub mod options;

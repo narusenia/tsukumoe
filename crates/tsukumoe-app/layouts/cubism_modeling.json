@@ -28,7 +28,8 @@
         "type": "tabs",
         "tabs": [
           "parameters",
-          "history"
+          "history",
+          "timeline"
         ],
         "active": 0
       }

@@ -17,7 +17,9 @@ use crate::menu;
 use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::options::Options;
 use crate::panels::palette::Palette;
-use crate::panels::{history, inspector, keys, parameters, splash, titlebar, tree, viewport};
+use crate::panels::{
+    history, inspector, keys, parameters, splash, timeline, titlebar, tree, viewport,
+};
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
 use crate::tree_model::{self, TreeView};
@@ -71,6 +73,8 @@ pub enum Dialog {
     Export(String),
     /// File > Export found problems in the model; nothing is written.
     ExportProblems(Vec<String>),
+    /// A motion file to import (the path-input form of the timeline's import).
+    ImportMotion(String),
 }
 
 /// What a confirmed deletion does.
@@ -592,6 +596,45 @@ impl Editor {
                 self.save_links();
             }
             parameters::Out::Error(key) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
+        }
+    }
+
+    /// What the timeline asked for, sent through the one door.
+    pub fn apply_timeline_out(&mut self, ctx: &Context, out: timeline::Out) {
+        match out {
+            timeline::Out::Command(command, label) => {
+                self.submit_labeled(ctx, command, Some(label));
+            }
+            timeline::Out::Error(key) => self.toasts.push(ctx, Tone::Error, tr(ctx, key)),
+            timeline::Out::Import if self.picker.is_native() => {
+                self.pending.push("timeline.import-motion".to_owned());
+            }
+            timeline::Out::Import => self.dialog = Some(Dialog::ImportMotion(String::new())),
+        }
+    }
+
+    /// Reads a motion file and adds it to the open model as a new motion.
+    pub fn import_motion(&mut self, ctx: &Context, path: &Path) {
+        let Some(doc) = self.doc.as_ref() else { return };
+        let read = std::fs::read_to_string(path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| crate::motion_import::parse(&text))
+            .map_err(|e| format!("{}: {e}", path.display()));
+        let file = match read {
+            Ok(file) => file,
+            Err(e) => return self.toasts.push(ctx, Tone::Error, e),
+        };
+        let import = crate::motion_import::commands(doc.dispatcher.model(), &file);
+        let (name, curves, skipped) = (import.name.clone(), import.curves, import.skipped);
+        if self.submit_labeled(ctx, import.command, Some(format!("motion_import: {name}"))) {
+            self.view.timeline.select_motion(Some(name.clone()));
+            let args = [
+                ("name", Arg::from(name.as_str())),
+                ("curves", Arg::from(curves)),
+                ("skipped", Arg::from(skipped)),
+            ];
+            self.toasts
+                .push(ctx, Tone::Success, tr_args(ctx, "timeline-imported", &args));
         }
     }
 
@@ -1186,6 +1229,11 @@ impl Editor {
                     self.report(ctx, r, Some(tr(ctx, "app-exported")));
                 }
             }
+            "timeline.import-motion" => {
+                if let Some(path) = self.pick(ctx, PickKind::Motion, "pick-motion-title", parent) {
+                    self.import_motion(ctx, &path);
+                }
+            }
             "file.save-as-folder" => {
                 if let Some(path) =
                     self.pick(ctx, PickKind::SaveFolder, "pick-save-folder-title", parent)
@@ -1585,6 +1633,7 @@ impl Editor {
             Dialog::ExportProblems(_) => {
                 (t("dialog-export-problems-title"), "dialog-export-problems")
             }
+            Dialog::ImportMotion(_) => (t("dialog-import-motion-title"), "dialog-import-motion"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
             Dialog::Confirm(_) | Dialog::Settings(_) | Dialog::PsdImport(_) => {
@@ -1593,7 +1642,10 @@ impl Editor {
         };
         tsukumoe_ui::dialog(ctx, id, &title, &mut open, |ui| {
             match &mut dialog {
-                Dialog::Open(text) | Dialog::SaveAs(text) | Dialog::Export(text) => {
+                Dialog::Open(text)
+                | Dialog::SaveAs(text)
+                | Dialog::Export(text)
+                | Dialog::ImportMotion(text) => {
                     let name = t("dialog-path");
                     text_input(ui, text, &name, &name).request_focus();
                 }
@@ -1670,6 +1722,9 @@ impl Editor {
                 Dialog::Export(text) if !text.trim().is_empty() => {
                     let r = self.export_runtime(Path::new(text.trim()));
                     self.report(ctx, r, Some(t("app-exported")));
+                }
+                Dialog::ImportMotion(text) if !text.trim().is_empty() => {
+                    self.import_motion(ctx, Path::new(text.trim()));
                 }
                 Dialog::SaveLayout(text) => {
                     if self.layouts.save_named(self.workspace, text) {
@@ -1941,6 +1996,7 @@ impl PanelHost for Panels<'_> {
             "keys" => Icon::Grid,
             "inspector" => Icon::Info,
             "history" => Icon::History,
+            "timeline" => Icon::Play,
             "palette" => Icon::Search,
             "ai_diff" => Icon::Sparkles,
             _ => return None,
@@ -1965,6 +2021,11 @@ impl PanelHost for Panels<'_> {
         };
         match id {
             "history" => history::show(ui, &mut doc.dispatcher),
+            "timeline" => {
+                for out in timeline::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    editor.apply_timeline_out(&ctx, out);
+                }
+            }
             "tree" | "deformers" => {
                 let panel = if id == "tree" {
                     tree_model::Panel::Parts
@@ -2151,8 +2212,7 @@ mod tests {
             .unwrap();
         let mut h = harness(editor);
         h.run();
-        // Animation has no tab until M5-08; the switch itself still works.
-        assert!(h.query_by_label("Animation").is_none());
+        assert!(h.query_by_label("Animation").is_some());
         h.state_mut().switch_workspace(Workspace::Animation);
         h.run();
         let e = h.state();
@@ -2166,10 +2226,9 @@ mod tests {
             e.layouts.current(Workspace::Modeling),
             e.layouts.current(Workspace::Animation)
         );
-        // a saved Animation choice opens as Modeling while it is hidden
         assert_eq!(
             Editor::new(Some(dir.clone())).workspace,
-            Workspace::Modeling
+            Workspace::Animation
         );
         std::fs::remove_dir_all(&dir).ok();
     }

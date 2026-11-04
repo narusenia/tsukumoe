@@ -41,7 +41,8 @@
         "b": {
           "type": "tabs",
           "tabs": [
-            "history"
+            "history",
+            "timeline"
           ],
           "active": 0
         }

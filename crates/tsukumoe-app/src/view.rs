@@ -133,6 +133,8 @@ pub struct ViewState {
     /// The two axes (by position in the binding) the key grid shows as rows and
     /// columns; clamped to the element's axes when drawn. Not saved.
     pub grid_axes: (usize, usize),
+    /// The timeline's motion, playhead and zoom. Not saved.
+    pub timeline: crate::panels::timeline::State,
     /// Proportional edit options; not saved with the project or the layout.
     pub proportional: crate::proportional::Proportional,
 }

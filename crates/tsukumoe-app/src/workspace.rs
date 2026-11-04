@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tsukumoe_ui::dock::Layout;
 
 /// The standard panels, by id. Every layout must stay within this set.
-pub const PANELS: [&str; 9] = [
+pub const PANELS: [&str; 10] = [
     "viewport",
     "tree",
     "deformers",
@@ -17,6 +17,7 @@ pub const PANELS: [&str; 9] = [
     "keys",
     "inspector",
     "history",
+    "timeline",
     "palette",
     "ai_diff",
 ];
@@ -37,8 +38,8 @@ pub enum Workspace {
 impl Workspace {
     pub const ALL: [Self; 2] = [Self::Modeling, Self::Animation];
 
-    /// The workspaces the editor offers. Animation stays hidden until M5-08 gives it its tools.
-    pub const SHOWN: [Self; 1] = [Self::Modeling];
+    /// The workspaces the editor offers.
+    pub const SHOWN: [Self; 2] = Self::ALL;
 
     pub fn key(self) -> &'static str {
         match self {
