@@ -9,7 +9,8 @@ use std::fmt::Write;
 
 use schemars::schema_for;
 use serde_json::{Value, json};
-use tsukumoe_core::command::{Command, ElementRef, RotationBase};
+use tsukumoe_core::command::{Command, ElementRef, MotionTarget, RotationBase};
+use tsukumoe_core::playback::Segment;
 use tsukumoe_core::rig::{BlendMode, GlueNode};
 
 /// One tool per `Command` variant, as `{name, description, inputSchema}`.
@@ -383,6 +384,52 @@ pub fn examples() -> Vec<Command> {
             name: "Skin".into(),
             visible: false,
         },
+        Command::AddMotion {
+            name: "Idle".into(),
+            duration: 2.0,
+            fps: 30.0,
+            looped: true,
+        },
+        Command::RemoveMotion {
+            name: "Idle".into(),
+        },
+        Command::RenameMotion {
+            name: "Idle".into(),
+            new_name: "Breathe".into(),
+        },
+        Command::SetMotionTiming {
+            name: "Idle".into(),
+            duration: 3.0,
+            fps: 30.0,
+            looped: false,
+            fade_in: 0.5,
+            fade_out: 0.5,
+        },
+        Command::AddMotionCurve {
+            motion: "Idle".into(),
+            target: MotionTarget::Parameter {
+                name: "ParamAngleX".into(),
+            },
+        },
+        Command::RemoveMotionCurve {
+            motion: "Idle".into(),
+            curve: 0,
+        },
+        Command::SetMotionCurveFade {
+            motion: "Idle".into(),
+            curve: 0,
+            fade_in: Some(0.25),
+            fade_out: None,
+        },
+        Command::SetMotionCurve {
+            motion: "Idle".into(),
+            curve: 0,
+            start: [0.0, 0.0],
+            segments: vec![
+                Segment::Linear([1.0, 10.0]),
+                Segment::Bezier([[1.2, 10.0], [1.8, 0.0], [2.0, 0.0]]),
+            ],
+        },
         Command::Batch {
             commands: vec![add_parameter, add_part],
         },
@@ -448,6 +495,14 @@ pub fn tag(command: &Command) -> &'static str {
         Command::SetMeshMasks { .. } => "set_mesh_masks",
         Command::SetMeshVisible { .. } => "set_mesh_visible",
         Command::Batch { .. } => "batch",
+        Command::AddMotion { .. } => "add_motion",
+        Command::RemoveMotion { .. } => "remove_motion",
+        Command::RenameMotion { .. } => "rename_motion",
+        Command::SetMotionTiming { .. } => "set_motion_timing",
+        Command::AddMotionCurve { .. } => "add_motion_curve",
+        Command::RemoveMotionCurve { .. } => "remove_motion_curve",
+        Command::SetMotionCurveFade { .. } => "set_motion_curve_fade",
+        Command::SetMotionCurve { .. } => "set_motion_curve",
     }
 }
 

@@ -14,6 +14,7 @@ use crate::arena::Id;
 use crate::elements::{Parameter, Part, Point};
 use crate::history::{Change, Edit, Editable, Record};
 use crate::model::Model;
+use crate::playback::Segment;
 use crate::rig::{
     ArtMesh, BlendMode, DeformerRef, Glue, GlueNode, RotationDeformer, RotationKeyform,
     WarpDeformer,
@@ -21,6 +22,7 @@ use crate::rig::{
 use crate::table::InsertError;
 
 mod keyform;
+mod motion;
 use crate::validate::ModelError;
 use keyform::refused;
 
@@ -67,6 +69,15 @@ impl RotationBase {
         base.reflect_x = self.reflect_x;
         base.reflect_y = self.reflect_y;
     }
+}
+
+/// What a motion curve drives, by name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MotionTarget {
+    Parameter { name: String },
+    PartOpacity { name: String },
 }
 
 /// An edit to a model. In JSON, `type` names the variant in snake case.
@@ -325,6 +336,54 @@ pub enum Command {
         name: String,
         #[serde(default)]
         parent: Option<String>,
+    },
+    /// Adds an empty motion (no curves). `duration` is in seconds.
+    AddMotion {
+        name: String,
+        duration: f32,
+        fps: f32,
+        #[serde(default)]
+        looped: bool,
+    },
+    /// Removes a motion by name.
+    RemoveMotion { name: String },
+    /// Renames a motion.
+    RenameMotion { name: String, new_name: String },
+    /// Sets the length, frame rate, loop flag and fades (seconds) of a motion.
+    SetMotionTiming {
+        name: String,
+        duration: f32,
+        fps: f32,
+        looped: bool,
+        fade_in: f32,
+        fade_out: f32,
+    },
+    /// Adds a curve for a parameter or a part's opacity: one key at time 0,
+    /// at the parameter's default (or opacity 1). Fails if the motion already
+    /// has a curve for the target.
+    AddMotionCurve {
+        motion: String,
+        target: MotionTarget,
+    },
+    /// Removes a curve of a motion by its index.
+    RemoveMotionCurve { motion: String, curve: usize },
+    /// Overrides (or, with `null`, clears the override of) the fades of one curve.
+    SetMotionCurveFade {
+        motion: String,
+        curve: usize,
+        #[serde(default)]
+        fade_in: Option<f32>,
+        #[serde(default)]
+        fade_out: Option<f32>,
+    },
+    /// Replaces the keys of a curve: the first key and the segments after it.
+    /// Times must not go back, and a Bezier's controls lie between the
+    /// previous key and its end.
+    SetMotionCurve {
+        motion: String,
+        curve: usize,
+        start: Point,
+        segments: Vec<Segment>,
     },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
@@ -770,6 +829,14 @@ impl Model {
                     self.run(command, changes)?;
                 }
             }
+            Command::AddMotion { .. }
+            | Command::RemoveMotion { .. }
+            | Command::RenameMotion { .. }
+            | Command::SetMotionTiming { .. }
+            | Command::AddMotionCurve { .. }
+            | Command::RemoveMotionCurve { .. }
+            | Command::SetMotionCurveFade { .. }
+            | Command::SetMotionCurve { .. } => self.run_motion(command, changes)?,
             Command::RenameParameter { .. }
             | Command::SetParameterRepeat { .. }
             | Command::SetParameterGroup { .. }
@@ -1212,6 +1279,58 @@ mod tests {
             Command::MoveParameterKeyforms {
                 from: "ParamAngleY".into(),
                 to: "ParamAngleZ".into(),
+            },
+            Command::AddMotion {
+                name: "Idle".into(),
+                duration: 2.0,
+                fps: 30.0,
+                looped: false,
+            },
+            Command::AddMotionCurve {
+                motion: "Idle".into(),
+                target: MotionTarget::Parameter {
+                    name: "ParamAngleZ".into(),
+                },
+            },
+            Command::SetMotionCurve {
+                motion: "Idle".into(),
+                curve: 0,
+                start: [0.0, 0.0],
+                segments: vec![
+                    Segment::Linear([1.0, 10.0]),
+                    Segment::Bezier([[1.2, 10.0], [1.8, 0.0], [2.0, 0.0]]),
+                ],
+            },
+            Command::SetMotionCurveFade {
+                motion: "Idle".into(),
+                curve: 0,
+                fade_in: Some(0.5),
+                fade_out: None,
+            },
+            Command::SetMotionTiming {
+                name: "Idle".into(),
+                duration: 3.0,
+                fps: 60.0,
+                looped: true,
+                fade_in: 0.25,
+                fade_out: 0.25,
+            },
+            Command::RenameMotion {
+                name: "Idle".into(),
+                new_name: "Breathe".into(),
+            },
+            Command::AddMotionCurve {
+                motion: "Breathe".into(),
+                target: MotionTarget::Parameter {
+                    name: "AngleX".into(),
+                },
+            },
+            Command::RemoveMotionCurve {
+                motion: "Breathe".into(),
+                curve: 1,
+            },
+            Command::RemoveMotion {
+                name: "Breathe".into(),
             },
         ]
     }

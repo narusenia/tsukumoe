@@ -823,6 +823,131 @@ Sets the parent part of a part (`null` for none); fails if it makes a cycle.
 {"type":"set_part_parent","name":"Face","parent":"Body"}
 ```
 
+### `add_motion`
+
+Adds an empty motion (no curves). `duration` is in seconds.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `duration` | number | yes |  |
+| `fps` | number | yes |  |
+| `looped` | boolean | no | `false` |
+| `name` | string | yes |  |
+| `type` | `"add_motion"` | yes |  |
+
+```json
+{"type":"add_motion","name":"Idle","duration":2.0,"fps":30.0,"looped":true}
+```
+
+### `remove_motion`
+
+Removes a motion by name.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_motion"` | yes |  |
+
+```json
+{"type":"remove_motion","name":"Idle"}
+```
+
+### `rename_motion`
+
+Renames a motion.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_motion"` | yes |  |
+
+```json
+{"type":"rename_motion","name":"Idle","new_name":"Breathe"}
+```
+
+### `set_motion_timing`
+
+Sets the length, frame rate, loop flag and fades (seconds) of a motion.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `duration` | number | yes |  |
+| `fade_in` | number | yes |  |
+| `fade_out` | number | yes |  |
+| `fps` | number | yes |  |
+| `looped` | boolean | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_motion_timing"` | yes |  |
+
+```json
+{"type":"set_motion_timing","name":"Idle","duration":3.0,"fps":30.0,"looped":false,"fade_in":0.5,"fade_out":0.5}
+```
+
+### `add_motion_curve`
+
+Adds a curve for a parameter or a part's opacity: one key at time 0,
+at the parameter's default (or opacity 1). Fails if the motion already
+has a curve for the target.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `motion` | string | yes |  |
+| `target` | Command | yes |  |
+| `type` | `"add_motion_curve"` | yes |  |
+
+```json
+{"type":"add_motion_curve","motion":"Idle","target":{"kind":"parameter","name":"ParamAngleX"}}
+```
+
+### `remove_motion_curve`
+
+Removes a curve of a motion by its index.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `curve` | integer | yes |  |
+| `motion` | string | yes |  |
+| `type` | `"remove_motion_curve"` | yes |  |
+
+```json
+{"type":"remove_motion_curve","motion":"Idle","curve":0}
+```
+
+### `set_motion_curve_fade`
+
+Overrides (or, with `null`, clears the override of) the fades of one curve.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `curve` | integer | yes |  |
+| `fade_in` | number or null | no | `null` |
+| `fade_out` | number or null | no | `null` |
+| `motion` | string | yes |  |
+| `type` | `"set_motion_curve_fade"` | yes |  |
+
+```json
+{"type":"set_motion_curve_fade","motion":"Idle","curve":0,"fade_in":0.25,"fade_out":null}
+```
+
+### `set_motion_curve`
+
+Replaces the keys of a curve: the first key and the segments after it.
+Times must not go back, and a Bezier's controls lie between the
+previous key and its end.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `curve` | integer | yes |  |
+| `motion` | string | yes |  |
+| `segments` | Command[] | yes |  |
+| `start` | number[2] | yes |  |
+| `type` | `"set_motion_curve"` | yes |  |
+
+```json
+{"type":"set_motion_curve","motion":"Idle","curve":0,"start":[0.0,0.0],"segments":[{"linear":[1.0,10.0]},{"bezier":[[1.2,10.0],[1.8,0.0],[2.0,0.0]]}]}
+```
+
 ### `batch`
 
 Applies the commands in order as one undo step; if one fails, none

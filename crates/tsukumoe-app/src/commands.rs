@@ -132,7 +132,7 @@ pub fn search<'a>(list: &'a [CommandInfo], query: &str) -> Vec<&'a CommandInfo> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tsukumoe_core::command::{ElementRef, RotationBase};
+    use tsukumoe_core::command::{ElementRef, MotionTarget, RotationBase};
     use tsukumoe_core::rig::GlueNode;
 
     /// Adding a variant to `Command` makes this match fail to compile; add it
@@ -194,6 +194,14 @@ mod tests {
             Command::SetMeshMasks { .. } => "set_mesh_masks",
             Command::SetMeshVisible { .. } => "set_mesh_visible",
             Command::Batch { .. } => "batch",
+            Command::AddMotion { .. } => "add_motion",
+            Command::RemoveMotion { .. } => "remove_motion",
+            Command::RenameMotion { .. } => "rename_motion",
+            Command::SetMotionTiming { .. } => "set_motion_timing",
+            Command::AddMotionCurve { .. } => "add_motion_curve",
+            Command::RemoveMotionCurve { .. } => "remove_motion_curve",
+            Command::SetMotionCurveFade { .. } => "set_motion_curve_fade",
+            Command::SetMotionCurve { .. } => "set_motion_curve",
         }
     }
 
@@ -479,6 +487,49 @@ mod tests {
             Command::SetMeshVisible {
                 name: String::new(),
                 visible: true,
+            },
+            Command::AddMotion {
+                name: String::new(),
+                duration: 1.0,
+                fps: 30.0,
+                looped: false,
+            },
+            Command::RemoveMotion {
+                name: String::new(),
+            },
+            Command::RenameMotion {
+                name: String::new(),
+                new_name: String::new(),
+            },
+            Command::SetMotionTiming {
+                name: String::new(),
+                duration: 1.0,
+                fps: 30.0,
+                looped: false,
+                fade_in: 0.0,
+                fade_out: 0.0,
+            },
+            Command::AddMotionCurve {
+                motion: String::new(),
+                target: MotionTarget::Parameter {
+                    name: String::new(),
+                },
+            },
+            Command::RemoveMotionCurve {
+                motion: String::new(),
+                curve: 0,
+            },
+            Command::SetMotionCurveFade {
+                motion: String::new(),
+                curve: 0,
+                fade_in: None,
+                fade_out: None,
+            },
+            Command::SetMotionCurve {
+                motion: String::new(),
+                curve: 0,
+                start: [0.0, 0.0],
+                segments: vec![],
             },
             Command::Batch { commands: vec![] },
         ];

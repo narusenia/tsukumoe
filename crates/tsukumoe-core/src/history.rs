@@ -9,6 +9,7 @@ use crate::driver::Driver;
 use crate::elements::{Parameter, Part};
 use crate::keyform::Binding;
 use crate::model::Model;
+use crate::playback::Motion;
 use crate::rig::{ArtMesh, Glue, RotationDeformer, WarpDeformer};
 use crate::table::Table;
 
@@ -66,6 +67,7 @@ pub(crate) enum Change {
     Warp(Box<Edit<WarpDeformer>>),
     Rotation(Edit<RotationDeformer>),
     Glue(Edit<Glue>),
+    Motion(Box<Edit<Motion>>),
     /// A parameter moved in the iteration order, from position `from` to `to`.
     ParameterOrder {
         id: Id<Parameter>,
@@ -85,6 +87,7 @@ impl Change {
             Change::Warp(e) => e.set(&mut model.warps, &e.before),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.before),
             Change::Glue(e) => e.set(&mut model.glues, &e.before),
+            Change::Motion(e) => e.set(&mut model.motions, &e.before),
             Change::ParameterOrder { id, from, .. } => {
                 model.parameters.move_to(*id, *from);
             }
@@ -101,6 +104,7 @@ impl Change {
             Change::Warp(e) => e.set(&mut model.warps, &e.after),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.after),
             Change::Glue(e) => e.set(&mut model.glues, &e.after),
+            Change::Motion(e) => e.set(&mut model.motions, &e.after),
             Change::ParameterOrder { id, to, .. } => {
                 model.parameters.move_to(*id, *to);
             }
@@ -192,6 +196,19 @@ impl Editable for RotationDeformer {
     }
     fn change(edit: Edit<Self>) -> Change {
         Change::Rotation(edit)
+    }
+}
+
+impl Editable for Motion {
+    const KIND: &'static str = "motion";
+    fn table(model: &Model) -> &Table<Self> {
+        &model.motions
+    }
+    fn table_mut(model: &mut Model) -> &mut Table<Self> {
+        &mut model.motions
+    }
+    fn change(edit: Edit<Self>) -> Change {
+        Change::Motion(Box::new(edit))
     }
 }
 
