@@ -73,6 +73,11 @@ impl Curve {
         }
     }
 
+    /// The key at `time` (to within a microsecond), if there is one.
+    pub fn key_at(&self, time: f32) -> Option<usize> {
+        (0..self.key_count()).find(|&k| self.key(k).is_some_and(|p| (p[0] - time).abs() < 1e-6))
+    }
+
     /// Whether every number is finite and each segment's points (controls
     /// included) lie between the previous key's time and its own end.
     pub fn is_ordered(&self) -> bool {
