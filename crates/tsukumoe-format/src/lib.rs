@@ -10,8 +10,10 @@ pub mod dto;
 mod error;
 mod manifest;
 mod model_io;
+mod runtime_io;
 
 pub use container::{Limits, MANIFEST_PATH, Project, to_json};
 pub use error::Error;
 pub use manifest::{FORMAT_NAME, Feature, KNOWN_FEATURES, MAJOR, MINOR, Manifest, Version};
 pub use model_io::{read_model, write_model};
+pub use runtime_io::runtime_bytes;

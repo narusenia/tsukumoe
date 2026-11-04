@@ -14,7 +14,7 @@ use tsukumoe_ai::LipsyncConfig;
 use tsukumoe_ai::wav::{self, MAX_WAV_BYTES};
 use tsukumoe_cli::{commands, generate, lipsync, mcp, parity, psd, store};
 use tsukumoe_core::eval::Frame;
-use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
+use tsukumoe_core::tmod::{self, AlignedBuf, Tmod};
 use tsukumoe_format::{Project, read_model};
 use tsukumoe_gpu::{Headless, Image, Texture};
 
@@ -147,28 +147,11 @@ fn convert(args: &[String]) -> Result<u8, Fail> {
     Ok(0)
 }
 
-/// The runtime format of a project: the compiled model, its motions,
-/// expressions and pose, and its textures (`textures/*.png`, in path order).
-fn tmod_bytes(project: &Project) -> Result<Vec<u8>, Fail> {
-    let model = read_model(project)?;
-    let compiled = model
-        .compile()
-        .map_err(|e| Fail::Failed(format!("{e:?}")))?;
-    let playback = PlaybackData::from_model(&model)?;
-    let textures: Vec<&[u8]> = project
-        .files
-        .iter()
-        .filter(|(path, _)| path.starts_with("textures/") && path.ends_with(".png"))
-        .map(|(_, bytes)| bytes.as_slice())
-        .collect();
-    Ok(tmod::write_with(&compiled, &playback, &textures)?)
-}
-
 /// A `.tmod` path gets the runtime format, a `.zip` or `.tsukumoe` path an
 /// archive, any other a directory.
 fn save(project: &Project, output: &str) -> Result<(), Fail> {
     if output.ends_with(".tmod") {
-        write(output, &tmod_bytes(project)?)
+        write(output, &tsukumoe_format::runtime_bytes(project)?)
     } else if output.ends_with(".zip") || output.ends_with(".tsukumoe") {
         write(output, &project.write_zip()?)
     } else {
