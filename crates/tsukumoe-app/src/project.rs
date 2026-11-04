@@ -234,6 +234,26 @@ impl Document {
         self.write_to(path, folder)
     }
 
+    /// The problems that would stop an export, one line each; empty when the model is sound.
+    pub fn export_problems(&self) -> Vec<String> {
+        self.dispatcher
+            .model()
+            .validate()
+            .iter()
+            .map(|e| format!("{e:?}"))
+            .collect()
+    }
+
+    /// Writes the runtime format (`.tmod`) to `path`. The project's own file,
+    /// its path and its unsaved state are left alone.
+    pub fn export_runtime(&mut self, path: &Path) -> Result<(), String> {
+        let err = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
+        self.sync_names();
+        write_model(self.dispatcher.model(), &mut self.project).map_err(|e| err(&e))?;
+        let bytes = tsukumoe_format::runtime_bytes(&self.project).map_err(|e| err(&e))?;
+        fs::write(path, bytes).map_err(|e| err(&e))
+    }
+
     /// Saves as a folder project whatever the name looks like.
     pub fn save_to_folder(&mut self, path: &Path) -> Result<(), String> {
         self.write_to(path, true)

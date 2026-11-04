@@ -47,6 +47,7 @@ pub const MENU: &[Def] = &[
             item("file.save-as", "menu-save-as"),
             item("file.save-as-folder", "menu-save-as-folder"),
             item("file.import-psd", "menu-import-psd"),
+            item("file.export", "menu-export"),
             Def::Sub {
                 label: "menu-recent",
                 items: &[Def::Recent],
@@ -108,9 +109,11 @@ pub struct State {
 impl State {
     pub fn enabled(&self, action: &str) -> bool {
         match action {
-            "file.save" | "file.save-as" | "file.save-as-folder" | "file.import-psd" => {
-                self.has_doc
-            }
+            "file.save"
+            | "file.save-as"
+            | "file.save-as-folder"
+            | "file.import-psd"
+            | "file.export" => self.has_doc,
             "edit.undo" => self.can_undo,
             "edit.redo" => self.can_redo,
             _ => true,
@@ -289,6 +292,7 @@ mod tests {
             "file.save-as",
             "file.save-as-folder",
             "file.import-psd",
+            "file.export",
             "edit.undo",
             "edit.redo",
         ] {

@@ -67,6 +67,10 @@ pub enum Dialog {
     NewFromPsd(String, String),
     /// Where to save as a folder project (the path-input form).
     SaveAsFolder(String),
+    /// Where to write the runtime file (the path-input form of File > Export).
+    Export(String),
+    /// File > Export found problems in the model; nothing is written.
+    ExportProblems(Vec<String>),
 }
 
 /// What a confirmed deletion does.
@@ -957,6 +961,15 @@ impl Editor {
             {
                 self.pending.push(action.to_owned());
             }
+            "file.export" => {
+                let problems = self.doc.as_ref().map(Document::export_problems);
+                match problems {
+                    None => {}
+                    Some(p) if !p.is_empty() => self.dialog = Some(Dialog::ExportProblems(p)),
+                    Some(_) if self.picker.is_native() => self.pending.push(action.to_owned()),
+                    Some(_) => self.dialog = Some(Dialog::Export(String::new())),
+                }
+            }
             "file.save-as" | "file.save-as-folder" | "file.import-psd"
                 if self.picker.is_native() =>
             {
@@ -1162,6 +1175,17 @@ impl Editor {
                     self.report(ctx, r, Some(tr(ctx, "app-saved")));
                 }
             }
+            "file.export" => {
+                if let Some(mut path) =
+                    self.pick(ctx, PickKind::Export, "pick-export-title", parent)
+                {
+                    if path.extension().is_none() {
+                        path.set_extension("tmod");
+                    }
+                    let r = self.export_runtime(&path);
+                    self.report(ctx, r, Some(tr(ctx, "app-exported")));
+                }
+            }
             "file.save-as-folder" => {
                 if let Some(path) =
                     self.pick(ctx, PickKind::SaveFolder, "pick-save-folder-title", parent)
@@ -1215,6 +1239,13 @@ impl Editor {
             &[("name", Arg::from(path.display().to_string().as_str()))],
         );
         self.report(ctx, r, Some(ok));
+    }
+
+    /// Writes the open document as a `.tmod` runtime file.
+    pub fn export_runtime(&mut self, path: &Path) -> Result<(), String> {
+        self.doc
+            .as_mut()
+            .map_or(Ok(()), |doc| doc.export_runtime(path))
     }
 
     /// Saves the open document as a folder project.
@@ -1550,6 +1581,10 @@ impl Editor {
             Dialog::NewProject(_) => (t("dialog-new-title"), "dialog-new"),
             Dialog::NewFromPsd(..) => (t("dialog-new-from-psd-title"), "dialog-new-from-psd"),
             Dialog::SaveAsFolder(_) => (t("dialog-save-folder-title"), "dialog-save-folder"),
+            Dialog::Export(_) => (t("dialog-export-title"), "dialog-export"),
+            Dialog::ExportProblems(_) => {
+                (t("dialog-export-problems-title"), "dialog-export-problems")
+            }
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
             Dialog::Confirm(_) | Dialog::Settings(_) | Dialog::PsdImport(_) => {
@@ -1558,7 +1593,7 @@ impl Editor {
         };
         tsukumoe_ui::dialog(ctx, id, &title, &mut open, |ui| {
             match &mut dialog {
-                Dialog::Open(text) | Dialog::SaveAs(text) => {
+                Dialog::Open(text) | Dialog::SaveAs(text) | Dialog::Export(text) => {
                     let name = t("dialog-path");
                     text_input(ui, text, &name, &name).request_focus();
                 }
@@ -1571,6 +1606,12 @@ impl Editor {
                     text_input(ui, psd, &name, &name).request_focus();
                     let name = t("dialog-folder-path");
                     text_input(ui, folder, &name, &name);
+                }
+                Dialog::ExportProblems(problems) => {
+                    hint(ui, t("dialog-export-problems-body"));
+                    for p in problems.iter() {
+                        label(ui, p.clone());
+                    }
                 }
                 Dialog::SaveLayout(text) => {
                     let name = t("layout-name");
@@ -1625,6 +1666,10 @@ impl Editor {
                 Dialog::SaveAsFolder(text) if !text.trim().is_empty() => {
                     let r = self.save_as_folder(Path::new(text.trim()));
                     self.report(ctx, r, Some(t("app-saved")));
+                }
+                Dialog::Export(text) if !text.trim().is_empty() => {
+                    let r = self.export_runtime(Path::new(text.trim()));
+                    self.report(ctx, r, Some(t("app-exported")));
                 }
                 Dialog::SaveLayout(text) => {
                     if self.layouts.save_named(self.workspace, text) {
@@ -3448,6 +3493,12 @@ mod tests {
         fake.answer(dir.join("f.v1"));
         run(&mut editor, &ctx, "file.save-as-folder");
         assert!(dir.join("f.v1/manifest.json").is_file());
+        // Export: the runtime file gets its extension and the project stays as saved.
+        fake.answer(dir.join("out"));
+        run(&mut editor, &ctx, "file.export");
+        let tmod = std::fs::read(dir.join("out.tmod")).unwrap();
+        assert!(!tmod.is_empty());
+        assert!(!editor.doc.as_ref().unwrap().dirty());
         // Import PSD: the dialog opens on the picked file.
         fake.answer(dir.join("x.psd"));
         run(&mut editor, &ctx, "file.import-psd");
@@ -3460,6 +3511,7 @@ mod tests {
         fake.answer(dir.join("y"));
         run(&mut none, &ctx, "file.save-as");
         run(&mut none, &ctx, "file.import-psd");
+        run(&mut none, &ctx, "file.export");
         assert!(fake.0.borrow().requests.is_empty());
     }
 

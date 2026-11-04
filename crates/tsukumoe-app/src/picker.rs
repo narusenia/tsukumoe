@@ -17,6 +17,8 @@ pub enum PickKind {
     SaveProject,
     /// Where to save a project folder.
     SaveFolder,
+    /// Where to write a `.tmod` runtime file.
+    Export,
     /// A `.psd` file.
     Psd,
     /// A new or empty folder for a new project.
@@ -79,6 +81,10 @@ impl FilePicker for RfdPicker {
             PickKind::SaveProject => dialog
                 .add_filter("Tsukumoe project", &["tsukumoe"])
                 .set_file_name("model.tsukumoe")
+                .save_file(),
+            PickKind::Export => dialog
+                .add_filter("Tsukumoe runtime", &["tmod"])
+                .set_file_name("model.tmod")
                 .save_file(),
             PickKind::Psd => dialog.add_filter("PSD", &["psd"]).pick_file(),
             PickKind::OpenFolder | PickKind::SaveFolder | PickKind::NewFolder => {
