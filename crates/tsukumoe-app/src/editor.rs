@@ -1887,8 +1887,26 @@ impl Editor {
                 Dialog::Confirm(_) | Dialog::Settings(_) | Dialog::PsdImport(_) => {}
             }
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                done = button(ui, &t("dialog-ok"), Variant::Primary).clicked();
+            let blank = match &dialog {
+                Dialog::Open(text)
+                | Dialog::SaveAs(text)
+                | Dialog::Export(text)
+                | Dialog::ImportMotion(text)
+                | Dialog::Reference(text)
+                | Dialog::NewProject(text)
+                | Dialog::SaveAsFolder(text)
+                | Dialog::ExportFrames(text)
+                | Dialog::SaveLayout(text) => text.trim().is_empty(),
+                Dialog::NewFromPsd(psd, folder) => {
+                    psd.trim().is_empty() || folder.trim().is_empty()
+                }
+                _ => false,
+            };
+            // The confirming button sits at the right edge, the way out beside it.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(!blank, |ui| {
+                    done = button(ui, &t("dialog-ok"), Variant::Primary).clicked();
+                });
                 if button(ui, &t("dialog-cancel"), Variant::Secondary).clicked() {
                     cancel = true;
                 }
