@@ -149,7 +149,11 @@ pub fn text_input(ui: &mut Ui, text: &mut String, name: &str, hint: &str) -> Res
     response.accessible_name(name)
 }
 
-/// A drop-down list. `changed()` is true on the frame the choice changes.
+/// How many options a drop-down takes before it gets a filter field.
+const SEARCH_FROM: usize = 10;
+
+/// A drop-down list. `changed()` is true on the frame the choice changes. A long
+/// list has a filter field on top: type to narrow it, Enter takes the first match.
 pub fn select<T: PartialEq + Clone>(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
@@ -161,15 +165,57 @@ pub fn select<T: PartialEq + Clone>(
         .iter()
         .find(|(v, _)| v == value)
         .map_or("", |(_, name)| *name);
+    let combo_id = Id::unique(id);
+    let (query_id, open_id) = (combo_id.with("query"), combo_id.with("open"));
+    let searchable = options.len() > SEARCH_FROM;
     let mut changed = false;
-    let mut response = egui::ComboBox::from_id_salt(Id::unique(id))
+    let mut ran = false;
+    let mut response = egui::ComboBox::from_id_salt(combo_id)
         .selected_text(current)
         .show_ui(ui, |ui| {
-            for (v, name) in options {
-                changed |= ui.selectable_value(value, v.clone(), *name).clicked();
+            ran = true;
+            let mut query = String::new();
+            if searchable {
+                let first = !ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
+                ui.data_mut(|d| d.insert_temp(open_id, true));
+                query = ui
+                    .data(|d| d.get_temp::<String>(query_id))
+                    .unwrap_or_default();
+                let field = text_input(ui, &mut query, name, name);
+                if first {
+                    field.request_focus();
+                }
+                ui.data_mut(|d| d.insert_temp(query_id, query.clone()));
             }
+            let needle = query.trim().to_lowercase();
+            let shown: Vec<&(T, &str)> = options
+                .iter()
+                .filter(|(_, n)| needle.is_empty() || n.to_lowercase().contains(&needle))
+                .collect();
+            let enter =
+                searchable && !needle.is_empty() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            egui::ScrollArea::vertical()
+                .max_height(280.0)
+                .show(ui, |ui| {
+                    for (i, (v, label)) in shown.iter().enumerate() {
+                        let picked = ui.selectable_value(value, v.clone(), *label).clicked()
+                            || (enter && i == 0);
+                        if picked {
+                            *value = v.clone();
+                            changed = true;
+                            ui.data_mut(|d| d.remove_temp::<String>(query_id));
+                            ui.close();
+                        }
+                    }
+                });
         })
         .response;
+    if !ran {
+        ui.data_mut(|d| {
+            d.remove_temp::<bool>(open_id);
+            d.remove_temp::<String>(query_id);
+        });
+    }
     if changed {
         response.mark_changed();
     }
@@ -229,5 +275,33 @@ mod tests {
         h.key_press(egui::Key::Escape);
         h.run();
         assert_eq!(*h.state(), 0.5);
+    }
+
+    #[test]
+    fn a_long_list_is_narrowed_by_typing_and_enter_takes_the_first_match() {
+        let names: Vec<String> = (0..14).map(|i| format!("Item {i}")).collect();
+        let mut h = Harness::new_ui_state(
+            move |ui, value: &mut usize| {
+                crate::init(ui.ctx());
+                let options: Vec<(usize, &str)> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (i, n.as_str()))
+                    .collect();
+                select(ui, "long", "Pick", value, &options);
+            },
+            0usize,
+        );
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Pick")
+            .click();
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Pick")
+            .type_text("item 12");
+        h.run();
+        assert!(h.query_by_label("Item 3").is_none(), "the list is narrowed");
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(*h.state(), 12);
     }
 }

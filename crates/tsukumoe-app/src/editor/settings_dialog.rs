@@ -344,7 +344,7 @@ impl Editor {
         t: &dyn Fn(&str) -> String,
     ) {
         const MAX_SLOTS: usize = 12;
-        const PIE_PICTURE: f32 = 220.0;
+        const PIE_PICTURE: f32 = 300.0;
         /// The select's value that stands for "a group" (no action has a NUL in its name).
         const GROUP: &str = "\u{0}group";
         /// A group's name is a translation key for the built-in one, else typed text.
@@ -446,7 +446,7 @@ impl Editor {
                 egui::Stroke::new(1.0, theme.colors.border_strong),
             );
             painter.circle_filled(rect.center(), radius * 0.25, theme.colors.background);
-            for i in 0..n {
+            for (i, entry) in items.iter().enumerate() {
                 let a = i as f32 * std::f32::consts::TAU / n as f32;
                 let dir = egui::vec2(a.sin(), -a.cos());
                 painter.line_segment(
@@ -456,11 +456,26 @@ impl Editor {
                     ],
                     egui::Stroke::new(1.0, theme.colors.border),
                 );
+                let name = match entry {
+                    Entry::Action { action } => options
+                        .iter()
+                        .find(|(a, _)| a == action)
+                        .map_or_else(String::new, |(_, n)| (*n).to_owned()),
+                    Entry::Group { label, .. } => group_name(label, t),
+                };
+                // The slot's number near the rim, and its name, cut short, inside.
                 painter.text(
-                    rect.center() + dir * radius * 0.62,
+                    rect.center() + dir * radius * 0.88,
                     egui::Align2::CENTER_CENTER,
                     format!("{}", i + 1),
-                    egui::FontId::proportional(theme.metrics.text + 2.0),
+                    egui::FontId::proportional(theme.metrics.text - 1.0),
+                    theme.colors.text_muted,
+                );
+                painter.text(
+                    rect.center() + dir * radius * 0.6,
+                    egui::Align2::CENTER_CENTER,
+                    shorten(&name, 7),
+                    egui::FontId::proportional(theme.metrics.text - 1.0),
                     theme.colors.text,
                 );
             }
@@ -841,6 +856,15 @@ impl Editor {
 }
 
 /// Whether `elapsed` since the last auto-save is at least the interval.
+/// `text` cut to `keep` characters, the cut marked.
+fn shorten(text: &str, keep: usize) -> String {
+    if text.chars().count() <= keep {
+        return text.to_owned();
+    }
+    let head: String = text.chars().take(keep).collect();
+    format!("{head}…")
+}
+
 fn autosave_due(elapsed: std::time::Duration, minutes: u32) -> bool {
     elapsed >= std::time::Duration::from_secs(u64::from(minutes) * 60)
 }

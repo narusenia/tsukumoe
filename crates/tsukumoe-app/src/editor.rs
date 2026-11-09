@@ -1262,6 +1262,31 @@ impl Editor {
                 };
                 self.view.touch();
             }
+            "view.toggle-grid" | "view.toggle-rulers" | "view.toggle-snap"
+            | "view.toggle-stats" => {
+                let aids = &mut self.view.aids;
+                match action {
+                    "view.toggle-grid" => aids.grid = !aids.grid,
+                    "view.toggle-rulers" => aids.rulers = !aids.rulers,
+                    "view.toggle-snap" => aids.snap = !aids.snap,
+                    _ => aids.stats = !aids.stats,
+                }
+                self.sync_aids();
+                self.view.touch();
+            }
+            "view.clear-guides" => {
+                self.view.aids.guides_x.clear();
+                self.view.aids.guides_y.clear();
+                self.sync_aids();
+                self.view.touch();
+            }
+            "edit.select-none" => {
+                self.view.clear_selection();
+                self.view.touch();
+            }
+            "timeline.rewind" => {
+                self.view.timeline.seek(0.0);
+            }
             "viewport.reset-camera" => {
                 self.view.camera.reset();
                 self.view.touch();

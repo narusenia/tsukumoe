@@ -13,9 +13,17 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 49] = [
+pub const ACTIONS: [&str; 68] = [
     "file.open",
     "file.save",
+    "file.new",
+    "file.new-from-psd",
+    "file.open-folder",
+    "file.save-as",
+    "file.save-as-folder",
+    "file.import-psd",
+    "file.export",
+    "file.export-frames",
     "edit.undo",
     "edit.redo",
     "edit.repeat",
@@ -63,6 +71,17 @@ pub const ACTIONS: [&str; 49] = [
     "viewport.reset-camera",
     "viewport.solo",
     "timeline.play-toggle",
+    "timeline.rewind",
+    "timeline.import-motion",
+    "view.reference-load",
+    "view.reference-remove",
+    "view.toggle-grid",
+    "view.toggle-rulers",
+    "view.toggle-snap",
+    "view.toggle-stats",
+    "view.clear-guides",
+    "edit.select-none",
+    "layout.save",
 ];
 
 /// The context a binding of `action` belongs to (`None` is global).
@@ -168,10 +187,31 @@ mod tests {
         assert!(map.conflicts().is_empty());
         for a in ACTIONS {
             // Showing a panel has no default key; the menu and the keymap dialog reach it.
-            // The glue actions have no Cubism key to copy.
-            if !a.starts_with("panel.show.")
-                && !["deformer.reset", "mesh.glue-source", "mesh.glue"].contains(&a)
-            {
+            // The glue actions have no Cubism key to copy; the rest are reached from the
+            // menu, the palette or a pie slot.
+            const NO_DEFAULT_KEY: [&str; 20] = [
+                "deformer.reset",
+                "mesh.glue-source",
+                "mesh.glue",
+                "file.new-from-psd",
+                "file.open-folder",
+                "file.save-as-folder",
+                "file.import-psd",
+                "file.export",
+                "file.export-frames",
+                "timeline.rewind",
+                "timeline.import-motion",
+                "view.reference-load",
+                "view.reference-remove",
+                "view.toggle-grid",
+                "view.toggle-rulers",
+                "view.toggle-snap",
+                "view.toggle-stats",
+                "view.clear-guides",
+                "edit.select-none",
+                "layout.save",
+            ];
+            if !a.starts_with("panel.show.") && !NO_DEFAULT_KEY.contains(&a) {
                 assert!(map.shortcut(a).is_some(), "{a} has no default key");
             }
         }
