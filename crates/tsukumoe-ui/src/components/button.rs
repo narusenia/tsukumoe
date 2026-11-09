@@ -22,19 +22,25 @@ pub enum Variant {
 
 /// A text button. Disable it with `ui.add_enabled_ui(false, ..)`.
 pub fn button(ui: &mut Ui, text: &str, variant: Variant) -> Response {
-    action(ui, None, Some(text), text, variant)
+    action(ui, None, Some(text), text, variant, 0.0)
+}
+
+/// A text button at least `width` wide, its text in the middle: for buttons of one
+/// group that should read as the same size.
+pub fn button_wide(ui: &mut Ui, text: &str, variant: Variant, width: f32) -> Response {
+    action(ui, None, Some(text), text, variant, width)
 }
 
 /// An icon-only button. `name` is what a screen reader announces and what the
 /// tooltip shows.
 pub fn icon_button(ui: &mut Ui, icon: Icon, name: &str, variant: Variant) -> Response {
-    action(ui, Some(icon), None, name, variant)
+    action(ui, Some(icon), None, name, variant, 0.0)
         .on_hover_text(name)
         .on_disabled_hover_text(name)
 }
 
 pub fn icon_text_button(ui: &mut Ui, icon: Icon, text: &str, variant: Variant) -> Response {
-    action(ui, Some(icon), Some(text), text, variant)
+    action(ui, Some(icon), Some(text), text, variant, 0.0)
 }
 
 fn fill_and_text(t: &Theme, variant: Variant, enabled: bool, r: &Response) -> (Color32, Color32) {
@@ -90,6 +96,7 @@ fn action(
     text: Option<&str>,
     name: &str,
     variant: Variant,
+    min_width: f32,
 ) -> Response {
     let t = Theme::get(ui.ctx());
     let m = t.metrics;
@@ -112,7 +119,8 @@ fn action(
     } else {
         (m.control - m.icon) / 2.0
     };
-    let size = vec2(2.0 * pad + icon_width + gap + text_width, m.control);
+    let natural = 2.0 * pad + icon_width + gap + text_width;
+    let size = vec2(natural.max(min_width), m.control);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
     if enabled {
@@ -143,7 +151,7 @@ fn action(
             StrokeKind::Outside,
         );
     }
-    let mut x = rect.left() + pad;
+    let mut x = rect.left() + pad + (size.x - natural) / 2.0;
     if let Some(icon) = icon {
         let at = Rect::from_min_size(
             egui::pos2(x, rect.center().y - m.icon / 2.0),

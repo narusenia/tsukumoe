@@ -1561,3 +1561,31 @@ fn history_panel_in_the_dark_theme() {
         "history",
     );
 }
+
+/// The viewport while no project is open.
+#[test]
+fn splash_in_the_dark_theme() {
+    use std::path::PathBuf;
+    use tsukumoe_app::panels::splash;
+
+    let recent = vec![
+        PathBuf::from("/Users/someone/models/deepseek-chan/project.tsukumoe"),
+        PathBuf::from("/Users/someone/work/sample"),
+    ];
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(640.0, 400.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, recent: &mut Vec<PathBuf>| {
+                let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::Ja);
+                set_mode(&ctx, Mode::Dark);
+                splash::show(ui, recent);
+            },
+            recent,
+        );
+    harness.run();
+    harness.snapshot_options("splash_dark", &SnapshotOptions::new().threshold(3.0));
+}

@@ -1385,7 +1385,7 @@ mod tests {
         h.get_by_label("Arm").click_secondary();
         h.run();
         assert!(h.query_by_label_contains("Duplicate").is_none());
-        h.get_by_label("Children...").click();
+        h.get_by_label("Children…").click();
         h.run();
         h.get_by_label("Select children").click();
         h.run();

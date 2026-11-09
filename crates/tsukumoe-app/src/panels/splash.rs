@@ -7,7 +7,20 @@
 use std::path::PathBuf;
 
 use egui::Ui;
-use tsukumoe_ui::{Variant, button, hint, tr};
+use tsukumoe_ui::{Icon, Variant, hint, selectable_row, tr};
+
+const BUTTON_WIDTH: f32 = 240.0;
+const RECENT_WIDTH: f32 = 420.0;
+
+/// The end of a long folder path, with the cut marked.
+fn shorten(text: &str, keep: usize) -> String {
+    let count = text.chars().count();
+    if count <= keep {
+        return text.to_owned();
+    }
+    let tail: String = text.chars().skip(count - keep).collect();
+    format!("…{tail}")
+}
 
 /// How many recent projects are listed.
 const RECENT_SHOWN: usize = 6;
@@ -24,7 +37,8 @@ pub fn show(ui: &mut Ui, recent: &[PathBuf]) -> Vec<String> {
             ("menu-open", "file.open", Variant::Secondary),
             ("menu-new-from-psd", "file.new-from-psd", Variant::Secondary),
         ] {
-            if button(ui, &tr(&ctx, key), variant).clicked() {
+            // The same width, so the three read as one group.
+            if tsukumoe_ui::button_wide(ui, &tr(&ctx, key), variant, BUTTON_WIDTH).clicked() {
                 actions.push(action.to_owned());
             }
         }
@@ -33,11 +47,30 @@ pub fn show(ui: &mut Ui, recent: &[PathBuf]) -> Vec<String> {
         if recent.is_empty() {
             hint(ui, tr(&ctx, "menu-no-recent"));
         }
+        let width = RECENT_WIDTH.min(ui.available_width());
+        let muted = tsukumoe_ui::Theme::get(&ctx).colors.text_muted;
         for path in recent.iter().take(RECENT_SHOWN) {
-            let text = path.display().to_string();
-            if ui.link(&text).clicked() {
-                actions.push(format!("file.open-recent:{text}"));
-            }
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            let folder = path
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            ui.allocate_ui(egui::vec2(width, ui.spacing().interact_size.y), |ui| {
+                let row = selectable_row(ui, false, Some(Icon::Folder), &name);
+                ui.painter().text(
+                    egui::pos2(row.rect.right() - 8.0, row.rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    shorten(&folder, 32),
+                    egui::FontId::proportional(11.0),
+                    muted,
+                );
+                if row.on_hover_text(path.display().to_string()).clicked() {
+                    actions.push(format!("file.open-recent:{}", path.display()));
+                }
+            });
         }
     });
     actions
@@ -60,9 +93,9 @@ mod tests {
             Vec::new(),
         );
         h.run();
-        h.get_by_label("New project...").click();
+        h.get_by_label("New project…").click();
         h.run();
-        h.get_by_label("/a/b.tsukumoe").click();
+        h.get_by_label("b.tsukumoe").click();
         h.run();
         assert_eq!(
             h.state(),
