@@ -245,7 +245,7 @@ mod tests {
         let ja = I18n::new(Language::Ja);
         assert_eq!(
             ja.tr_args("host-parameters", &[("count", 3usize.into())]),
-            "パラメータ 3 個"
+            "パラメータ3個"
         );
     }
 
