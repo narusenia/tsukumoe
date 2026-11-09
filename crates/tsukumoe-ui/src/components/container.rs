@@ -142,3 +142,48 @@ pub fn list(
             }
         });
 }
+
+/// A section that opens and closes: a chevron and `title` on a row you click,
+/// the contents below while open. The state is kept under `id`; the response is
+/// the row's.
+pub fn collapsible<R>(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    title: &str,
+    default_open: bool,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> (Response, Option<R>) {
+    let t = Theme::get(ui.ctx());
+    let m = t.metrics;
+    let id = ui.make_persistent_id(id);
+    let open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(default_open);
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), m.control), Sense::click());
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, open, title));
+    response.clone().on_hover_cursor(CursorIcon::PointingHand);
+    if response.hovered() {
+        ui.painter()
+            .rect_filled(rect, m.radius, t.colors.control_hover);
+    }
+    let icon = if open {
+        Icon::ChevronDown
+    } else {
+        Icon::ChevronRight
+    };
+    let at = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + 2.0, rect.center().y - m.icon / 2.0),
+        vec2(m.icon, m.icon),
+    );
+    icon.image(t.colors.text_muted, m.icon).paint_at(ui, at);
+    ui.painter().text(
+        egui::pos2(at.right() + m.gap, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        TextStyle::Body.resolve(ui.style()),
+        t.colors.text,
+    );
+    let open = open != response.clicked();
+    ui.data_mut(|d| d.insert_temp(id, open));
+    let inner = open.then(|| add_contents(ui));
+    (response, inner)
+}

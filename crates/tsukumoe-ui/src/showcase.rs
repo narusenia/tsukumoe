@@ -290,6 +290,25 @@ impl Showcase {
                 });
             });
         });
+        section(ui, "Form rows, collapsible", |ui| {
+            crate::form_row(ui, "Name", |ui| {
+                text_input(ui, &mut self.text, "Name", "");
+            });
+            crate::form_row(ui, "Size", |ui| {
+                select(
+                    ui,
+                    "form-size",
+                    "Size",
+                    &mut self.size,
+                    &[(Size::Small, "Small"), (Size::Large, "Large")],
+                );
+            });
+            crate::collapsible(ui, "showcase-collapsible", "Details", true, |ui| {
+                crate::form_row(ui, "Value", |ui| {
+                    number(ui, &mut self.value, 0.0..=1.0, 0.005, "Value");
+                });
+            });
+        });
     }
 
     fn feedback(&mut self, ui: &mut Ui, _ctx: &egui::Context) {

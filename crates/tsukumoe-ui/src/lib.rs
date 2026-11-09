@@ -17,10 +17,10 @@ pub mod showcase;
 mod theme;
 
 pub use components::{
-    DIALOG_WIDTH, Toasts, Tone, Variant, badge, button, checkbox, color_picker, dialog,
-    dialog_sized, hint, icon_button, icon_text_button, label, list, menu_item, menu_item_checked,
-    menu_item_icon, menu_sub_icon, number, number_edit, number_or, panel, progress, radio,
-    section_header, select, selectable_row, slider, switch, tabs, text_input, tip,
+    DIALOG_WIDTH, Toasts, Tone, Variant, badge, button, checkbox, collapsible, color_picker,
+    dialog, dialog_sized, form_row, hint, icon_button, icon_text_button, label, list, menu_item,
+    menu_item_checked, menu_item_icon, menu_sub_icon, number, number_edit, number_or, panel,
+    progress, radio, section_header, select, selectable_row, slider, switch, tabs, text_input, tip,
 };
 pub use font::{has_cjk_font, install_cjk_font};
 pub use icons::{Icon, icon};

@@ -16,15 +16,41 @@ pub fn hint(ui: &mut Ui, text: impl Into<String>) -> Response {
     ui.label(RichText::new(text.into()).color(t.colors.text_muted))
 }
 
-/// A small heading above a group of controls.
+/// A heading above a group of controls, with a rule under it. The space above is
+/// left out at the top of a panel.
 pub fn section_header(ui: &mut Ui, text: &str) -> Response {
     let t = Theme::get(ui.ctx());
-    ui.label(
-        RichText::new(text)
-            .size(t.metrics.text - 2.0)
-            .color(t.colors.text_muted)
-            .strong(),
-    )
+    if ui.cursor().top() > ui.max_rect().top() + 1.0 {
+        ui.add_space(t.metrics.pad);
+    }
+    let response = ui.label(RichText::new(text).color(t.colors.text).strong());
+    let y = ui.cursor().top();
+    let x = ui.max_rect().x_range();
+    ui.painter()
+        .hline(x, y, egui::Stroke::new(1.0, t.colors.border));
+    ui.add_space(t.metrics.gap + 1.0);
+    response
+}
+
+/// A row of a form: `name` in a column whose width follows the panel, then the
+/// control, filling what is left. Every field of one form starts at one place.
+pub fn form_row<R>(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let label_width = (ui.available_width() * 0.38).clamp(64.0, 200.0);
+    let height = Theme::get(ui.ctx()).metrics.control;
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            vec2(label_width, height),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(label_width);
+                ui.add(egui::Label::new(name).truncate())
+                    .on_hover_text(name);
+            },
+        );
+        ui.spacing_mut().combo_width = ui.available_width().max(48.0);
+        add(ui)
+    })
+    .inner
 }
 
 /// Shows `text` while the pointer rests on `response`.
