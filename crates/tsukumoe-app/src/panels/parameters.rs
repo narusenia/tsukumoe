@@ -139,15 +139,13 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     }
                     continue;
                 };
-                let r = egui::CollapsingHeader::new(&group)
-                    .id_salt(("param-group", &group))
-                    .default_open(true)
-                    .show(ui, |ui| {
+                let (header, _) =
+                    tsukumoe_ui::collapsible(ui, ("param-group", &group), &group, true, |ui| {
                         for name in &rows {
                             draw(ui, view, &mut outs, name);
                         }
                     });
-                drop_on_header(ctx, &r.header_response, model, &group, &mut outs);
+                drop_on_header(ctx, &header, model, &group, &mut outs);
             }
         });
     // The settings dialog of one parameter (name, range, repeat, delete).

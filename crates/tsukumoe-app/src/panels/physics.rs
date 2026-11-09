@@ -406,64 +406,57 @@ fn pendulum(
         });
     }
     changed |= io_tables(ui, model, &mut inputs, &mut outputs, particles.len(), focus);
-    egui::CollapsingHeader::new(t("physics-details"))
-        .id_salt("physics-details")
-        .show(ui, |ui| {
-            changed |= range_row(ui, &ctx, &t("physics-position-range"), &mut position);
-            changed |= range_row(ui, &ctx, &t("physics-angle-range"), &mut angle);
-            section_header(ui, &t("physics-particles"));
-            let mut remove = None;
-            let count = particles.len();
-            for (i, p) in particles.iter_mut().enumerate() {
-                ui.push_id(("particle", i), |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(i.to_string());
-                        changed |= field(ui, &mut p.position[0], -1.0e6..=1.0e6, &t("physics-x"));
-                        changed |= field(ui, &mut p.position[1], -1.0e6..=1.0e6, &t("physics-y"));
-                        changed |= field(ui, &mut p.mobility, 0.0..=1.0, &t("physics-mobility"));
-                        changed |= field(ui, &mut p.delay, 0.0..=10.0, &t("physics-delay"));
-                        changed |= field(
-                            ui,
-                            &mut p.acceleration,
-                            0.0..=100.0,
-                            &t("physics-acceleration"),
-                        );
-                        changed |= field(ui, &mut p.radius, 0.0..=1000.0, &t("physics-radius"));
-                        ui.add_enabled_ui(count > 1, |ui| {
-                            if icon_button(
-                                ui,
-                                Icon::Trash,
-                                &t("physics-row-delete"),
-                                Variant::Ghost,
-                            )
+    tsukumoe_ui::collapsible(ui, "physics-details", &t("physics-details"), false, |ui| {
+        changed |= range_row(ui, &ctx, &t("physics-position-range"), &mut position);
+        changed |= range_row(ui, &ctx, &t("physics-angle-range"), &mut angle);
+        section_header(ui, &t("physics-particles"));
+        let mut remove = None;
+        let count = particles.len();
+        for (i, p) in particles.iter_mut().enumerate() {
+            ui.push_id(("particle", i), |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(i.to_string());
+                    changed |= field(ui, &mut p.position[0], -1.0e6..=1.0e6, &t("physics-x"));
+                    changed |= field(ui, &mut p.position[1], -1.0e6..=1.0e6, &t("physics-y"));
+                    changed |= field(ui, &mut p.mobility, 0.0..=1.0, &t("physics-mobility"));
+                    changed |= field(ui, &mut p.delay, 0.0..=10.0, &t("physics-delay"));
+                    changed |= field(
+                        ui,
+                        &mut p.acceleration,
+                        0.0..=100.0,
+                        &t("physics-acceleration"),
+                    );
+                    changed |= field(ui, &mut p.radius, 0.0..=1000.0, &t("physics-radius"));
+                    ui.add_enabled_ui(count > 1, |ui| {
+                        if icon_button(ui, Icon::Trash, &t("physics-row-delete"), Variant::Ghost)
                             .clicked()
-                            {
-                                remove = Some(i);
-                            }
-                        });
+                        {
+                            remove = Some(i);
+                        }
                     });
                 });
-            }
-            if let Some(i) = remove {
-                particles.remove(i);
-                forget_target(&mut outputs, i);
-                changed = true;
-            }
-            if button(ui, &t("physics-add-particle"), Variant::Secondary).clicked() {
-                let last = particles.last().copied().unwrap_or(Particle {
-                    position: [0.0, 0.0],
-                    mobility: 0.95,
-                    delay: 0.9,
-                    acceleration: 1.5,
-                    radius: 10.0,
-                });
-                particles.push(Particle {
-                    position: [last.position[0], last.position[1] + last.radius.max(1.0)],
-                    ..last
-                });
-                changed = true;
-            }
-        });
+            });
+        }
+        if let Some(i) = remove {
+            particles.remove(i);
+            forget_target(&mut outputs, i);
+            changed = true;
+        }
+        if button(ui, &t("physics-add-particle"), Variant::Secondary).clicked() {
+            let last = particles.last().copied().unwrap_or(Particle {
+                position: [0.0, 0.0],
+                mobility: 0.95,
+                delay: 0.9,
+                acceleration: 1.5,
+                radius: 10.0,
+            });
+            particles.push(Particle {
+                position: [last.position[0], last.position[1] + last.radius.max(1.0)],
+                ..last
+            });
+            changed = true;
+        }
+    });
     changed.then(|| Command::SetPendulum {
         name: group.name.clone(),
         inputs,

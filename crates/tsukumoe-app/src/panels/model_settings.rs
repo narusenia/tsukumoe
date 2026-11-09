@@ -11,13 +11,10 @@ use tsukumoe_core::command::Command;
 use tsukumoe_core::model::Model;
 use tsukumoe_core::settings::StandardRole;
 use tsukumoe_ui::{
-    Icon, Variant, button, icon_button, label, section_header, select, text_input, tr,
+    Icon, Variant, button, form_row, icon_button, section_header, select, text_input, tr,
 };
 
 use crate::view::ViewState;
-
-/// The width of a hit area's name field.
-const NAME_WIDTH: f32 = 150.0;
 
 /// What the panel remembers between frames. Not saved, not in the history.
 #[derive(Clone, Debug, Default)]
@@ -89,9 +86,8 @@ fn standard_section(ui: &mut Ui, model: &Model, outs: &mut Vec<Out>) {
     let none = t("model-settings-none");
     let mut options: Vec<(Option<String>, &str)> = vec![(None, none.as_str())];
     options.extend(names.iter().map(|n| (Some((*n).to_owned()), *n)));
-    egui::Grid::new("model-settings-standard")
-        .num_columns(2)
-        .show(ui, |ui| {
+    {
+        {
             for role in StandardRole::ALL {
                 let current = model
                     .settings()
@@ -100,14 +96,15 @@ fn standard_section(ui: &mut Ui, model: &Model, outs: &mut Vec<Out>) {
                     .map(str::to_owned);
                 let mut value = current.clone();
                 let name = t(&role_key(role));
-                label(ui, &name);
-                let response = select(
-                    ui,
-                    ("model-settings-role", role),
-                    &name,
-                    &mut value,
-                    &options,
-                );
+                let response = form_row(ui, &name, |ui| {
+                    select(
+                        ui,
+                        ("model-settings-role", role),
+                        &name,
+                        &mut value,
+                        &options,
+                    )
+                });
                 if response.changed() && value != current {
                     outs.push(Out::Command(
                         Command::SetStandardParameter {
@@ -117,9 +114,10 @@ fn standard_section(ui: &mut Ui, model: &Model, outs: &mut Vec<Out>) {
                         format!("settings_standard: {role:?}"),
                     ));
                 }
-                ui.end_row();
             }
-        });
+        }
+    }
+    ui.add_space(2.0);
     let assign = assign_by_name(model);
     ui.add_enabled_ui(!assign.is_empty(), |ui| {
         if button(ui, &t("model-settings-assign"), Variant::Secondary).clicked() {
@@ -145,9 +143,11 @@ fn hit_area_section(
     for area in &model.settings().hit_areas {
         ui.push_id(("hit-area", &area.name), |ui| {
             ui.horizontal(|ui| {
+                let name_width = (ui.available_width() * 0.38).clamp(64.0, 160.0);
+                ui.spacing_mut().combo_width = (ui.available_width() - name_width - 40.0).max(48.0);
                 let key = format!("area.{}", area.name);
                 let renamed = ui
-                    .allocate_ui(egui::vec2(NAME_WIDTH, ui.spacing().interact_size.y), |ui| {
+                    .allocate_ui(egui::vec2(name_width, ui.spacing().interact_size.y), |ui| {
                         text_field(ui, drafts, &key, &area.name, &t("model-settings-area-name"))
                     })
                     .inner;
@@ -226,14 +226,13 @@ fn info_section(
         ("license", &info.license),
         ("notes", &info.notes),
     ];
-    egui::Grid::new("model-settings-info")
-        .num_columns(2)
-        .show(ui, |ui| {
+    {
+        {
             for (field, current) in fields {
                 let name = t(&format!("model-settings-{field}"));
-                label(ui, &name);
                 let key = format!("info.{field}");
-                if let Some(text) = text_field(ui, drafts, &key, current, &name) {
+                let edited = form_row(ui, &name, |ui| text_field(ui, drafts, &key, current, &name));
+                if let Some(text) = edited {
                     let mut next = info.clone();
                     match field {
                         "title" => next.title = text,
@@ -251,9 +250,9 @@ fn info_section(
                         format!("settings_info: {field}"),
                     ));
                 }
-                ui.end_row();
             }
-        });
+        }
+    }
 }
 
 pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {

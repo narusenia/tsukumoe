@@ -8,7 +8,7 @@
 
 use crate::options::{self, Background, Options};
 use egui::ScrollArea;
-use tsukumoe_ui::{Density, Language, Mode, Preferences, builtin_themes, section_header};
+use tsukumoe_ui::{Density, Language, Mode, Preferences, builtin_themes, form_row, section_header};
 
 use super::*;
 
@@ -259,7 +259,6 @@ impl Editor {
     fn confirm_contents(&mut self, ctx: &Context, ui: &mut Ui) {
         let t = |key: &str| tr(ctx, key);
         let before = self.confirm.clone();
-        hint(ui, t("confirm-settings-hint"));
         for kind in KINDS {
             let mut asks = self.confirm.asks(kind);
             if checkbox(ui, &mut asks, &t(kind.key())).changed() {
@@ -288,7 +287,6 @@ impl Editor {
             .collect();
         let options: Vec<(String, &str)> =
             names.iter().map(|(a, n)| (a.clone(), n.as_str())).collect();
-        hint(ui, t("pie-hint"));
         // Which mode's slots are edited.
         let labels = [
             t("pie-mode-common"),
@@ -500,7 +498,6 @@ impl Editor {
         });
         let before = self.drag.clone();
         let drag = &mut self.drag;
-        hint(ui, t("drag-hint"));
         let modifiers = [
             (Modifier::Alt, "Alt".to_owned()),
             (Modifier::Ctrl, "Ctrl".to_owned()),
@@ -564,7 +561,6 @@ impl Editor {
     ) {
         let t = |key: &str| tr(ctx, key);
         let mut changed = false;
-        hint(ui, t("keymap-hint"));
         // Two columns so every field starts at the same place, with room between the
         // name and the field, and a field only as wide as a key chord needs.
         egui::Grid::new("tsukumoe-keymap")
@@ -692,7 +688,6 @@ impl Editor {
                 &mut o.background,
                 &choices,
             );
-            hint(ui, t("settings-radius-hint"));
             let d = Options::default();
             for (key, value, default) in [
                 (
@@ -739,7 +734,6 @@ impl Editor {
                 );
             });
             o.history_limit = limit.round() as u32;
-            hint(ui, t("settings-threshold-hint"));
             let d = Options::default();
             for (key, value, range, default) in [
                 (
@@ -845,28 +839,6 @@ impl Editor {
 /// Whether `elapsed` since the last auto-save is at least the interval.
 fn autosave_due(elapsed: std::time::Duration, minutes: u32) -> bool {
     elapsed >= std::time::Duration::from_secs(u64::from(minutes) * 60)
-}
-
-/// The width of the name column of a settings row, so every field in a tab starts
-/// at the same place whatever its name.
-const FORM_LABEL_WIDTH: f32 = 200.0;
-
-/// A settings row: the name in a fixed-width column (cut short with the whole
-/// name as its tooltip), then whatever `add` puts to its right.
-fn form_row<R>(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(FORM_LABEL_WIDTH, ui.spacing().interact_size.y),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_width(FORM_LABEL_WIDTH);
-                ui.add(egui::Label::new(name).truncate())
-                    .on_hover_text(name);
-            },
-        );
-        add(ui)
-    })
-    .inner
 }
 
 /// A drop-down with its name on the left: `select` keeps the name for screen

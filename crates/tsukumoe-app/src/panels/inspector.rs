@@ -10,7 +10,9 @@ use egui::{Id, Ui};
 use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::elements::ParameterId;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{Icon, checkbox, hint, icon_button, label, number_or, section_header, tr};
+use tsukumoe_ui::{
+    Icon, checkbox, form_row, hint, icon_button, label, number_or, section_header, tr,
+};
 
 use crate::deformer_tool::DeformerTool;
 use crate::view::Selection;
@@ -40,26 +42,6 @@ fn commit_field(
         }
     }
     None
-}
-
-const COLOR_LABEL_WIDTH: f32 = 96.0;
-
-/// A row of the inspector: the name in a column of fixed width, then the field, so
-/// the fields of one panel start at the same place.
-fn form_row<R>(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(COLOR_LABEL_WIDTH, ui.spacing().interact_size.y),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_width(COLOR_LABEL_WIDTH);
-                ui.add(egui::Label::new(name).truncate())
-                    .on_hover_text(name);
-            },
-        );
-        add(ui)
-    })
-    .inner
 }
 
 /// A numeric field whose every change is reported at once: `Some((value, ended))`
@@ -92,16 +74,7 @@ fn color_row(
 ) -> Option<(Option<[f32; 3]>, bool)> {
     let id = Id::unique(("inspector-color", mesh, key));
     let mut out = None;
-    ui.horizontal(|ui| {
-        // The same width for every row, so the buttons line up.
-        ui.allocate_ui_with_layout(
-            egui::vec2(COLOR_LABEL_WIDTH, ui.spacing().interact_size.y),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_width(COLOR_LABEL_WIDTH);
-                ui.add(egui::Label::new(tr(ctx, key)).truncate());
-            },
-        );
+    form_row(ui, &tr(ctx, key), |ui| {
         let mut rgb = current;
         let response = ui.color_edit_button_rgb(&mut rgb);
         let picking = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);

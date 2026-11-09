@@ -39,13 +39,17 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let name = name.as_str();
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    ui.label(egui::RichText::new(name).strong());
+    tsukumoe_ui::section_header(ui, name);
     // Rename, range, repeat and delete of the parameter, where its keys are.
-    egui::CollapsingHeader::new(t("param-settings"))
-        .id_salt(("keys-settings", name))
-        .show(ui, |ui| {
+    tsukumoe_ui::collapsible(
+        ui,
+        ("keys-settings", name),
+        &t("param-settings"),
+        false,
+        |ui| {
             super::parameters::settings_section(ui, model, name, p, &mut outs);
-        });
+        },
+    );
     // The keys of the selected element.
     let value = view.param(name, p);
     let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
@@ -348,39 +352,36 @@ fn mirror_row(
 ) {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    egui::CollapsingHeader::new(t("mirror-title"))
-        .id_salt("keys-mirror")
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if button(ui, &t("mirror-source"), Variant::Secondary).clicked()
-                    && let Err(key) = mirror::set_source(model, view, element)
-                {
-                    outs.push(Out::Error(key));
-                }
-                if button(ui, &t("mirror-paste"), Variant::Secondary).clicked() {
-                    outs.push(match mirror::paste(model, view, element) {
-                        Ok(op) => Out::Op(op),
-                        Err(key) => Out::Error(key),
-                    });
-                }
-            });
-            ui.horizontal(|ui| {
-                ui.label(t("mirror-center"));
-                let hint_text = t("mirror-center-empty");
-                text_input(ui, &mut view.mirror_center, &hint_text, &t("mirror-center"));
-            });
-            if let Some((source, key)) = &view.mirror_source {
-                let (ElementRef::Mesh { name }
-                | ElementRef::Deformer { name }
-                | ElementRef::Glue { name }
-                | ElementRef::Bone { name }) = source;
-                let key: Vec<String> = key.iter().map(|k| (k + 1).to_string()).collect();
-                hint(
-                    ui,
-                    format!("{}: {name} ({})", t("mirror-source"), key.join(", ")),
-                );
+    tsukumoe_ui::collapsible(ui, "keys-mirror", &t("mirror-title"), false, |ui| {
+        ui.horizontal(|ui| {
+            if button(ui, &t("mirror-source"), Variant::Secondary).clicked()
+                && let Err(key) = mirror::set_source(model, view, element)
+            {
+                outs.push(Out::Error(key));
+            }
+            if button(ui, &t("mirror-paste"), Variant::Secondary).clicked() {
+                outs.push(match mirror::paste(model, view, element) {
+                    Ok(op) => Out::Op(op),
+                    Err(key) => Out::Error(key),
+                });
             }
         });
+        tsukumoe_ui::form_row(ui, &t("mirror-center"), |ui| {
+            let hint_text = t("mirror-center-empty");
+            text_input(ui, &mut view.mirror_center, &t("mirror-center"), &hint_text);
+        });
+        if let Some((source, key)) = &view.mirror_source {
+            let (ElementRef::Mesh { name }
+            | ElementRef::Deformer { name }
+            | ElementRef::Glue { name }
+            | ElementRef::Bone { name }) = source;
+            let key: Vec<String> = key.iter().map(|k| (k + 1).to_string()).collect();
+            hint(
+                ui,
+                format!("{}: {name} ({})", t("mirror-source"), key.join(", ")),
+            );
+        }
+    });
 }
 
 #[cfg(test)]

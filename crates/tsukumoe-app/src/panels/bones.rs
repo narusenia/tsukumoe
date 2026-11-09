@@ -12,8 +12,8 @@ use tsukumoe_core::command::{BoneBase, Command};
 use tsukumoe_core::model::Model;
 use tsukumoe_core::rig::BoneId;
 use tsukumoe_ui::{
-    Icon, Variant, button, icon_button, label, number_edit, section_header, select, selectable_row,
-    tr,
+    Icon, Variant, button, form_row, icon_button, number_edit, section_header, select,
+    selectable_row, tr,
 };
 
 use crate::bone_tool;
@@ -155,12 +155,13 @@ fn fields(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs: &m
         .and_then(|b| b.parent)
         .and_then(|p| model.bones().name(p))
         .map(str::to_owned);
-    egui::Grid::new("bones-fields")
-        .num_columns(2)
-        .show(ui, |ui| {
-            label(ui, t("bones-name"));
+    {
+        {
             let drafts = &mut view.bones.drafts;
-            if let Some(new_name) = text_field(ui, drafts, "bone.name", name, &t("bones-name")) {
+            let renamed = form_row(ui, &t("bones-name"), |ui| {
+                text_field(ui, drafts, "bone.name", name, &t("bones-name"))
+            });
+            if let Some(new_name) = renamed {
                 outs.push(Out::Command(
                     Command::RenameBone {
                         name: name.to_owned(),
@@ -170,15 +171,15 @@ fn fields(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs: &m
                 ));
                 view.select_only(Selection::Bone(new_name));
             }
-            ui.end_row();
 
-            label(ui, t("bones-parent"));
             let none = t("bones-no-parent");
             let mut options: Vec<(Option<String>, &str)> = vec![(None, none.as_str())];
             let names = parent_options(model, name);
             options.extend(names.iter().map(|n| (Some(n.clone()), n.as_str())));
             let mut value = parent.clone();
-            let response = select(ui, "bones-parent", &t("bones-parent"), &mut value, &options);
+            let response = form_row(ui, &t("bones-parent"), |ui| {
+                select(ui, "bones-parent", &t("bones-parent"), &mut value, &options)
+            });
             if response.changed() && value != parent {
                 outs.push(Out::Command(
                     Command::SetBoneParent {
@@ -188,18 +189,17 @@ fn fields(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs: &m
                     format!("bone_parent: {name}"),
                 ));
             }
-            ui.end_row();
 
             let mut base = BoneBase::of(&local);
             let mut changed = false;
             let mut row =
                 |ui: &mut Ui, key: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>| {
-                    label(ui, t(key));
-                    if let Some(v) = number_edit(ui, *value, range, 0.05, &t(key)) {
-                        *value = v;
-                        changed = true;
-                    }
-                    ui.end_row();
+                    form_row(ui, &t(key), |ui| {
+                        if let Some(v) = number_edit(ui, *value, range, 0.05, &t(key)) {
+                            *value = v;
+                            changed = true;
+                        }
+                    });
                 };
             row(ui, "bones-x", &mut base.translation[0], -1.0e6..=1.0e6);
             row(ui, "bones-y", &mut base.translation[1], -1.0e6..=1.0e6);
@@ -214,7 +214,8 @@ fn fields(ui: &mut Ui, model: &Model, view: &mut ViewState, name: &str, outs: &m
             if changed {
                 outs.push(edit(model, view, name, base));
             }
-        });
+        }
+    }
 }
 
 #[cfg(test)]
