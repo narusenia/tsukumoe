@@ -1153,6 +1153,67 @@ Replaces the joints, gravity, wind, inputs and outputs of a chain.
 {"type":"set_physics_chain","name":"Rope","joints":[{"length":1.0,"stiffness":0.5,"damping":0.1}],"gravity":[0.0,-9.8],"wind":[0.0,0.0],"inputs":[],"outputs":[]}
 ```
 
+### `set_model_info`
+
+Sets the title, author, license and notes of the model.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `author` | string | no | `""` |
+| `license` | string | no | `""` |
+| `notes` | string | no | `""` |
+| `title` | string | no | `""` |
+| `type` | `"set_model_info"` | yes |  |
+
+### `add_hit_area`
+
+Adds a hit area: a name for the region a mesh covers.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `mesh` | string | yes |  |
+| `name` | string | yes |  |
+| `type` | `"add_hit_area"` | yes |  |
+
+### `remove_hit_area`
+
+Removes a hit area by name.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_hit_area"` | yes |  |
+
+### `rename_hit_area`
+
+Renames a hit area.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_hit_area"` | yes |  |
+
+### `set_hit_area_mesh`
+
+Points a hit area at another mesh.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `mesh` | string | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_hit_area_mesh"` | yes |  |
+
+### `set_standard_parameter`
+
+Names the parameter that plays a standard role; `None` clears the role.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `parameter` | string or null | no | `null` |
+| `role` | Command | yes |  |
+| `type` | `"set_standard_parameter"` | yes |  |
+
 ### `batch`
 
 Applies the commands in order as one undo step; if one fails, none

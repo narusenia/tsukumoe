@@ -622,6 +622,12 @@ pub fn tag(command: &Command) -> &'static str {
         Command::RemovePhysicsChain { .. } => "remove_physics_chain",
         Command::RenamePhysicsChain { .. } => "rename_physics_chain",
         Command::SetPhysicsChain { .. } => "set_physics_chain",
+        Command::SetModelInfo { .. } => "set_model_info",
+        Command::AddHitArea { .. } => "add_hit_area",
+        Command::RemoveHitArea { .. } => "remove_hit_area",
+        Command::RenameHitArea { .. } => "rename_hit_area",
+        Command::SetHitAreaMesh { .. } => "set_hit_area_mesh",
+        Command::SetStandardParameter { .. } => "set_standard_parameter",
     }
 }
 

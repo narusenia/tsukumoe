@@ -14,6 +14,7 @@ use crate::keyform::Binding;
 use crate::physics::PhysicsRig;
 use crate::playback::{Expression, Motion, Pose};
 use crate::rig::{ArtMesh, BlendShape, Bone, Glue, RotationDeformer, WarpDeformer};
+use crate::settings::ModelSettings;
 use crate::table::Table;
 use crate::validate::ModelError;
 
@@ -34,6 +35,7 @@ pub struct Model {
     pub(crate) bindings: Arena<Binding>,
     pub(crate) pose: Option<Pose>,
     pub(crate) physics: PhysicsRig,
+    pub(crate) settings: ModelSettings,
     pub(crate) history: History,
 }
 
@@ -55,6 +57,7 @@ pub struct ModelParts {
     pub bindings: Arena<Binding>,
     pub pose: Option<Pose>,
     pub physics: PhysicsRig,
+    pub settings: ModelSettings,
 }
 
 impl Model {
@@ -80,6 +83,7 @@ impl Model {
             bindings: parts.bindings,
             pose: parts.pose,
             physics: parts.physics,
+            settings: parts.settings,
             history: History::default(),
         };
         let errors = model.validate();
@@ -146,6 +150,10 @@ impl Model {
         &self.physics
     }
 
+    pub fn settings(&self) -> &ModelSettings {
+        &self.settings
+    }
+
     pub fn history(&self) -> &History {
         &self.history
     }
@@ -172,5 +180,6 @@ impl PartialEq for Model {
             && self.bindings == other.bindings
             && self.pose == other.pose
             && self.physics == other.physics
+            && self.settings == other.settings
     }
 }

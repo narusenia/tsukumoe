@@ -82,6 +82,7 @@ impl Model {
         self.check_blend_shapes(&mut r);
         self.check_drivers(&mut r);
         self.check_physics(&mut r);
+        self.check_settings(&mut r);
         self.check_playback(&mut r);
         r.0
     }
@@ -370,6 +371,31 @@ impl Model {
         for chain in &self.physics.chains {
             let owner = format!("physics chain '{}'", chain.name);
             self.check_physics_io(r, &owner, &chain.inputs, &chain.outputs, chain.joints.len());
+        }
+    }
+
+    fn check_settings(&self, r: &mut Report) {
+        let settings = &self.settings;
+        for (i, area) in settings.hit_areas.iter().enumerate() {
+            let owner = format!("hit area '{}'", area.name);
+            if !self.meshes.contains(area.mesh) {
+                r.dangling(&owner, "mesh");
+            }
+            if area.name.is_empty() || settings.hit_areas[..i].iter().any(|a| a.name == area.name) {
+                r.geometry(&owner, "name");
+            }
+        }
+        for (i, (role, parameter)) in settings.standard.iter().enumerate() {
+            let owner = format!("standard parameter {role:?}");
+            if !self.parameters.contains(*parameter) {
+                r.dangling(&owner, "parameter");
+            }
+            if settings.standard[..i]
+                .iter()
+                .any(|(other, _)| other == role)
+            {
+                r.geometry(&owner, "role");
+            }
         }
     }
 

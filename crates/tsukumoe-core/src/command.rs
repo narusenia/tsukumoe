@@ -20,12 +20,14 @@ use crate::rig::{
     ArtMesh, BlendMode, DeformerRef, Glue, GlueNode, RotationDeformer, RotationKeyform,
     WarpDeformer,
 };
+use crate::settings::StandardRole;
 use crate::table::InsertError;
 
 mod expression;
 mod keyform;
 mod motion;
 mod physics;
+mod settings;
 use crate::validate::ModelError;
 use keyform::refused;
 pub use physics::{PhysicsInputDef, PhysicsOutputDef};
@@ -450,6 +452,31 @@ pub enum Command {
         wind: Point,
         inputs: Vec<PhysicsInputDef>,
         outputs: Vec<PhysicsOutputDef>,
+    },
+    /// Sets the title, author, license and notes of the model.
+    SetModelInfo {
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        author: String,
+        #[serde(default)]
+        license: String,
+        #[serde(default)]
+        notes: String,
+    },
+    /// Adds a hit area: a name for the region a mesh covers.
+    AddHitArea { name: String, mesh: String },
+    /// Removes a hit area by name.
+    RemoveHitArea { name: String },
+    /// Renames a hit area.
+    RenameHitArea { name: String, new_name: String },
+    /// Points a hit area at another mesh.
+    SetHitAreaMesh { name: String, mesh: String },
+    /// Names the parameter that plays a standard role; `None` clears the role.
+    SetStandardParameter {
+        role: StandardRole,
+        #[serde(default)]
+        parameter: Option<String>,
     },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
@@ -911,6 +938,12 @@ impl Model {
             | Command::RemovePhysicsChain { .. }
             | Command::RenamePhysicsChain { .. }
             | Command::SetPhysicsChain { .. } => self.run_physics(command, changes)?,
+            Command::SetModelInfo { .. }
+            | Command::AddHitArea { .. }
+            | Command::RemoveHitArea { .. }
+            | Command::RenameHitArea { .. }
+            | Command::SetHitAreaMesh { .. }
+            | Command::SetStandardParameter { .. } => self.run_settings(command, changes)?,
             Command::AddExpression { .. }
             | Command::RemoveExpression { .. }
             | Command::RenameExpression { .. }
@@ -1519,6 +1552,35 @@ mod tests {
             },
             Command::RemovePhysicsChain {
                 name: "Cord".into(),
+            },
+            Command::SetModelInfo {
+                title: "Demo".into(),
+                author: "Someone".into(),
+                license: "CC0".into(),
+                notes: String::new(),
+            },
+            Command::AddHitArea {
+                name: "Head".into(),
+                mesh: "Scalp".into(),
+            },
+            Command::SetHitAreaMesh {
+                name: "Head".into(),
+                mesh: "Clip".into(),
+            },
+            Command::RenameHitArea {
+                name: "Head".into(),
+                new_name: "Face".into(),
+            },
+            Command::RemoveHitArea {
+                name: "Face".into(),
+            },
+            Command::SetStandardParameter {
+                role: StandardRole::AngleX,
+                parameter: Some("AngleX".into()),
+            },
+            Command::SetStandardParameter {
+                role: StandardRole::AngleX,
+                parameter: None,
             },
         ]
     }

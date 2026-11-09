@@ -27,6 +27,7 @@ pub mod physics;
 pub mod playback;
 pub mod proportional;
 pub mod rig;
+pub mod settings;
 pub mod simulate;
 pub mod table;
 pub mod tmod;

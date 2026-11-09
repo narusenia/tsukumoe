@@ -216,6 +216,12 @@ mod tests {
             Command::RemovePhysicsChain { .. } => "remove_physics_chain",
             Command::RenamePhysicsChain { .. } => "rename_physics_chain",
             Command::SetPhysicsChain { .. } => "set_physics_chain",
+            Command::SetModelInfo { .. } => "set_model_info",
+            Command::AddHitArea { .. } => "add_hit_area",
+            Command::RemoveHitArea { .. } => "remove_hit_area",
+            Command::RenameHitArea { .. } => "rename_hit_area",
+            Command::SetHitAreaMesh { .. } => "set_hit_area_mesh",
+            Command::SetStandardParameter { .. } => "set_standard_parameter",
         }
     }
 
@@ -615,6 +621,31 @@ mod tests {
                 wind: [0.0, 0.0],
                 inputs: vec![],
                 outputs: vec![],
+            },
+            Command::SetModelInfo {
+                title: String::new(),
+                author: String::new(),
+                license: String::new(),
+                notes: String::new(),
+            },
+            Command::AddHitArea {
+                name: String::new(),
+                mesh: String::new(),
+            },
+            Command::RemoveHitArea {
+                name: String::new(),
+            },
+            Command::RenameHitArea {
+                name: String::new(),
+                new_name: String::new(),
+            },
+            Command::SetHitAreaMesh {
+                name: String::new(),
+                mesh: String::new(),
+            },
+            Command::SetStandardParameter {
+                role: tsukumoe_core::settings::StandardRole::AngleX,
+                parameter: None,
             },
             Command::Batch { commands: vec![] },
         ];

@@ -12,6 +12,7 @@ use crate::model::Model;
 use crate::physics::PhysicsRig;
 use crate::playback::{Expression, Motion};
 use crate::rig::{ArtMesh, Glue, RotationDeformer, WarpDeformer};
+use crate::settings::ModelSettings;
 use crate::table::Table;
 
 /// One element's state before and after a command. `before` empty is an
@@ -72,6 +73,8 @@ pub(crate) enum Change {
     Expression(Edit<Expression>),
     /// The whole physics rig, before and after.
     Physics(Box<(PhysicsRig, PhysicsRig)>),
+    /// The model settings, before and after.
+    Settings(Box<(ModelSettings, ModelSettings)>),
     /// A parameter moved in the iteration order, from position `from` to `to`.
     ParameterOrder {
         id: Id<Parameter>,
@@ -94,6 +97,7 @@ impl Change {
             Change::Motion(e) => e.set(&mut model.motions, &e.before),
             Change::Expression(e) => e.set(&mut model.expressions, &e.before),
             Change::Physics(e) => model.physics = e.0.clone(),
+            Change::Settings(e) => model.settings = e.0.clone(),
             Change::ParameterOrder { id, from, .. } => {
                 model.parameters.move_to(*id, *from);
             }
@@ -113,6 +117,7 @@ impl Change {
             Change::Motion(e) => e.set(&mut model.motions, &e.after),
             Change::Expression(e) => e.set(&mut model.expressions, &e.after),
             Change::Physics(e) => model.physics = e.1.clone(),
+            Change::Settings(e) => model.settings = e.1.clone(),
             Change::ParameterOrder { id, to, .. } => {
                 model.parameters.move_to(*id, *to);
             }
