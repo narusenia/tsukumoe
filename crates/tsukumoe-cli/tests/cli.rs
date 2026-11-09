@@ -329,6 +329,8 @@ fn convert_writes_a_tmod_that_inspect_summarizes() {
     assert_eq!(v["motions"], 0);
     assert_eq!(v["expressions"], 0);
     assert_eq!(v["pose_groups"], 0);
+    assert_eq!(v["hit_areas"], 0);
+    assert_eq!(v["title"], "");
 
     // Same project, same bytes.
     let again = dir.with_file_name("again.tmod");

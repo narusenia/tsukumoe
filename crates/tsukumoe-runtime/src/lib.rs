@@ -26,10 +26,11 @@ pub mod pose;
 
 use std::fmt;
 
-use tsukumoe_core::compiled::CompiledModel;
+use tsukumoe_core::compiled::{CompiledModel, ModelInfoRef};
 use tsukumoe_core::draw::DrawList;
 use tsukumoe_core::eval::Frame;
 use tsukumoe_core::layout::LayoutError;
+pub use tsukumoe_core::settings::StandardRole;
 use tsukumoe_core::tmod::{self, AlignedBuf, PlaybackData, Tmod};
 
 pub use auto::{AutoConfig, BlinkConfig, BreathConfig};
@@ -151,6 +152,49 @@ impl Runtime<'_> {
 
     pub fn parameter_index(&self, name: &str) -> Option<usize> {
         self.model.parameter_index(name)
+    }
+
+    /// Title, author, license and notes; empty strings when the file has none.
+    pub fn model_info(&self) -> ModelInfoRef<'_> {
+        self.model.model_info()
+    }
+
+    /// The index of the parameter that plays `role`, if the model assigns one.
+    /// Auto blink, lip sync and tracking can use it instead of a name.
+    pub fn standard_parameter(&self, role: StandardRole) -> Option<usize> {
+        self.model.standard_parameter(role)
+    }
+
+    /// The names of the hit areas, in the order the model lists them.
+    pub fn hit_areas(&self) -> impl Iterator<Item = &str> {
+        (0..self.model.hit_areas.len()).map(|i| self.model.hit_area_name(i))
+    }
+
+    /// The names of the hit areas whose mesh covers `(x, y)` in drawing space
+    /// after the last update, in the order the model lists them. A mesh covers
+    /// the bounding rectangle of its vertices as they are now, whether or not
+    /// it is shown.
+    pub fn hit_test(&self, x: f32, y: f32) -> Vec<&str> {
+        let list = self.draw_list();
+        self.model
+            .hit_areas
+            .iter()
+            .enumerate()
+            .filter(|(_, area)| {
+                let vertices = list.drawable(area.mesh as usize).positions;
+                let (points, _) = vertices.as_chunks::<2>();
+                let Some(&first) = points.first() else {
+                    return false;
+                };
+                let (mut lo, mut hi) = (first, first);
+                for p in points {
+                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+                }
+                lo[0] <= x && x <= hi[0] && lo[1] <= y && y <= hi[1]
+            })
+            .map(|(i, _)| self.model.hit_area_name(i))
+            .collect()
     }
 
     /// Holds parameter `index` at `value` from the next update on, above

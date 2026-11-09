@@ -249,6 +249,9 @@ fn inspect(args: &[String]) -> Result<u8, Fail> {
             "curves": t.playback.curves.len(),
             "expressions": t.playback.expressions.len(),
             "pose_groups": t.playback.pose_groups.len(),
+            "title": m.model_info().title,
+            "hit_areas": m.hit_areas.len(),
+            "standard_parameters": m.standard_params.len(),
             "textures": t.texture_count(),
             "sections": sections,
         })
