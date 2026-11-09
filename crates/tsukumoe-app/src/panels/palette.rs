@@ -210,6 +210,7 @@ impl Palette {
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             if self.form.is_some() {
                 self.form = None;
+                ctx.request_repaint();
             } else {
                 self.close();
             }
@@ -278,6 +279,7 @@ impl Palette {
                     let name = self.raw[index].name.clone();
                     self.select(&name);
                     self.focus = true;
+                    ctx.request_repaint();
                 }
             }
         }
@@ -304,13 +306,17 @@ impl Palette {
         }
         if self.query != before {
             self.cursor = 0;
+            ui.ctx().request_repaint();
         }
         ui.add_space(4.0);
         let moved = std::mem::take(&mut self.moved);
         egui::ScrollArea::vertical()
             .id_salt("palette-list")
+            // A fixed height, so the box does not shrink with a narrowed list and
+            // lag behind when the list grows back.
+            .min_scrolled_height(VISIBLE_ROWS * 28.0)
             .max_height(VISIBLE_ROWS * 28.0)
-            .auto_shrink([false, true])
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 if found.is_empty() {
