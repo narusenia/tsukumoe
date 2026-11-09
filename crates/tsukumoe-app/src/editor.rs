@@ -1757,6 +1757,7 @@ impl Editor {
 
     fn status_bar(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        let selected = self.view.selected();
         ui.horizontal(|ui| match &self.doc {
             Some(doc) => {
                 hint(ui, doc.name());
@@ -1766,6 +1767,32 @@ impl Editor {
                 if let Some(e) = doc.dispatcher.error() {
                     tsukumoe_ui::badge(ui, e, Tone::Error);
                 }
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| match selected.as_slice() {
+                        [] => {}
+                        [one] => {
+                            let (Selection::Part(n)
+                            | Selection::Mesh(n)
+                            | Selection::Warp(n)
+                            | Selection::Rotation(n)
+                            | Selection::Glue(n)
+                            | Selection::Bone(n)
+                            | Selection::Parameter(n)) = one;
+                            hint(ui, n.clone());
+                        }
+                        many => {
+                            hint(
+                                ui,
+                                tsukumoe_ui::tr_args(
+                                    &ctx,
+                                    "tree-selected-count",
+                                    &[("count", many.len().into())],
+                                ),
+                            );
+                        }
+                    },
+                );
             }
             None => {
                 hint(ui, tr(&ctx, "app-no-project"));
@@ -2184,14 +2211,14 @@ impl PanelHost for Panels<'_> {
             "tree" => Icon::ListTree,
             "deformers" => Icon::Grid,
             "parameters" => Icon::Sliders,
-            "keys" => Icon::Grid,
+            "keys" => Icon::Diamond,
             "inspector" => Icon::Info,
             "history" => Icon::History,
             "timeline" => Icon::Play,
-            "expressions" => Icon::Layers,
-            "physics" => Icon::Link,
+            "expressions" => Icon::Smile,
+            "physics" => Icon::Activity,
             "model_settings" => Icon::Settings,
-            "bones" => Icon::Link,
+            "bones" => Icon::Bone,
             "palette" => Icon::Search,
             "ai_diff" => Icon::Sparkles,
             _ => return None,

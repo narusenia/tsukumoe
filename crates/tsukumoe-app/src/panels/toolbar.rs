@@ -20,7 +20,7 @@ pub fn buttons(tool: Tool, proportional: bool) -> [(&'static str, Icon, bool); 5
         ),
         (Tool::Mesh.action(), Icon::Image, tool == Tool::Mesh),
         (Tool::Deformer.action(), Icon::Grid, tool == Tool::Deformer),
-        (Tool::Bone.action(), Icon::Link, tool == Tool::Bone),
+        (Tool::Bone.action(), Icon::Bone, tool == Tool::Bone),
         ("proportional.toggle", Icon::Locate, proportional),
     ]
 }
@@ -37,6 +37,11 @@ pub fn show(
     super::overlay::tools(ctx, rect, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
         for (action, icon, pressed) in buttons(tool, proportional) {
+            // The option is not a tool: a rule sets it apart.
+            if action == "proportional.toggle" {
+                ui.add_space(2.0);
+                ui.separator();
+            }
             let mut name = tr(ctx, &label_key(action));
             if let Some(keys) = keymap.shortcut_text(ctx, action) {
                 name = format!("{name} ({keys})");

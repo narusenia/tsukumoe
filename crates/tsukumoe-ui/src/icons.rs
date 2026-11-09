@@ -91,6 +91,10 @@ icons! {
     Unlink => "unlink",
     BoxSelect => "square-dashed-mouse-pointer",
     Mirror => "mirror-rectangular",
+    Bone => "bone",
+    Activity => "activity",
+    Diamond => "diamond",
+    Smile => "smile",
 }
 
 impl Icon {
