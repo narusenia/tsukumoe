@@ -1431,6 +1431,10 @@ fn panel_snapshot(mode: Mode, name: &str, size: egui::Vec2, panel: &'static str)
     }
     let mut view = ViewState::default();
     view.timeline.motion = Some("Idle".into());
+    if panel == "curve" {
+        view.timeline.curve = Some(0);
+        view.timeline.key = Some(1);
+    }
     view.expression.name = Some("Smile".into());
     view.physics.selected = Some((physics::Kind::Pendulum, "Hair".into()));
     view.select_only(Selection::Mesh("Face".into()));
@@ -1443,9 +1447,22 @@ fn panel_snapshot(mode: Mode, name: &str, size: egui::Vec2, panel: &'static str)
             set_mode(&ctx, mode);
             let (model, view) = state;
             match panel {
-                "timeline" => drop(timeline::show(ui, model, view)),
+                "timeline" | "curve" => drop(timeline::show(ui, model, view)),
                 "expressions" => drop(expressions::show(ui, model, view)),
                 "physics" => drop(physics::show(ui, model, view)),
+                "history" => {
+                    let mut dispatcher = tsukumoe_app::dispatcher::Dispatcher::new(
+                        tsukumoe_core::model::Model::new(),
+                    );
+                    for name in ["Head", "Body", "Arm"] {
+                        let _ = dispatcher.submit(tsukumoe_core::command::Command::AddPart {
+                            name: name.into(),
+                            parent: None,
+                        });
+                    }
+                    let _ = dispatcher.undo();
+                    tsukumoe_app::panels::history::show(ui, &mut dispatcher);
+                }
                 _ => drop(inspector::show(ui, model, view.selection.as_ref(), None)),
             }
         },
@@ -1528,4 +1545,19 @@ fn palette_in_the_dark_theme() {
 #[test]
 fn palette_in_the_light_theme() {
     palette_snapshot(Mode::Light, "palette_light");
+}
+
+#[test]
+fn curve_editor_in_the_dark_theme() {
+    panel_snapshot(Mode::Dark, "curve_dark", egui::vec2(840.0, 520.0), "curve");
+}
+
+#[test]
+fn history_panel_in_the_dark_theme() {
+    panel_snapshot(
+        Mode::Dark,
+        "history_dark",
+        egui::vec2(400.0, 220.0),
+        "history",
+    );
 }

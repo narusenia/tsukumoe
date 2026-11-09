@@ -140,6 +140,7 @@ pub fn show(
 
     ui.horizontal_wrapped(|ui| {
         ui.label(target_name(model, curve.target));
+        tsukumoe_ui::group_rule(ui);
         let seg = segment_of(view, &curve);
         let on = seg.map(|s| curve.segments[s].kind());
         for (kind, key) in KINDS {

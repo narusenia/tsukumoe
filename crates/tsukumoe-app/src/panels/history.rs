@@ -53,6 +53,77 @@ pub fn rows(dispatcher: &Dispatcher) -> Vec<Row> {
     rows
 }
 
+/// The words that name what a command does; the rest name what it is done to.
+const VERBS: [&str; 15] = [
+    "add",
+    "remove",
+    "set",
+    "move",
+    "create",
+    "delete",
+    "rename",
+    "duplicate",
+    "reset",
+    "bind",
+    "unbind",
+    "import",
+    "capture",
+    "copy",
+    "clear",
+];
+
+/// A history label such as `set_mesh_opacity: Face` in the language of the UI:
+/// the words of the command name are translated and put in that language's
+/// order, then the detail follows.
+fn humanize(ctx: &egui::Context, label: &str) -> String {
+    let (head, detail) = label
+        .split_once(": ")
+        .map_or((label, None), |(h, d)| (h, Some(d)));
+    if head.is_empty()
+        || !head
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return label.to_owned();
+    }
+    let word = |w: &str| {
+        let key = format!("history-word-{w}");
+        let text = tr(ctx, &key);
+        if text == key { w.to_owned() } else { text }
+    };
+    let words: Vec<&str> = head.split('_').collect();
+    let verb_at = words.iter().position(|w| VERBS.contains(w)).unwrap_or(0);
+    let verb = word(words[verb_at]);
+    let rest: String = words
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != verb_at)
+        .map(|(_, w)| word(w))
+        .collect::<Vec<_>>()
+        .join(&tr(ctx, "history-separator"));
+    let mut op = tsukumoe_ui::tr_args(
+        ctx,
+        "history-compose",
+        &[
+            ("verb", verb.as_str().into()),
+            ("rest", rest.as_str().into()),
+        ],
+    );
+    // Without a noun the composed text can carry a dangling space.
+    op = op.trim().to_owned();
+    if let Some(first) = op.chars().next().filter(char::is_ascii_lowercase) {
+        op.replace_range(..1, &first.to_ascii_uppercase().to_string());
+    }
+    match detail {
+        Some(d) => tsukumoe_ui::tr_args(
+            ctx,
+            "history-entry",
+            &[("op", op.as_str().into()), ("detail", d.into())],
+        ),
+        None => op,
+    }
+}
+
 pub fn show(ui: &mut Ui, dispatcher: &mut Dispatcher) {
     let ctx = ui.ctx().clone();
     let mut jump = None;
@@ -62,8 +133,8 @@ pub fn show(ui: &mut Ui, dispatcher: &mut Dispatcher) {
             for row in rows(dispatcher) {
                 let text = row
                     .label
-                    .clone()
-                    .unwrap_or_else(|| tr(&ctx, "history-initial"));
+                    .as_deref()
+                    .map_or_else(|| tr(&ctx, "history-initial"), |l| humanize(&ctx, l));
                 let response = selectable_row(ui, row.state == RowState::Current, None, &text);
                 if response.clicked() {
                     jump = Some(row.position);
@@ -104,5 +175,23 @@ mod tests {
         assert_eq!(rows(&d)[3].position, 3);
         d.submit_labeled(part("d"), Some("named".into())).unwrap();
         assert_eq!(rows(&d)[3].label.as_deref(), Some("named"));
+    }
+
+    #[test]
+    fn a_label_reads_in_the_language_of_the_ui() {
+        let ctx = egui::Context::default();
+        tsukumoe_ui::set_language(&ctx, tsukumoe_ui::Language::En);
+        assert_eq!(
+            humanize(&ctx, "set_mesh_opacity: Face"),
+            "Set mesh opacity: Face"
+        );
+        assert_eq!(humanize(&ctx, "named by hand"), "named by hand");
+        tsukumoe_ui::set_language(&ctx, tsukumoe_ui::Language::Ja);
+        assert_eq!(
+            humanize(&ctx, "set_mesh_opacity: Face"),
+            "メッシュ不透明度設定: Face"
+        );
+        assert_eq!(humanize(&ctx, "add_part: c"), "パーツ追加: c");
+        assert_eq!(humanize(&ctx, "param_add_key: P"), "パラメータキー追加: P");
     }
 }

@@ -382,6 +382,7 @@ fn actions_row(
         // Length, rate and loop: one command per finished edit.
         let mut next = (motion.duration, motion.fps, motion.looped);
         let mut changed = false;
+        tsukumoe_ui::group_rule(ui);
         tsukumoe_ui::hint(ui, t("timeline-duration"));
         if let Some(v) = number_edit(ui, next.0, 0.0..=3600.0, 0.05, &t("timeline-duration")) {
             next.0 = v;
