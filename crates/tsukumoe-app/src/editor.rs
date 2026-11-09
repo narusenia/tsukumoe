@@ -18,7 +18,7 @@ use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::options::Options;
 use crate::panels::palette::Palette;
 use crate::panels::{
-    history, inspector, keys, parameters, splash, timeline, titlebar, tree, viewport,
+    expressions, history, inspector, keys, parameters, splash, timeline, titlebar, tree, viewport,
 };
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
@@ -1997,6 +1997,7 @@ impl PanelHost for Panels<'_> {
             "inspector" => Icon::Info,
             "history" => Icon::History,
             "timeline" => Icon::Play,
+            "expressions" => Icon::Layers,
             "palette" => Icon::Search,
             "ai_diff" => Icon::Sparkles,
             _ => return None,
@@ -2024,6 +2025,13 @@ impl PanelHost for Panels<'_> {
             "timeline" => {
                 for out in timeline::show(ui, doc.dispatcher.model(), &mut editor.view) {
                     editor.apply_timeline_out(&ctx, out);
+                }
+            }
+            "expressions" => {
+                for expressions::Out::Command(command, label) in
+                    expressions::show(ui, doc.dispatcher.model(), &mut editor.view)
+                {
+                    editor.submit_labeled(&ctx, command, Some(label));
                 }
             }
             "tree" | "deformers" => {

@@ -29,7 +29,8 @@
         "tabs": [
           "parameters",
           "history",
-          "timeline"
+          "timeline",
+          "expressions"
         ],
         "active": 0
       }

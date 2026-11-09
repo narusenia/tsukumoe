@@ -42,7 +42,8 @@
           "type": "tabs",
           "tabs": [
             "history",
-            "timeline"
+            "timeline",
+            "expressions"
           ],
           "active": 0
         }

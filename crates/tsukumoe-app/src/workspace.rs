@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tsukumoe_ui::dock::Layout;
 
 /// The standard panels, by id. Every layout must stay within this set.
-pub const PANELS: [&str; 10] = [
+pub const PANELS: [&str; 11] = [
     "viewport",
     "tree",
     "deformers",
@@ -18,6 +18,7 @@ pub const PANELS: [&str; 10] = [
     "inspector",
     "history",
     "timeline",
+    "expressions",
     "palette",
     "ai_diff",
 ];

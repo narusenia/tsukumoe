@@ -6,6 +6,7 @@
 
 pub mod curve_editor;
 pub mod deformer_overlay;
+pub mod expressions;
 pub mod history;
 pub mod inspector;
 pub mod keys;

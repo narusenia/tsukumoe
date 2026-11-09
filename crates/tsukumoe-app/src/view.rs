@@ -135,6 +135,8 @@ pub struct ViewState {
     pub grid_axes: (usize, usize),
     /// The timeline's motion, playhead and zoom. Not saved.
     pub timeline: crate::panels::timeline::State,
+    /// The expressions panel's pick, weight and preview. Not saved.
+    pub expression: crate::panels::expressions::State,
     /// Proportional edit options; not saved with the project or the layout.
     pub proportional: crate::proportional::Proportional,
 }

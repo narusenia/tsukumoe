@@ -32,6 +32,7 @@
           "type": "tabs",
           "tabs": [
             "timeline",
+            "expressions",
             "parameters"
           ],
           "active": 0
