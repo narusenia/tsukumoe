@@ -184,6 +184,74 @@ impl Curve {
         }
         Ok(())
     }
+
+    /// Changes the kind of segment `segment` (the one that starts at key
+    /// `segment`). The end point stays. A new Bezier gets its controls at the
+    /// thirds of the straight line between its keys.
+    pub fn set_kind(&mut self, segment: usize, kind: SegmentKind) -> Result<(), KeyError> {
+        let (Some(from), Some(s)) = (self.key(segment), self.segments.get(segment).copied()) else {
+            return Err(KeyError::NoSuchKey);
+        };
+        let end = s.end();
+        if s.kind() == kind {
+            return Ok(());
+        }
+        let third = |u: f32| {
+            [
+                from[0] + (end[0] - from[0]) * u,
+                from[1] + (end[1] - from[1]) * u,
+            ]
+        };
+        self.segments[segment] = match kind {
+            SegmentKind::Linear => Segment::Linear(end),
+            SegmentKind::Bezier => Segment::Bezier([third(1.0 / 3.0), third(2.0 / 3.0), end]),
+            SegmentKind::Stepped => Segment::Stepped(end),
+            SegmentKind::InverseStepped => Segment::InverseStepped(end),
+        };
+        Ok(())
+    }
+
+    /// Moves control `control` (0 or 1) of the Bezier segment `segment`. The
+    /// time stays between the segment's keys, which keeps its time monotone.
+    pub fn move_control(
+        &mut self,
+        segment: usize,
+        control: usize,
+        point: Point,
+    ) -> Result<(), KeyError> {
+        let (Some(from), Some(s)) = (self.key(segment), self.segments.get(segment).copied()) else {
+            return Err(KeyError::NoSuchKey);
+        };
+        let Segment::Bezier(mut p) = s else {
+            return Err(KeyError::BadKey);
+        };
+        if control > 1 || !point[0].is_finite() || !point[1].is_finite() {
+            return Err(KeyError::BadKey);
+        }
+        p[control] = [point[0].clamp(from[0], p[2][0]), point[1]];
+        self.segments[segment] = Segment::Bezier(p);
+        Ok(())
+    }
+}
+
+/// The kinds of [`Segment`], without their points.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentKind {
+    Linear,
+    Bezier,
+    Stepped,
+    InverseStepped,
+}
+
+impl Segment {
+    pub fn kind(&self) -> SegmentKind {
+        match self {
+            Self::Linear(_) => SegmentKind::Linear,
+            Self::Bezier(_) => SegmentKind::Bezier,
+            Self::Stepped(_) => SegmentKind::Stepped,
+            Self::InverseStepped(_) => SegmentKind::InverseStepped,
+        }
+    }
 }
 
 fn shift(p: Point, d: Point) -> Point {

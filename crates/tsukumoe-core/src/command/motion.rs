@@ -305,4 +305,61 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn switching_the_kind_keeps_the_end_and_a_new_bezier_draws_the_line() {
+        use crate::playback::SegmentKind;
+        let m = model();
+        let target = m.parameters().find("P").unwrap();
+        let mut c = Curve {
+            target: CurveTarget::Parameter(target),
+            start: [0.0, 0.0],
+            segments: vec![Segment::Linear([2.0, 4.0]), Segment::Linear([3.0, 0.0])],
+            fade_in: None,
+            fade_out: None,
+        };
+        let line = c.clone();
+        c.set_kind(0, SegmentKind::Bezier).unwrap();
+        assert_eq!(c.segments[0].end(), [2.0, 4.0]);
+        for t in [0.0, 0.5, 1.0, 1.9] {
+            assert!((line.value_at(t) - c.value_at(t)).abs() < 1e-3, "at {t}");
+        }
+        for kind in [
+            SegmentKind::Stepped,
+            SegmentKind::InverseStepped,
+            SegmentKind::Linear,
+        ] {
+            c.set_kind(1, kind).unwrap();
+            assert_eq!(c.segments[1].kind(), kind);
+            assert_eq!(c.segments[1].end(), [3.0, 0.0]);
+        }
+        assert!(c.set_kind(2, SegmentKind::Linear).is_err());
+    }
+
+    #[test]
+    fn a_control_stays_between_the_keys_of_its_segment() {
+        use crate::playback::SegmentKind;
+        let m = model();
+        let target = m.parameters().find("P").unwrap();
+        let mut c = Curve {
+            target: CurveTarget::Parameter(target),
+            start: [1.0, 0.0],
+            segments: vec![Segment::Linear([2.0, 4.0])],
+            fade_in: None,
+            fade_out: None,
+        };
+        assert!(
+            c.move_control(0, 0, [1.5, 1.0]).is_err(),
+            "not a Bezier yet"
+        );
+        c.set_kind(0, SegmentKind::Bezier).unwrap();
+        c.move_control(0, 0, [9.0, 7.0]).unwrap();
+        c.move_control(0, 1, [-9.0, -7.0]).unwrap();
+        let Segment::Bezier([a, b, _]) = c.segments[0] else {
+            panic!()
+        };
+        assert_eq!((a, b), ([2.0, 7.0], [1.0, -7.0]));
+        assert!(c.is_ordered());
+        assert!(c.move_control(0, 2, [1.5, 0.0]).is_err());
+    }
 }
