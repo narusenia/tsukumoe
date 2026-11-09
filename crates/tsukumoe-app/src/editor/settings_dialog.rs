@@ -372,7 +372,12 @@ impl Editor {
                 };
                 let before = current.clone();
                 ui.horizontal(|ui| {
-                    ui.label(format!("{}", i + 1));
+                    // The same width for every slot, whatever it holds.
+                    ui.spacing_mut().combo_width = 180.0;
+                    ui.add_sized(
+                        egui::vec2(14.0, ui.spacing().interact_size.y),
+                        egui::Label::new(format!("{}", i + 1)),
+                    );
                     tsukumoe_ui::select(
                         ui,
                         id.clone(),
