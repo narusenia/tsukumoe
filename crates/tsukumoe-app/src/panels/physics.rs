@@ -11,8 +11,11 @@ use egui::Ui;
 use tsukumoe_core::command::{Command, PhysicsInputDef, PhysicsOutputDef};
 use tsukumoe_core::model::Model;
 use tsukumoe_core::physics::{ChainJoint, Channel, Particle, PendulumGroup, PhysicsChain, Range};
-use tsukumoe_ui::{Icon, Variant, button, checkbox, hint, icon_button, number, section_header, tr};
+use tsukumoe_ui::{
+    Icon, Variant, button, checkbox, hint, icon_button, number, section_header, slider, tr,
+};
 
+use crate::physics_preset::{self as preset, HEAD_INPUTS, Preset, feel_of};
 use crate::view::ViewState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +28,16 @@ pub enum Kind {
 #[derive(Clone, Debug, Default)]
 pub struct State {
     pub selected: Option<(Kind, String)>,
+    /// The test that wiggles the inputs of the picked group, while it runs.
+    testing: Option<Test>,
+}
+
+#[derive(Clone, Debug)]
+struct Test {
+    group: (Kind, String),
+    /// The values the inputs had when the test started.
+    base: Vec<(String, f32)>,
+    time: f32,
 }
 
 pub enum Out {
@@ -161,14 +174,21 @@ fn io_tables(
     inputs: &mut Vec<PhysicsInputDef>,
     outputs: &mut Vec<PhysicsOutputDef>,
     targets: usize,
+    focus: Option<&str>,
 ) -> bool {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    let first = model
-        .parameters()
-        .iter()
-        .next()
-        .map(|(_, n, _)| n.to_owned());
+    // A new row takes the parameter in focus in the parameters panel, else the first.
+    let first = focus
+        .filter(|f| model.parameters().find(f).is_some())
+        .map(str::to_owned)
+        .or_else(|| {
+            model
+                .parameters()
+                .iter()
+                .next()
+                .map(|(_, n, _)| n.to_owned())
+        });
     let mut changed = false;
     section_header(ui, &t("physics-inputs"));
     let mut remove = None;
@@ -275,6 +295,20 @@ fn range_row(ui: &mut Ui, ctx: &egui::Context, label: &str, range: &mut Range) -
     changed
 }
 
+/// Adds an input for each head parameter the model has and the group lacks.
+fn add_head_inputs(model: &Model, inputs: &mut Vec<PhysicsInputDef>) {
+    for (name, channel, weight) in HEAD_INPUTS {
+        if model.parameters().find(name).is_some() && !inputs.iter().any(|i| i.parameter == name) {
+            inputs.push(PhysicsInputDef {
+                parameter: name.to_owned(),
+                channel,
+                weight,
+                reflect: false,
+            });
+        }
+    }
+}
+
 /// Drops the outputs on particle `removed` and moves the ones after it back.
 fn forget_target(outputs: &mut Vec<PhysicsOutputDef>, removed: usize) {
     outputs.retain(|o| o.particle != removed);
@@ -286,63 +320,137 @@ fn forget_target(outputs: &mut Vec<PhysicsOutputDef>, removed: usize) {
 }
 
 /// Edits a pendulum group; the command if anything finished changing.
-fn pendulum(ui: &mut Ui, model: &Model, group: &PendulumGroup) -> Option<Command> {
+fn pendulum(
+    ui: &mut Ui,
+    model: &Model,
+    group: &PendulumGroup,
+    focus: Option<&str>,
+) -> Option<Command> {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
     let mut inputs = input_defs(model, &group.inputs);
     let mut outputs = output_defs(model, &group.outputs);
     let mut particles = group.particles.clone();
     let (mut position, mut angle) = (group.position_range, group.angle_range);
-    let mut changed = range_row(ui, &ctx, &t("physics-position-range"), &mut position);
-    changed |= range_row(ui, &ctx, &t("physics-angle-range"), &mut angle);
-    changed |= io_tables(ui, model, &mut inputs, &mut outputs, particles.len());
-    section_header(ui, &t("physics-particles"));
-    let mut remove = None;
-    let count = particles.len();
-    for (i, p) in particles.iter_mut().enumerate() {
-        ui.push_id(("particle", i), |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(i.to_string());
-                changed |= field(ui, &mut p.position[0], -1.0e6..=1.0e6, &t("physics-x"));
-                changed |= field(ui, &mut p.position[1], -1.0e6..=1.0e6, &t("physics-y"));
-                changed |= field(ui, &mut p.mobility, 0.0..=1.0, &t("physics-mobility"));
-                changed |= field(ui, &mut p.delay, 0.0..=10.0, &t("physics-delay"));
-                changed |= field(
-                    ui,
-                    &mut p.acceleration,
-                    0.0..=100.0,
-                    &t("physics-acceleration"),
-                );
-                changed |= field(ui, &mut p.radius, 0.0..=1000.0, &t("physics-radius"));
-                ui.add_enabled_ui(count > 1, |ui| {
-                    if icon_button(ui, Icon::Trash, &t("physics-row-delete"), Variant::Ghost)
-                        .clicked()
-                    {
-                        remove = Some(i);
-                    }
+    let mut changed = false;
+    // Presets: the particles of a kind of hair, and the head inputs it needs.
+    ui.horizontal_wrapped(|ui| {
+        ui.label(t("physics-preset"));
+        for p in Preset::ALL {
+            if button(ui, &t(p.key()), Variant::Secondary).clicked() {
+                particles = preset::particles(p.feel(), p.count());
+                outputs.retain(|o| o.particle < particles.len());
+                if inputs.is_empty() {
+                    add_head_inputs(model, &mut inputs);
+                }
+                changed = true;
+            }
+        }
+    });
+    // The three knobs, read back from particle 1.
+    let mut feel = feel_of(&particles);
+    let before = feel;
+    let mut knob = false;
+    for (value, key) in [
+        (&mut feel.sway, "physics-sway"),
+        (&mut feel.stickiness, "physics-stickiness"),
+        (&mut feel.length, "physics-length-knob"),
+    ] {
+        ui.horizontal(|ui| {
+            ui.label(t(key));
+            knob |= done(&slider(ui, value, 0.0..=1.0, &t(key)));
+        });
+    }
+    if knob && feel != before {
+        particles = preset::particles(feel, particles.len());
+        changed = true;
+    }
+    // Inputs by the head parameters the model has.
+    let present: Vec<_> = HEAD_INPUTS
+        .iter()
+        .filter(|(n, _, _)| model.parameters().find(n).is_some())
+        .collect();
+    ui.horizontal_wrapped(|ui| {
+        ui.label(t("physics-head-inputs"));
+        for &&(name, channel, weight) in &present {
+            let mut on = inputs.iter().any(|i| i.parameter == name);
+            if checkbox(ui, &mut on, name).changed() {
+                if on {
+                    inputs.push(PhysicsInputDef {
+                        parameter: name.to_owned(),
+                        channel,
+                        weight,
+                        reflect: false,
+                    });
+                } else {
+                    inputs.retain(|i| i.parameter != name);
+                }
+                changed = true;
+            }
+        }
+        if present.is_empty() {
+            hint(ui, t("physics-no-head-inputs"));
+        }
+    });
+    changed |= io_tables(ui, model, &mut inputs, &mut outputs, particles.len(), focus);
+    egui::CollapsingHeader::new(t("physics-details"))
+        .id_salt("physics-details")
+        .show(ui, |ui| {
+            changed |= range_row(ui, &ctx, &t("physics-position-range"), &mut position);
+            changed |= range_row(ui, &ctx, &t("physics-angle-range"), &mut angle);
+            section_header(ui, &t("physics-particles"));
+            let mut remove = None;
+            let count = particles.len();
+            for (i, p) in particles.iter_mut().enumerate() {
+                ui.push_id(("particle", i), |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(i.to_string());
+                        changed |= field(ui, &mut p.position[0], -1.0e6..=1.0e6, &t("physics-x"));
+                        changed |= field(ui, &mut p.position[1], -1.0e6..=1.0e6, &t("physics-y"));
+                        changed |= field(ui, &mut p.mobility, 0.0..=1.0, &t("physics-mobility"));
+                        changed |= field(ui, &mut p.delay, 0.0..=10.0, &t("physics-delay"));
+                        changed |= field(
+                            ui,
+                            &mut p.acceleration,
+                            0.0..=100.0,
+                            &t("physics-acceleration"),
+                        );
+                        changed |= field(ui, &mut p.radius, 0.0..=1000.0, &t("physics-radius"));
+                        ui.add_enabled_ui(count > 1, |ui| {
+                            if icon_button(
+                                ui,
+                                Icon::Trash,
+                                &t("physics-row-delete"),
+                                Variant::Ghost,
+                            )
+                            .clicked()
+                            {
+                                remove = Some(i);
+                            }
+                        });
+                    });
                 });
-            });
+            }
+            if let Some(i) = remove {
+                particles.remove(i);
+                forget_target(&mut outputs, i);
+                changed = true;
+            }
+            if button(ui, &t("physics-add-particle"), Variant::Secondary).clicked() {
+                let last = particles.last().copied().unwrap_or(Particle {
+                    position: [0.0, 0.0],
+                    mobility: 0.95,
+                    delay: 0.9,
+                    acceleration: 1.5,
+                    radius: 10.0,
+                });
+                particles.push(Particle {
+                    position: [last.position[0], last.position[1] + last.radius.max(1.0)],
+                    ..last
+                });
+                changed = true;
+            }
         });
-    }
-    if let Some(i) = remove {
-        particles.remove(i);
-        forget_target(&mut outputs, i);
-        changed = true;
-    }
-    if button(ui, &t("physics-add-particle"), Variant::Secondary).clicked() {
-        let last = particles.last().copied().unwrap_or(Particle {
-            position: [0.0, 0.0],
-            mobility: 0.95,
-            delay: 0.9,
-            acceleration: 1.5,
-            radius: 10.0,
-        });
-        particles.push(Particle {
-            position: [last.position[0], last.position[1] + last.radius.max(1.0)],
-            ..last
-        });
-        changed = true;
-    }
     changed.then(|| Command::SetPendulum {
         name: group.name.clone(),
         inputs,
@@ -354,7 +462,7 @@ fn pendulum(ui: &mut Ui, model: &Model, group: &PendulumGroup) -> Option<Command
 }
 
 /// Edits a physics chain; the command if anything finished changing.
-fn chain(ui: &mut Ui, model: &Model, c: &PhysicsChain) -> Option<Command> {
+fn chain(ui: &mut Ui, model: &Model, c: &PhysicsChain, focus: Option<&str>) -> Option<Command> {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
     let mut inputs = input_defs(model, &c.inputs);
@@ -372,7 +480,7 @@ fn chain(ui: &mut Ui, model: &Model, c: &PhysicsChain) -> Option<Command> {
             changed |= field(ui, &mut v[1], -1.0e4..=1.0e4, &t("physics-y"));
         });
     }
-    changed |= io_tables(ui, model, &mut inputs, &mut outputs, joints.len());
+    changed |= io_tables(ui, model, &mut inputs, &mut outputs, joints.len(), focus);
     section_header(ui, &t("physics-joints"));
     let mut remove = None;
     let count = joints.len();
@@ -414,6 +522,110 @@ fn chain(ui: &mut Ui, model: &Model, c: &PhysicsChain) -> Option<Command> {
         inputs,
         outputs,
     })
+}
+
+/// The names of the parameters a group takes as input.
+fn input_names(model: &Model, kind: Kind, name: &str) -> Vec<String> {
+    let inputs = match kind {
+        Kind::Pendulum => model
+            .physics()
+            .pendulums
+            .iter()
+            .find(|g| g.name == name)
+            .map(|g| &g.inputs),
+        Kind::Chain => model
+            .physics()
+            .chains
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| &c.inputs),
+    };
+    inputs
+        .into_iter()
+        .flatten()
+        .filter_map(|i| model.parameters().name(i.parameter).map(str::to_owned))
+        .collect()
+}
+
+/// Puts the inputs back to what they were and ends the test.
+fn stop_test(model: &Model, view: &mut ViewState) {
+    for (name, value) in view
+        .physics
+        .testing
+        .take()
+        .map(|t| t.base)
+        .unwrap_or_default()
+    {
+        if let Some(p) = model
+            .parameters()
+            .find(&name)
+            .and_then(|id| model.parameters().get(id))
+        {
+            view.set_param(&name, p, value);
+        }
+    }
+}
+
+/// The button that wiggles the inputs of the picked group, and the wiggle.
+fn test_row(ui: &mut Ui, model: &Model, view: &mut ViewState, kind: Kind, name: &str) {
+    let ctx = ui.ctx().clone();
+    let t = |k: &str| tr(&ctx, k);
+    let names = input_names(model, kind, name);
+    let group = (kind, name.to_owned());
+    if view
+        .physics
+        .testing
+        .as_ref()
+        .is_some_and(|test| test.group != group)
+    {
+        stop_test(model, view);
+    }
+    ui.horizontal(|ui| {
+        if view.physics.testing.is_some() {
+            if button(ui, &t("physics-test-stop"), Variant::Secondary).clicked() {
+                stop_test(model, view);
+            }
+        } else {
+            ui.add_enabled_ui(!names.is_empty(), |ui| {
+                if button(ui, &t("physics-test"), Variant::Secondary)
+                    .on_hover_text(t("physics-test-hint"))
+                    .clicked()
+                {
+                    let base = names
+                        .iter()
+                        .filter_map(|n| {
+                            let p = model.parameters().get(model.parameters().find(n)?)?;
+                            Some((n.clone(), view.param(n, p)))
+                        })
+                        .collect();
+                    view.physics.testing = Some(Test {
+                        group,
+                        base,
+                        time: 0.0,
+                    });
+                }
+            });
+            if names.is_empty() {
+                hint(ui, t("physics-test-no-input"));
+            }
+        }
+    });
+    if let Some(test) = view.physics.testing.as_mut() {
+        test.time += ui.input(|i| i.stable_dt);
+        let time = test.time;
+        for (i, n) in names.iter().enumerate() {
+            if let Some(p) = model
+                .parameters()
+                .find(n)
+                .and_then(|id| model.parameters().get(id))
+            {
+                let swing = (p.max - p.default).min(p.default - p.min).max(0.0) * 0.8;
+                let value = p.default + swing * (time * 2.4 + i as f32 * 1.3).sin();
+                view.set_param(n, p, value);
+            }
+        }
+        ui.ctx().request_repaint();
+    }
 }
 
 pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
@@ -487,6 +699,9 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         hint(ui, t("physics-empty"));
         return outs;
     };
+    test_row(ui, model, view, kind, &name);
+    let focus = view.param_focus.clone();
+    let focus = focus.as_deref();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .id_salt("physics-scroll")
@@ -497,13 +712,13 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     .pendulums
                     .iter()
                     .find(|g| g.name == name)
-                    .and_then(|g| pendulum(ui, model, g)),
+                    .and_then(|g| pendulum(ui, model, g, focus)),
                 Kind::Chain => model
                     .physics()
                     .chains
                     .iter()
                     .find(|c| c.name == name)
-                    .and_then(|c| chain(ui, model, c)),
+                    .and_then(|c| chain(ui, model, c, focus)),
             };
             if let Some(command) = command {
                 outs.push(Out::Command(command, format!("physics_set: {name}")));
@@ -523,6 +738,13 @@ mod tests {
         for c in [
             Command::AddParameter {
                 name: "AngleX".into(),
+                min: -30.0,
+                max: 30.0,
+                default: 0.0,
+                repeat: false,
+            },
+            Command::AddParameter {
+                name: "ParamAngleX".into(),
                 min: -30.0,
                 max: 30.0,
                 default: 0.0,
@@ -605,6 +827,62 @@ mod tests {
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs[0].parameter, "AngleX");
         assert_eq!(particles.len(), 2);
+    }
+
+    #[test]
+    fn a_preset_sets_the_particles_and_the_head_inputs() {
+        let mut h = harness(true);
+        h.run();
+        h.get_by_label("Long hair").click();
+        h.run();
+        let Some(Out::Command(
+            Command::SetPendulum {
+                inputs, particles, ..
+            },
+            _,
+        )) = h.state().outs.last()
+        else {
+            panic!("a SetPendulum");
+        };
+        assert_eq!(particles.len(), Preset::LongHair.count());
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].parameter, "ParamAngleX");
+    }
+
+    #[test]
+    fn the_test_wiggles_the_inputs_and_stop_puts_them_back() {
+        let mut h = harness(true);
+        h.state_mut()
+            .model
+            .apply(Command::SetPendulum {
+                name: "Hair".into(),
+                inputs: vec![PhysicsInputDef {
+                    parameter: "ParamAngleX".into(),
+                    channel: Channel::X,
+                    weight: 60.0,
+                    reflect: false,
+                }],
+                outputs: vec![],
+                particles: model().physics().pendulums[0].particles.clone(),
+                position_range: model().physics().pendulums[0].position_range,
+                angle_range: model().physics().pendulums[0].angle_range,
+            })
+            .unwrap();
+        h.run();
+        h.get_by_label("Wiggle to test").click();
+        h.run_steps(8);
+        let value = |h: &Harness<'_, Panel>| {
+            let m = &h.state().model;
+            let p = m
+                .parameters()
+                .get(m.parameters().find("ParamAngleX").unwrap())
+                .unwrap();
+            h.state().view.param("ParamAngleX", p)
+        };
+        assert!(value(&h) != 0.0, "the input moves");
+        h.get_by_label("Stop the test").click();
+        h.run_steps(3);
+        assert_eq!(value(&h), 0.0);
     }
 
     #[test]

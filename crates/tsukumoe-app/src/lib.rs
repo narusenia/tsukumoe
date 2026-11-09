@@ -26,6 +26,7 @@ mod native;
 pub mod options;
 pub mod panels;
 pub mod param_ops;
+pub mod physics_preset;
 pub mod picker;
 pub mod pie;
 pub mod project;
