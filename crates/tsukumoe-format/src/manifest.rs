@@ -9,8 +9,8 @@ use crate::error::Error;
 pub const FORMAT_NAME: &str = "tsukumoe-project";
 /// The newest major version this reader understands.
 pub const MAJOR: u32 = 1;
-/// 1.1 added `visible` to meshes (M5-03).
-pub const MINOR: u32 = 1;
+/// 1.1 added `visible` to meshes (M5-03). 1.2 added `settings` (M5-10).
+pub const MINOR: u32 = 2;
 /// Features this reader implements. None yet.
 pub const KNOWN_FEATURES: &[&str] = &[];
 

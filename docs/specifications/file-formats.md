@@ -57,7 +57,7 @@ All are UTF-8 JSON in the order of the field definitions in the Rust types (`tsu
 
 | File | Content |
 |---|---|
-| `model.json` | `parameters`, `parts`, `bindings`, `bones`, `warps`, `rotations`, `meshes`, `glues`, `blend_shapes`, `drivers`, optional `pose` |
+| `model.json` | `parameters`, `parts`, `bindings`, `bones`, `warps`, `rotations`, `meshes`, `glues`, `blend_shapes`, `drivers`, optional `pose`, optional `settings` |
 | `physics.json` | `pendulums`, `chains` |
 | `motions/NNNNNN-name.json` | one motion; the real name is the `name` field inside |
 | `expressions/NNNNNN-name.json` | one expression, same naming |
@@ -67,6 +67,7 @@ All are UTF-8 JSON in the order of the field definitions in the Rust types (`tsu
 - Files under `motions/` and `expressions/` are numbered in the order of the model's table so the order survives; the name part is the real name with every byte outside `A-Z a-z 0-9 - _` written as `%XX`. A reader takes the name from inside the file.
 - Fields with a natural default (opacity 1, draw order 500, colors, `visible`, empty lists) may be left out when a file is edited by hand; a writer always writes them.
 - Version 1.1 added the optional `visible` field of meshes (default true; a hidden mesh stays in the model and is left out of the draw list, as is every mesh of a hidden part). A 1.0 file reads as all meshes shown; a 1.0 reader ignores the field.
+- Version 1.2 added the optional `settings` of `model.json`: `info` (`title`, `author`, `license`, `notes`), `hit_areas` (`name` and the `mesh` it covers, by name) and `standard` (a `role` such as `angle_x` or `mouth_open`, and the `parameter` that plays it, by name; a role appears at most once). A writer leaves it out when all of it is empty. A 1.1 file reads as no settings; a 1.1 reader ignores the field.
 - Reading validates the content as a model: a name that is not defined, a duplicate name, or a geometry that does not fit is an error that names the element.
 - Numbers must be finite; JSON has no NaN or infinity.
 
@@ -175,10 +176,16 @@ The distribution format. Designed for zero-copy loading: after validation, the e
 | `0x99` | `pose_links` | `u32` | 4 | optional playback: part indices linked to an entry |
 | `0x9A` | `mesh_hidden` | `u32` | 4 | optional: ascending indices of the meshes the draw list leaves out (a hidden mesh or a mesh of a hidden part); written only when there is one, so other files are unchanged |
 | `0x9B` | `warp_bezier` | `u32` | 4 | optional: ascending indices of the warps evaluated with the bicubic surface (evaluation.md); written only when there is one, so other files are unchanged. A reader that does not know it evaluates every warp bilinearly |
+| `0x9C` | `settings_strings` | `u8` | 1 | optional settings: UTF-8 text that the info and the hit area names point into |
+| `0x9D` | `model_info` | `ModelInfoDef` | 32 | optional settings: zero or one element |
+| `0x9E` | `hit_areas` | `HitAreaDef` | 16 | optional settings: one per hit area |
+| `0x9F` | `standard_params` | `StandardParamDef` | 8 | optional settings: one per parameter that plays a standard role |
 
 IDs from `0x2A` up to `0x7F` other than those listed are reserved for later minor versions; `0x80` and up are optional content. The texture sections are written together or not at all; texture `i` of a mesh (`texture` field) is entry `i` of the table, in the order of `textures/*.png` in the project.
 
 The playback sections `0x90` to `0x99` are optional, not marked required (a reader that predates them skips them, REQ-FMT-005), and written together or not at all. A writer omits all ten for a model with no motion, expression or pose, so such a file is the same as one written before they existed. A reader that knows them reads either form. All ten are written in ascending ID order after the texture sections. Names are in `playback_strings`, not in `strings`, so the evaluation data does not change.
+
+The settings sections `0x9C` to `0x9F` follow the same rules: optional, written together or not at all, omitted for a model whose settings are empty (so such a file is the same as one written before they existed), and written in ascending ID order after `warp_bezier`. The text is in `settings_strings`, not in `strings`. A writer that has settings always writes `model_info` (one element), even if every text is empty.
 
 ### 2.4 Elements
 
@@ -241,6 +248,8 @@ Attributes (`base_attrs`, `mesh_kf_attrs`): opacity, draw order, multiply color 
 
 **`BlendDef`** (24): `target_kind` (0: 0 mesh, 1 warp), `target` (4, index), `parameter` (8), `key_start` (12), `key_count` (16), `delta_start` (20, float offset in `blend_deltas`; `2 * vertex_count` or `2 * point_count` floats). Keys and weights are `blend_keys` / `blend_weights` from `key_start`, `key_count` entries each; keys are strictly ascending and finite. The blend shapes of a mesh or warp are `blend_refs[blend_start .. blend_start + blend_count]`; each entry is a blend index whose target is that mesh or warp.
 
+**Settings sections.** `model_info` holds `ModelInfoDef` (32): `title` (0), `author` (8), `license` (16), `notes` (24), each a `StrRef` into `settings_strings`. **`HitAreaDef`** (16): `name` (0, `StrRef` into `settings_strings`), `mesh` (8, mesh index), `reserved` (12, 0). A hit test is done by the reader against the current bounds of the mesh; names are unique. **`StandardParamDef`** (8): `role` (0), `parameter` (4, parameter index). Roles by code: 0 `angle_x`, 1 `angle_y`, 2 `angle_z`, 3 `body_angle_x`, 4 `body_angle_y`, 5 `body_angle_z`, 6 `eye_l_open`, 7 `eye_r_open`, 8 `eye_ball_x`, 9 `eye_ball_y`, 10 `mouth_open`, 11 `mouth_form`, 12 `brow_l_y`, 13 `brow_r_y`; later roles take later codes. A role appears at most once.
+
 **Playback sections.** Parameters and parts are indices into `parameters` and `part_opacity` (the same part order). `start` / `count` pairs address the section named in the field's description.
 
 - **`MotionDef`** (36): `name` (0, `StrRef` into `playback_strings`), `duration` (8, f32, seconds), `fps` (12, f32, informational: curves are sampled by time), `looped` (16, flag), `fade_in` (20, f32, seconds), `fade_out` (24, f32), `curve_start` (28), `curve_count` (32). Curves: `motion_curves[curve_start .. curve_start + curve_count]`.
@@ -265,6 +274,7 @@ A loader checks the following before it exposes the data, and rejects the file w
 7. Drivers: the instruction rules of `Op` above.
 8. Textures (when present): both sections present, every entry inside `texture_data` and starting with the PNG signature.
 9. Playback sections (when any is present): all ten present; every `start + count` inside its array; names inside `playback_strings` and UTF-8; every target, parameter and part index inside its array; enumerations (`target_kind`, curve flags, segment kind, blend) known; flags 0 or 1; every `f32` finite, and fade times, `duration` and `fps` not negative; segment times never decreasing and Bezier control times between the ends; at most one `pose` element.
+10. Settings sections (when any is present): all four present; at most one `model_info`, and none of the other three without it; every `StrRef` inside `settings_strings` and UTF-8; every mesh and parameter index inside its array; hit area names unique; roles known and appearing once; `reserved` 0.
 
 Limits: at most 256 sections; at most 16 axes per binding; `corner_capacity` at most 2^20; arrays of fewer than 2^32 - 1 elements; instruction stack of 16.
 

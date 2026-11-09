@@ -250,7 +250,7 @@ fn rich_bytes() -> Vec<u8> {
     write(&c, &[&png, &png2]).unwrap()
 }
 
-/// The rich model with two motions, two expressions and a pose.
+/// The rich model with two motions, two expressions, a pose and settings.
 pub(crate) fn playback_model() -> Model {
     let mut m = rich_model();
     let part = m.parts.find("Part").unwrap();
@@ -347,6 +347,23 @@ pub(crate) fn playback_model() -> Model {
             },
         ]],
     });
+    let mesh = m.meshes.iter().next().map(|(id, _, _)| id).unwrap();
+    m.settings = crate::settings::ModelSettings {
+        info: crate::settings::ModelInfo {
+            title: "題".into(),
+            author: "A".into(),
+            license: String::new(),
+            notes: "n".into(),
+        },
+        hit_areas: vec![crate::settings::HitArea {
+            name: "Head".into(),
+            mesh,
+        }],
+        standard: vec![
+            (crate::settings::StandardRole::AngleX, p),
+            (crate::settings::StandardRole::MouthOpen, q),
+        ],
+    };
     assert!(m.validate().is_empty());
     m
 }
@@ -387,6 +404,10 @@ fn exercise(bytes: &[u8]) -> Result<(), Error> {
     }
     for (i, e) in p.expressions.iter().enumerate() {
         let _ = (p.expression_name(i), p.expression_params_of(e));
+    }
+    let _ = c.model_info();
+    for i in 0..c.hit_areas.len() {
+        let _ = c.hit_area_name(i);
     }
     for pose in p.pose.iter() {
         for g in p.pose_groups_of(pose) {
@@ -470,6 +491,9 @@ fn the_pod_layouts_match_the_specification() {
         (size_of::<GlueNode>(), 12),
         (size_of::<BlendTargetRaw>(), 8),
         (size_of::<BlendDef>(), 24),
+        (size_of::<ModelInfoDef>(), 32),
+        (size_of::<HitAreaDef>(), 16),
+        (size_of::<StandardParamDef>(), 8),
     ];
     for (i, (actual, expected)) in sizes.iter().enumerate() {
         assert_eq!(actual, expected, "entry {i}");
@@ -817,7 +841,7 @@ fn a_file_without_playback_data_has_none_and_one_with_it_round_trips() {
     for s in t.sections.iter().filter(|s| s.id >= id::PLAYBACK_STRINGS) {
         assert!(!s.required, "{:#x}", s.id);
     }
-    assert_eq!(t.sections.len(), 52);
+    assert_eq!(t.sections.len(), 56);
     let c = m.compile().unwrap();
     assert!(matches!(t.playback.motions, Cow::Borrowed(_)));
     let (lo, hi) = (buf.as_ptr() as usize, buf.as_ptr() as usize + buf.len());
@@ -982,4 +1006,92 @@ fn hidden_meshes_survive_a_round_trip_and_are_optional() {
     let mut bad = c.clone();
     bad.mesh_hidden = Cow::Owned(vec![7]);
     assert!(write(&bad, &[]).map_or(true, |b| parse(&b).is_err()));
+}
+
+fn settings_entry(b: &[u8], sec: u32) -> usize {
+    let n = le_u32(b, 16) as usize;
+    (0..n)
+        .map(|i| HEADER_LEN + i * ENTRY_LEN)
+        .find(|&at| le_u32(b, at) == sec)
+        .unwrap()
+}
+
+#[test]
+fn settings_survive_a_round_trip_and_are_optional() {
+    use crate::settings::StandardRole;
+    let m = playback_model();
+    let c = m.compile().unwrap();
+    let bytes = write(&c, &[]).unwrap();
+    let buf = AlignedBuf::from_bytes(&bytes);
+    let t = Tmod::parse(&buf).unwrap();
+    let info = t.model.model_info();
+    assert_eq!(
+        (info.title, info.author, info.license, info.notes),
+        ("題", "A", "", "n")
+    );
+    assert_eq!(t.model.hit_area_name(0), "Head");
+    assert_eq!(t.model.hit_areas[0].mesh, 0);
+    let p = t.model.parameter_index("P").unwrap();
+    assert_eq!(t.model.standard_parameter(StandardRole::AngleX), Some(p));
+    assert_eq!(t.model.standard_parameter(StandardRole::AngleY), None);
+    // A model with no settings has none of the four sections.
+    let bytes = write(&rich_model().compile().unwrap(), &[]).unwrap();
+    let buf = AlignedBuf::from_bytes(&bytes);
+    let t = Tmod::parse(&buf).unwrap();
+    assert!(t.model.model_info.is_empty() && t.model.hit_areas.is_empty());
+    assert!(
+        !t.sections
+            .iter()
+            .any(|s| (id::SETTINGS_STRINGS..=id::STANDARD_PARAMS).contains(&s.id))
+    );
+}
+
+#[test]
+fn a_loader_that_predates_the_settings_sections_still_reads_the_file() {
+    let mut b = write(&playback_model().compile().unwrap(), &[]).unwrap();
+    for sec in id::SETTINGS_STRINGS..=id::STANDARD_PARAMS {
+        b = patch(&b, settings_entry(&b, sec), &(sec + 0x1000).to_le_bytes());
+    }
+    let buf = AlignedBuf::from_bytes(&b);
+    assert!(Tmod::parse(&buf).unwrap().model.model_info.is_empty());
+}
+
+#[test]
+fn partial_or_inconsistent_settings_are_rejected() {
+    let b = write(&playback_model().compile().unwrap(), &[]).unwrap();
+    let buf = AlignedBuf::from_bytes(&b);
+    // One of the four missing.
+    let missing = patch(
+        &b,
+        settings_entry(&b, id::STANDARD_PARAMS),
+        &0x7777u32.to_le_bytes(),
+    );
+    assert_eq!(
+        parse(&missing),
+        Err(Error::MissingSection(id::STANDARD_PARAMS))
+    );
+    // A hit area on a mesh past the end, a role nobody knows, a parameter past the end.
+    let at = le_u64(&buf, settings_entry(&b, id::HIT_AREAS) + 8) as usize;
+    assert!(matches!(
+        parse(&patch(&b, at + 8, &999u32.to_le_bytes())),
+        Err(Error::Layout(_))
+    ));
+    let at = le_u64(&buf, settings_entry(&b, id::STANDARD_PARAMS) + 8) as usize;
+    assert!(matches!(
+        parse(&patch(&b, at, &99u32.to_le_bytes())),
+        Err(Error::Layout(_))
+    ));
+    assert!(matches!(
+        parse(&patch(&b, at + 4, &999u32.to_le_bytes())),
+        Err(Error::Layout(_))
+    ));
+    // The same role twice.
+    let twice = patch(&b, at + 8, &0u32.to_le_bytes());
+    assert!(matches!(parse(&twice), Err(Error::Layout(_))));
+    // A name outside the string table.
+    let at = le_u64(&buf, settings_entry(&b, id::MODEL_INFO) + 8) as usize;
+    assert!(matches!(
+        parse(&patch(&b, at, &9999u32.to_le_bytes())),
+        Err(Error::Layout(_))
+    ));
 }

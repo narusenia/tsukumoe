@@ -1165,6 +1165,10 @@ Sets the title, author, license and notes of the model.
 | `title` | string | no | `""` |
 | `type` | `"set_model_info"` | yes |  |
 
+```json
+{"type":"set_model_info","title":"Demo","author":"Someone","license":"CC0","notes":""}
+```
+
 ### `add_hit_area`
 
 Adds a hit area: a name for the region a mesh covers.
@@ -1175,6 +1179,10 @@ Adds a hit area: a name for the region a mesh covers.
 | `name` | string | yes |  |
 | `type` | `"add_hit_area"` | yes |  |
 
+```json
+{"type":"add_hit_area","name":"Head","mesh":"Skin"}
+```
+
 ### `remove_hit_area`
 
 Removes a hit area by name.
@@ -1183,6 +1191,10 @@ Removes a hit area by name.
 |---|---|---|---|
 | `name` | string | yes |  |
 | `type` | `"remove_hit_area"` | yes |  |
+
+```json
+{"type":"remove_hit_area","name":"Head"}
+```
 
 ### `rename_hit_area`
 
@@ -1194,6 +1206,10 @@ Renames a hit area.
 | `new_name` | string | yes |  |
 | `type` | `"rename_hit_area"` | yes |  |
 
+```json
+{"type":"rename_hit_area","name":"Head","new_name":"Face"}
+```
+
 ### `set_hit_area_mesh`
 
 Points a hit area at another mesh.
@@ -1204,6 +1220,10 @@ Points a hit area at another mesh.
 | `name` | string | yes |  |
 | `type` | `"set_hit_area_mesh"` | yes |  |
 
+```json
+{"type":"set_hit_area_mesh","name":"Head","mesh":"Skin"}
+```
+
 ### `set_standard_parameter`
 
 Names the parameter that plays a standard role; `None` clears the role.
@@ -1213,6 +1233,10 @@ Names the parameter that plays a standard role; `None` clears the role.
 | `parameter` | string or null | no | `null` |
 | `role` | Command | yes |  |
 | `type` | `"set_standard_parameter"` | yes |  |
+
+```json
+{"type":"set_standard_parameter","role":"angle_x","parameter":"ParamAngleX"}
+```
 
 ### `batch`
 

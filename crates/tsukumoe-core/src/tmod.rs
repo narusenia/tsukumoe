@@ -98,6 +98,12 @@ pub mod id {
     pub const MESH_HIDDEN: u32 = 0x9A;
     /// Optional: ascending indices of the warps evaluated with the cubic surface.
     pub const WARP_BEZIER: u32 = 0x9B;
+    /// Optional model settings, written when a model has any; all four
+    /// sections appear together (see `CompiledModel::model_info`).
+    pub const SETTINGS_STRINGS: u32 = 0x9C;
+    pub const MODEL_INFO: u32 = 0x9D;
+    pub const HIT_AREAS: u32 = 0x9E;
+    pub const STANDARD_PARAMS: u32 = 0x9F;
 }
 
 /// The name of a section ID in this version, for tools that print the table.
@@ -160,6 +166,10 @@ pub fn section_name(section: u32) -> Option<&'static str> {
         POSE_LINKS => "pose_links",
         MESH_HIDDEN => "mesh_hidden",
         WARP_BEZIER => "warp_bezier",
+        SETTINGS_STRINGS => "settings_strings",
+        MODEL_INFO => "model_info",
+        HIT_AREAS => "hit_areas",
+        STANDARD_PARAMS => "standard_params",
         _ => return None,
     })
 }
@@ -462,6 +472,43 @@ pub fn write_with(
         )?;
     }
 
+    if !model.model_info.is_empty() {
+        // Optional, and written together: a reader that predates settings
+        // skips them.
+        let mut optional = |id, count: usize, data: &[u8]| -> Result<(), Error> {
+            s.push(Section {
+                id,
+                flags: 0,
+                count: u32::try_from(count).map_err(|_| Error::Section {
+                    id,
+                    reason: "too many elements",
+                })?,
+                data: Cow::Owned(data.to_vec()),
+            });
+            Ok(())
+        };
+        optional(
+            id::SETTINGS_STRINGS,
+            model.settings_strings.len(),
+            &model.settings_strings,
+        )?;
+        optional(
+            id::MODEL_INFO,
+            model.model_info.len(),
+            bytemuck::cast_slice(&model.model_info),
+        )?;
+        optional(
+            id::HIT_AREAS,
+            model.hit_areas.len(),
+            bytemuck::cast_slice(&model.hit_areas),
+        )?;
+        optional(
+            id::STANDARD_PARAMS,
+            model.standard_params.len(),
+            bytemuck::cast_slice(&model.standard_params),
+        )?;
+    }
+
     if !model.mesh_hidden.is_empty() {
         s.push(Section {
             id: id::MESH_HIDDEN,
@@ -634,6 +681,7 @@ impl<'a> Tmod<'a> {
                 || (id::PLAYBACK_STRINGS..=id::POSE_LINKS).contains(&id)
                 || id == id::MESH_HIDDEN
                 || id == id::WARP_BEZIER
+                || (id::SETTINGS_STRINGS..=id::STANDARD_PARAMS).contains(&id)
         };
         for e in &entries {
             if !known(e.id) && e.flags & SECTION_REQUIRED != 0 {
@@ -741,6 +789,22 @@ impl<'a> Tmod<'a> {
             } else {
                 Cow::Borrowed(&[])
             },
+            settings_strings: Cow::Borrowed(&[]),
+            model_info: Cow::Borrowed(&[]),
+            hit_areas: Cow::Borrowed(&[]),
+            standard_params: Cow::Borrowed(&[]),
+        };
+        // The four settings sections come together or not at all.
+        let model = if (id::SETTINGS_STRINGS..=id::STANDARD_PARAMS).all(|s| find(s).is_none()) {
+            model
+        } else {
+            CompiledModel {
+                settings_strings: arr!(id::SETTINGS_STRINGS),
+                model_info: arr!(id::MODEL_INFO),
+                hit_areas: arr!(id::HIT_AREAS),
+                standard_params: arr!(id::STANDARD_PARAMS),
+                ..model
+            }
         };
         model.check()?;
 

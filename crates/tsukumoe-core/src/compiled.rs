@@ -19,8 +19,9 @@ use crate::keyform::BindingId;
 use crate::model::Model;
 use crate::physics::{Channel, Range};
 use crate::rig::{
-    BlendMode, BlendTarget, BoneId, BoneTransform, DeformerRef, GlueNode, RotationKeyform,
+    BlendMode, BlendTarget, BoneId, BoneTransform, DeformerRef, GlueNode, MeshId, RotationKeyform,
 };
+use crate::settings::StandardRole;
 use crate::validate::ModelError;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -257,6 +258,34 @@ pub struct PhysicsParticle {
     pub acceleration: f32,
     pub stiffness: f32,
     pub damping: f32,
+}
+
+/// The model's information; strings are in [`CompiledModel::settings_strings`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct ModelInfoDef {
+    pub title: StrRef,
+    pub author: StrRef,
+    pub license: StrRef,
+    pub notes: StrRef,
+}
+
+/// A named hit area: the mesh whose bounds answer a hit test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct HitAreaDef {
+    pub name: StrRef,
+    pub mesh: u32,
+    pub reserved: u32,
+}
+
+/// A parameter playing a standard role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct StandardParamDef {
+    /// A [`StandardRole`] as `u32` (its position in `StandardRole::ALL`).
+    pub role: u32,
+    pub parameter: u32,
 }
 
 pub const PHYSICS_PENDULUM: u32 = 0;
@@ -522,6 +551,15 @@ pub(crate) fn idx(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(NONE)
 }
 
+/// The model's information, borrowed from the compiled model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ModelInfoRef<'a> {
+    pub title: &'a str,
+    pub author: &'a str,
+    pub license: &'a str,
+    pub notes: &'a str,
+}
+
 /// The evaluation data. Every array is a [`Cow`]: owned when compiled from a
 /// [`Model`], borrowed from the buffer when loaded from a `.tmod`
 /// (`crate::tmod`).
@@ -597,6 +635,15 @@ pub struct CompiledModel<'a> {
     /// ascending warp indices. Optional in `.tmod`; a reader that does not know
     /// it evaluates every warp bilinearly.
     pub warp_bezier: Cow<'a, [u32]>,
+
+    /// UTF-8 bytes the names in the model settings point into. The four
+    /// settings arrays are optional in `.tmod`, written together or not at
+    /// all; all are empty when the model has no settings.
+    pub settings_strings: Cow<'a, [u8]>,
+    /// Zero or one element.
+    pub model_info: Cow<'a, [ModelInfoDef]>,
+    pub hit_areas: Cow<'a, [HitAreaDef]>,
+    pub standard_params: Cow<'a, [StandardParamDef]>,
 }
 
 impl CompiledModel<'_> {
@@ -647,7 +694,45 @@ impl CompiledModel<'_> {
             blend_refs: Cow::Owned(self.blend_refs.into_owned()),
             mesh_hidden: Cow::Owned(self.mesh_hidden.into_owned()),
             warp_bezier: Cow::Owned(self.warp_bezier.into_owned()),
+            settings_strings: Cow::Owned(self.settings_strings.into_owned()),
+            model_info: Cow::Owned(self.model_info.into_owned()),
+            hit_areas: Cow::Owned(self.hit_areas.into_owned()),
+            standard_params: Cow::Owned(self.standard_params.into_owned()),
         }
+    }
+
+    pub(crate) fn settings_str(&self, r: StrRef) -> &str {
+        let start = r.offset as usize;
+        start
+            .checked_add(r.len as usize)
+            .and_then(|end| self.settings_strings.get(start..end))
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .unwrap_or("")
+    }
+
+    /// Title, author, license and notes; empty strings when there is no info.
+    pub fn model_info(&self) -> ModelInfoRef<'_> {
+        match self.model_info.first() {
+            Some(i) => ModelInfoRef {
+                title: self.settings_str(i.title),
+                author: self.settings_str(i.author),
+                license: self.settings_str(i.license),
+                notes: self.settings_str(i.notes),
+            },
+            None => ModelInfoRef::default(),
+        }
+    }
+
+    pub fn hit_area_name(&self, i: usize) -> &str {
+        self.settings_str(self.hit_areas[i].name)
+    }
+
+    /// The index in `parameters` of the parameter that plays `role`.
+    pub fn standard_parameter(&self, role: StandardRole) -> Option<usize> {
+        self.standard_params
+            .iter()
+            .find(|p| p.role == u32::from(role.to_u8()))
+            .map(|p| p.parameter as usize)
     }
 
     /// The text a name reference points at. A reference outside `strings`
@@ -1058,6 +1143,8 @@ impl Model {
         order.sort_by_key(|&d| depth(d));
         c.deformer_order = order.into_iter().map(ParentRaw::from).collect();
 
+        compile_settings(self, &param_index, &mesh_index, &mut c);
+
         check_bone_spaces(&c)?;
         c.check().map_err(|e| CompileError::Layout(e.to_string()))?;
 
@@ -1166,6 +1253,41 @@ fn compile_physics(
         }
     }
     Ok(())
+}
+
+/// The model settings as flat arrays; nothing when the settings are empty.
+fn compile_settings(
+    model: &Model,
+    param_index: &HashMap<ParameterId, usize>,
+    mesh_index: &HashMap<MeshId, usize>,
+    c: &mut CompiledModel,
+) {
+    let settings = &model.settings;
+    if settings.is_empty() {
+        return;
+    }
+    let mut strings = Cow::Owned(Vec::new());
+    let info = &settings.info;
+    c.model_info.to_mut().push(ModelInfoDef {
+        title: push_str(&mut strings, &info.title),
+        author: push_str(&mut strings, &info.author),
+        license: push_str(&mut strings, &info.license),
+        notes: push_str(&mut strings, &info.notes),
+    });
+    for area in &settings.hit_areas {
+        c.hit_areas.to_mut().push(HitAreaDef {
+            name: push_str(&mut strings, &area.name),
+            mesh: idx(mesh_index[&area.mesh]),
+            reserved: 0,
+        });
+    }
+    for (role, parameter) in &settings.standard {
+        c.standard_params.to_mut().push(StandardParamDef {
+            role: u32::from(role.to_u8()),
+            parameter: idx(param_index[parameter]),
+        });
+    }
+    c.settings_strings = strings;
 }
 
 /// Bones, parents first, with the inverse of each rest transform.

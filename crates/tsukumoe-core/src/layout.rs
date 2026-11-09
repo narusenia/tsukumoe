@@ -16,6 +16,7 @@ use crate::compiled::{
 use crate::expr::{MAX_STACK, Op};
 use crate::physics::Channel;
 use crate::rig::BlendMode;
+use crate::settings::StandardRole;
 
 /// Most axes one binding may have.
 pub const MAX_AXES: u32 = 16;
@@ -85,6 +86,7 @@ impl CompiledModel<'_> {
         self.check_physics()?;
         self.check_glues()?;
         self.check_blends()?;
+        self.check_settings()?;
         Ok(())
     }
 
@@ -289,6 +291,81 @@ impl CompiledModel<'_> {
             ),
             None => Ok(()),
         }
+    }
+
+    /// The settings arrays are all present or all empty; the names lie in
+    /// `settings_strings`; a hit area names a mesh, a standard parameter a
+    /// parameter, each role at most once.
+    fn check_settings(&self) -> Check {
+        ensure(
+            self.settings_strings.len() < NONE as usize,
+            "settings_strings",
+            0,
+            "too many bytes",
+        )?;
+        ensure(
+            self.model_info.len() <= 1,
+            "model_info",
+            0,
+            "at most one info",
+        )?;
+        if self.model_info.is_empty() {
+            return ensure(
+                self.settings_strings.is_empty()
+                    && self.hit_areas.is_empty()
+                    && self.standard_params.is_empty(),
+                "model_info",
+                0,
+                "settings without info",
+            );
+        }
+        let ok = |r: &StrRef| {
+            within(r.offset, u64::from(r.len), self.settings_strings.len())
+                && std::str::from_utf8(
+                    &self.settings_strings[r.offset as usize..(r.offset + r.len) as usize],
+                )
+                .is_ok()
+        };
+        for i in self.model_info.iter() {
+            ensure(
+                [i.title, i.author, i.license, i.notes].iter().all(ok),
+                "model_info",
+                0,
+                "text outside the string table or not UTF-8",
+            )?;
+        }
+        for (i, a) in self.hit_areas.iter().enumerate() {
+            ensure(
+                ok(&a.name) && (a.mesh as usize) < self.meshes.len() && a.reserved == 0,
+                "hit_areas",
+                i,
+                "bad name, mesh outside its array or reserved word not 0",
+            )?;
+            ensure(
+                self.hit_areas[..i]
+                    .iter()
+                    .all(|b| self.settings_str(b.name) != self.settings_str(a.name)),
+                "hit_areas",
+                i,
+                "name is not unique",
+            )?;
+        }
+        for (i, p) in self.standard_params.iter().enumerate() {
+            ensure(
+                StandardRole::from_u8(u8::try_from(p.role).unwrap_or(u8::MAX)).is_some()
+                    && (p.parameter as usize) < self.parameters.len(),
+                "standard_params",
+                i,
+                "unknown role or parameter outside its array",
+            )?;
+            ensure(
+                self.standard_params[..i].iter().all(|q| q.role != p.role),
+                "standard_params",
+                i,
+                "role appears twice",
+            )?;
+        }
+        Ok(())
     }
 
     fn check_parameters(&self) -> Check {

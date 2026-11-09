@@ -15,6 +15,7 @@ use tsukumoe_core::physics::{ChainJoint, Channel, Particle, Range};
 use tsukumoe_core::playback::ExpressionBlend;
 use tsukumoe_core::playback::Segment;
 use tsukumoe_core::rig::{BlendMode, GlueNode};
+use tsukumoe_core::settings::StandardRole;
 
 /// One tool per `Command` variant, as `{name, description, inputSchema}`.
 /// The name is the variant's `type`; the schema is that variant's.
@@ -534,6 +535,31 @@ pub fn examples() -> Vec<Command> {
             wind: [0.0, 0.0],
             inputs: vec![],
             outputs: vec![],
+        },
+        Command::SetModelInfo {
+            title: "Demo".into(),
+            author: "Someone".into(),
+            license: "CC0".into(),
+            notes: String::new(),
+        },
+        Command::AddHitArea {
+            name: "Head".into(),
+            mesh: "Skin".into(),
+        },
+        Command::RemoveHitArea {
+            name: "Head".into(),
+        },
+        Command::RenameHitArea {
+            name: "Head".into(),
+            new_name: "Face".into(),
+        },
+        Command::SetHitAreaMesh {
+            name: "Head".into(),
+            mesh: "Skin".into(),
+        },
+        Command::SetStandardParameter {
+            role: StandardRole::AngleX,
+            parameter: Some("ParamAngleX".into()),
         },
         Command::Batch {
             commands: vec![add_parameter, add_part],
