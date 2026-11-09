@@ -59,6 +59,9 @@ pub struct ModelFile {
     pub drivers: Vec<DriverDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pose: Option<PoseDto>,
+    /// Absent when the model has no settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<SettingsDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -316,6 +319,62 @@ pub struct PoseDto {
     #[serde(default)]
     pub fade_in: f32,
     pub groups: Vec<Vec<PoseEntryDto>>,
+}
+
+/// The standard roles a parameter can play (see the settings in the model).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StandardRoleDto {
+    AngleX,
+    AngleY,
+    AngleZ,
+    BodyAngleX,
+    BodyAngleY,
+    BodyAngleZ,
+    EyeLOpen,
+    EyeROpen,
+    EyeBallX,
+    EyeBallY,
+    MouthOpen,
+    MouthForm,
+    BrowLY,
+    BrowRY,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ModelInfoDto {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub license: String,
+    #[serde(default)]
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HitAreaDto {
+    pub name: String,
+    /// The mesh by name.
+    pub mesh: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StandardParameterDto {
+    pub role: StandardRoleDto,
+    /// The parameter by name.
+    pub parameter: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct SettingsDto {
+    #[serde(default)]
+    pub info: ModelInfoDto,
+    #[serde(default)]
+    pub hit_areas: Vec<HitAreaDto>,
+    #[serde(default)]
+    pub standard: Vec<StandardParameterDto>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

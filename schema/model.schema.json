@@ -427,6 +427,22 @@
       ],
       "type": "object"
     },
+    "HitAreaDto": {
+      "properties": {
+        "mesh": {
+          "description": "The mesh by name.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "mesh"
+      ],
+      "type": "object"
+    },
     "InfluenceDto": {
       "description": "Up to four bones moving one vertex. Unused slots are `null` with weight 0.",
       "properties": {
@@ -663,6 +679,27 @@
       ],
       "type": "object"
     },
+    "ModelInfoDto": {
+      "properties": {
+        "author": {
+          "default": "",
+          "type": "string"
+        },
+        "license": {
+          "default": "",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "ParameterDto": {
       "properties": {
         "default": {
@@ -849,6 +886,70 @@
       },
       "type": "object"
     },
+    "SettingsDto": {
+      "properties": {
+        "hit_areas": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HitAreaDto"
+          },
+          "type": "array"
+        },
+        "info": {
+          "$ref": "#/$defs/ModelInfoDto",
+          "default": {
+            "author": "",
+            "license": "",
+            "notes": "",
+            "title": ""
+          }
+        },
+        "standard": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/StandardParameterDto"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "StandardParameterDto": {
+      "properties": {
+        "parameter": {
+          "description": "The parameter by name.",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/StandardRoleDto"
+        }
+      },
+      "required": [
+        "role",
+        "parameter"
+      ],
+      "type": "object"
+    },
+    "StandardRoleDto": {
+      "description": "The standard roles a parameter can play (see the settings in the model).",
+      "enum": [
+        "angle_x",
+        "angle_y",
+        "angle_z",
+        "body_angle_x",
+        "body_angle_y",
+        "body_angle_z",
+        "eye_l_open",
+        "eye_r_open",
+        "eye_ball_x",
+        "eye_ball_y",
+        "mouth_open",
+        "mouth_form",
+        "brow_l_y",
+        "brow_r_y"
+      ],
+      "type": "string"
+    },
     "WarpDto": {
       "properties": {
         "base_points": {
@@ -1031,6 +1132,17 @@
         "$ref": "#/$defs/RotationDto"
       },
       "type": "array"
+    },
+    "settings": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SettingsDto"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Absent when the model has no settings."
     },
     "warps": {
       "default": [],

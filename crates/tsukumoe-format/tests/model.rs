@@ -17,6 +17,7 @@ use tsukumoe_core::rig::{
     ArtMesh, BlendMode, BlendShape, BlendTarget, Bone, BoneTransform, DeformerRef, Glue, GlueNode,
     MeshKeyform, RotationDeformer, RotationKeyform, VertexInfluences, WarpDeformer, WarpKeyform,
 };
+use tsukumoe_core::settings::{HitArea, ModelInfo, ModelSettings, StandardRole};
 use tsukumoe_format::{Error, Manifest, Project, read_model, write_model};
 
 const GRID: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
@@ -402,6 +403,23 @@ fn rich() -> Model {
         outputs: vec![io_out(out, Channel::X, 1)],
     });
 
+    p.settings = ModelSettings {
+        info: ModelInfo {
+            title: "題".into(),
+            author: "A".into(),
+            license: "CC0".into(),
+            notes: "n\nm".into(),
+        },
+        hit_areas: vec![HitArea {
+            name: "Head".into(),
+            mesh: face,
+        }],
+        standard: vec![
+            (StandardRole::AngleZ, angle),
+            (StandardRole::MouthOpen, open),
+        ],
+    };
+
     Model::from_parts(p).expect("the sample model is consistent")
 }
 
@@ -628,4 +646,56 @@ fn damaged_model_files_never_panic() {
             let _ = read_model(&damaged);
         }
     }
+}
+
+#[test]
+fn settings_are_written_only_when_set_and_read_back() {
+    let model = rich();
+    let json = String::from_utf8(saved(&model).files["model.json"].clone()).unwrap();
+    assert!(json.contains("\"settings\"") && json.contains("mouth_open"));
+
+    let mut bare = Model::new();
+    bare.apply(Command::AddParameter {
+        name: "P".into(),
+        min: 0.0,
+        max: 1.0,
+        default: 0.0,
+        repeat: false,
+    })
+    .unwrap();
+    let json = String::from_utf8(saved(&bare).files["model.json"].clone()).unwrap();
+    assert!(
+        !json.contains("settings"),
+        "an empty settings is not written"
+    );
+    // A file from before settings existed still loads, with empty settings.
+    assert!(read_model(&saved(&bare)).unwrap().settings().is_empty());
+}
+
+#[test]
+fn settings_that_name_missing_things_are_refused() {
+    let base = r#""parameters": [{"name":"P","min":0,"max":1,"default":0}]"#;
+    let bad_param = format!(
+        r#"{{{base}, "settings": {{"standard": [{{"role": "angle_x", "parameter": "Nope"}}]}}}}"#
+    );
+    assert!(matches!(
+        read_model(&with_model_json(&bad_param)),
+        Err(Error::Reference {
+            field: "parameter",
+            ..
+        })
+    ));
+    let bad_mesh =
+        format!(r#"{{{base}, "settings": {{"hit_areas": [{{"name": "H", "mesh": "Nope"}}]}}}}"#);
+    assert!(matches!(
+        read_model(&with_model_json(&bad_mesh)),
+        Err(Error::Reference { field: "mesh", .. })
+    ));
+    let bad_role = format!(
+        r#"{{{base}, "settings": {{"standard": [{{"role": "nope", "parameter": "P"}}]}}}}"#
+    );
+    assert!(matches!(
+        read_model(&with_model_json(&bad_role)),
+        Err(Error::Json { .. })
+    ));
 }

@@ -24,6 +24,7 @@ use tsukumoe_core::rig::{
     ArtMesh, BlendMode, BlendShape, BlendTarget, Bone, BoneTransform, DeformerRef, Glue, GlueNode,
     MeshKeyform, RotationDeformer, RotationKeyform, VertexInfluences, WarpDeformer, WarpKeyform,
 };
+use tsukumoe_core::settings::{HitArea, ModelInfo, ModelSettings, StandardRole};
 use tsukumoe_core::table::Table;
 
 use crate::container::{Project, to_json};
@@ -343,6 +344,31 @@ impl Writer<'_> {
                 fade_in: pose.fade_in,
                 groups,
             });
+        }
+        let settings = m.settings();
+        if !settings.is_empty() {
+            let mut d = SettingsDto {
+                info: ModelInfoDto {
+                    title: settings.info.title.clone(),
+                    author: settings.info.author.clone(),
+                    license: settings.info.license.clone(),
+                    notes: settings.info.notes.clone(),
+                },
+                ..SettingsDto::default()
+            };
+            for a in &settings.hit_areas {
+                d.hit_areas.push(HitAreaDto {
+                    name: a.name.clone(),
+                    mesh: name_of(m.meshes(), a.mesh)?,
+                });
+            }
+            for &(role, parameter) in &settings.standard {
+                d.standard.push(StandardParameterDto {
+                    role: role_dto(role),
+                    parameter: self.parameter(parameter)?,
+                });
+            }
+            f.settings = Some(d);
         }
         Ok(f)
     }
@@ -891,8 +917,47 @@ impl Reader {
         }
 
         self.p.physics = self.physics(physics)?;
+        if let Some(d) = &f.settings {
+            self.p.settings = self.settings(d)?;
+        }
 
         Model::from_parts(self.p).map_err(|errors| Error::Invalid(format!("{errors:?}")))
+    }
+
+    fn settings(&self, d: &SettingsDto) -> Result<ModelSettings, Error> {
+        let mut s = ModelSettings {
+            info: ModelInfo {
+                title: d.info.title.clone(),
+                author: d.info.author.clone(),
+                license: d.info.license.clone(),
+                notes: d.info.notes.clone(),
+            },
+            ..ModelSettings::default()
+        };
+        for a in &d.hit_areas {
+            s.hit_areas.push(HitArea {
+                name: a.name.clone(),
+                mesh: find(
+                    &self.p.meshes,
+                    &a.mesh,
+                    &format!("hit area '{}'", a.name),
+                    "mesh",
+                )?,
+            });
+        }
+        for x in &d.standard {
+            let role = role_from_dto(x.role);
+            s.standard.push((
+                role,
+                find(
+                    &self.p.parameters,
+                    &x.parameter,
+                    &format!("standard parameter {role:?}"),
+                    "parameter",
+                )?,
+            ));
+        }
+        Ok(s)
     }
 
     fn physics_io(
@@ -972,6 +1037,44 @@ impl Reader {
             });
         }
         Ok(rig)
+    }
+}
+
+fn role_dto(role: StandardRole) -> StandardRoleDto {
+    match role {
+        StandardRole::AngleX => StandardRoleDto::AngleX,
+        StandardRole::AngleY => StandardRoleDto::AngleY,
+        StandardRole::AngleZ => StandardRoleDto::AngleZ,
+        StandardRole::BodyAngleX => StandardRoleDto::BodyAngleX,
+        StandardRole::BodyAngleY => StandardRoleDto::BodyAngleY,
+        StandardRole::BodyAngleZ => StandardRoleDto::BodyAngleZ,
+        StandardRole::EyeLOpen => StandardRoleDto::EyeLOpen,
+        StandardRole::EyeROpen => StandardRoleDto::EyeROpen,
+        StandardRole::EyeBallX => StandardRoleDto::EyeBallX,
+        StandardRole::EyeBallY => StandardRoleDto::EyeBallY,
+        StandardRole::MouthOpen => StandardRoleDto::MouthOpen,
+        StandardRole::MouthForm => StandardRoleDto::MouthForm,
+        StandardRole::BrowLY => StandardRoleDto::BrowLY,
+        StandardRole::BrowRY => StandardRoleDto::BrowRY,
+    }
+}
+
+fn role_from_dto(role: StandardRoleDto) -> StandardRole {
+    match role {
+        StandardRoleDto::AngleX => StandardRole::AngleX,
+        StandardRoleDto::AngleY => StandardRole::AngleY,
+        StandardRoleDto::AngleZ => StandardRole::AngleZ,
+        StandardRoleDto::BodyAngleX => StandardRole::BodyAngleX,
+        StandardRoleDto::BodyAngleY => StandardRole::BodyAngleY,
+        StandardRoleDto::BodyAngleZ => StandardRole::BodyAngleZ,
+        StandardRoleDto::EyeLOpen => StandardRole::EyeLOpen,
+        StandardRoleDto::EyeROpen => StandardRole::EyeROpen,
+        StandardRoleDto::EyeBallX => StandardRole::EyeBallX,
+        StandardRoleDto::EyeBallY => StandardRole::EyeBallY,
+        StandardRoleDto::MouthOpen => StandardRole::MouthOpen,
+        StandardRoleDto::MouthForm => StandardRole::MouthForm,
+        StandardRoleDto::BrowLY => StandardRole::BrowLY,
+        StandardRoleDto::BrowRY => StandardRole::BrowRY,
     }
 }
 
