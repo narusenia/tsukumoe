@@ -30,6 +30,8 @@ pub struct State {
     pub selected: Option<(Kind, String)>,
     /// The test that wiggles the inputs of the picked group, while it runs.
     testing: Option<Test>,
+    /// A particle being dragged in the diagram.
+    work: Option<super::physics_diagram::Work>,
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +327,7 @@ fn pendulum(
     model: &Model,
     group: &PendulumGroup,
     focus: Option<&str>,
+    work: &mut Option<super::physics_diagram::Work>,
 ) -> Option<Command> {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
@@ -347,6 +350,10 @@ fn pendulum(
             }
         }
     });
+    if let Some(next) = super::physics_diagram::show(ui, &particles, work) {
+        particles = next;
+        changed = true;
+    }
     // The three knobs, read back from particle 1.
     let mut feel = feel_of(&particles);
     let before = feel;
@@ -695,6 +702,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     test_row(ui, model, view, kind, &name);
     let focus = view.param_focus.clone();
     let focus = focus.as_deref();
+    let work = &mut view.physics.work;
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .id_salt("physics-scroll")
@@ -705,7 +713,7 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                     .pendulums
                     .iter()
                     .find(|g| g.name == name)
-                    .and_then(|g| pendulum(ui, model, g, focus)),
+                    .and_then(|g| pendulum(ui, model, g, focus, work)),
                 Kind::Chain => model
                     .physics()
                     .chains
