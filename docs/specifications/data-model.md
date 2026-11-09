@@ -21,6 +21,7 @@ ID は内部が世代付きインデックス、外部参照は永続 ID（種�
 | BlendShape | 基本形に加算する差分形。重みはパラメータで駆動する |
 | Driver | パラメータ式。出力パラメータ 1 つと式 |
 | PhysicsRig | 振り子（physics3 互換）と物理チェーン |
+| ModelSettings | モデル情報（タイトル・作者・ライセンス・メモ）、当たり判定（名前とメッシュ）、標準パラメータの割り当て（役割ごとに高々 1 つのパラメータ）。`.tproj` の `settings` と `.tmod` の任意セクションに保存する |
 | Motion / Expression / Pose | 再生側データ（motion3 / exp3 / pose3 相当） |
 
 ## Cubism 機能との対応
