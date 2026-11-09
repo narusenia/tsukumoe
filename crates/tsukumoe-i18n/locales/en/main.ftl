@@ -519,3 +519,4 @@ expressions-capture-hint = Makes an Overwrite item of each parameter that is not
 expressions-preview = Preview
 expressions-preview-stop = Stop preview
 expressions-weight = Weight
+action-timeline-play-toggle = Play / pause the motion

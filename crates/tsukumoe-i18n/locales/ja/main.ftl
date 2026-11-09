@@ -515,3 +515,4 @@ expressions-capture-hint = 既定値と違うパラメータを、上書きの�
 expressions-preview = プレビュー
 expressions-preview-stop = プレビューを止める
 expressions-weight = 重み
+action-timeline-play-toggle = モーションの再生・一時停止

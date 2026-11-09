@@ -110,6 +110,18 @@ impl State {
         self.apply = true;
     }
 
+    /// Plays, or pauses a playing motion. From the end it plays from the start.
+    pub fn toggle_play(&mut self, duration: f32) {
+        if self.playing {
+            self.playing = false;
+        } else {
+            if self.time >= duration {
+                self.seek(0.0);
+            }
+            self.playing = true;
+        }
+    }
+
     /// Advances a playing motion by `dt` seconds.
     pub fn advance(&mut self, motion: &Motion, dt: f32) {
         if !self.playing {
@@ -356,14 +368,7 @@ fn actions_row(
             (Icon::Play, "timeline-play")
         };
         if icon_button(ui, icon, &t(key), Variant::Secondary).clicked() {
-            if view.timeline.playing {
-                view.timeline.playing = false;
-            } else {
-                if view.timeline.time >= motion.duration {
-                    view.timeline.seek(0.0);
-                }
-                view.timeline.playing = true;
-            }
+            view.timeline.toggle_play(motion.duration);
         }
         if icon_button(ui, Icon::RotateCcw, &t("timeline-rewind"), Variant::Ghost).clicked() {
             view.timeline.seek(0.0);
@@ -883,6 +888,18 @@ mod tests {
         st.time = 1.5;
         st.advance(&mo, 1.0);
         assert!(st.playing && (st.time - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn toggling_play_pauses_and_restarts_from_the_end() {
+        let mut st = State::default();
+        st.toggle_play(2.0);
+        assert!(st.playing);
+        st.toggle_play(2.0);
+        assert!(!st.playing);
+        st.time = 2.0;
+        st.toggle_play(2.0);
+        assert!(st.playing && st.time == 0.0);
     }
 
     #[test]

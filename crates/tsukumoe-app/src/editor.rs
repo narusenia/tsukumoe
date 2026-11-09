@@ -1102,6 +1102,15 @@ impl Editor {
                 self.view.camera.zoom_at(f, [0.5, 0.5]);
                 self.view.touch();
             }
+            "timeline.play-toggle" => {
+                let duration = self.doc.as_ref().and_then(|d| {
+                    let (_, m) = self.view.timeline.current(d.dispatcher.model())?;
+                    Some(m.duration)
+                });
+                if let Some(duration) = duration {
+                    self.view.timeline.toggle_play(duration);
+                }
+            }
             "viewport.solo" => {
                 // The selection alone, or the solo ended when it is already the one.
                 let item = self.view.selection.clone().filter(|s| {
