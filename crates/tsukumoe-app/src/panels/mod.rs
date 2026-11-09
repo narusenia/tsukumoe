@@ -11,6 +11,7 @@ pub mod history;
 pub mod inspector;
 pub mod keys;
 pub mod mesh_overlay;
+pub mod model_settings;
 pub mod overlay;
 pub mod palette;
 pub mod parameters;

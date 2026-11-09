@@ -139,6 +139,8 @@ pub struct ViewState {
     pub expression: crate::panels::expressions::State,
     /// The physics panel's pick. Not saved.
     pub physics: crate::panels::physics::State,
+    /// The model settings panel's text being typed. Not saved.
+    pub model_settings: crate::panels::model_settings::State,
     /// Proportional edit options; not saved with the project or the layout.
     pub proportional: crate::proportional::Proportional,
 }

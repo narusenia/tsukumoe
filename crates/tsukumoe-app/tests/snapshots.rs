@@ -1039,3 +1039,90 @@ fn the_view_tab_of_the_settings_dialog_in_the_dark_theme() {
     harness.run();
     harness.snapshot_options("settings_view_dark", &SnapshotOptions::new().threshold(3.0));
 }
+
+fn model_settings_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::panels::model_settings;
+    use tsukumoe_app::view::ViewState;
+    use tsukumoe_core::command::Command;
+    use tsukumoe_core::model::Model;
+    use tsukumoe_core::settings::StandardRole;
+
+    let mut model = Model::new();
+    let pts = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    let mut steps = vec![Command::AddPart {
+        name: "Part".into(),
+        parent: None,
+    }];
+    for parameter in ["ParamAngleX", "ParamAngleY", "ParamMouthOpenY"] {
+        steps.push(Command::AddParameter {
+            name: parameter.into(),
+            min: -30.0,
+            max: 30.0,
+            default: 0.0,
+            repeat: false,
+        });
+    }
+    for mesh in ["Face", "Body"] {
+        steps.push(Command::AddMesh {
+            name: mesh.into(),
+            part: "Part".into(),
+            positions: pts.clone(),
+            uvs: pts.clone(),
+            indices: vec![0, 1, 2],
+        });
+    }
+    steps.extend([
+        Command::SetStandardParameter {
+            role: StandardRole::AngleX,
+            parameter: Some("ParamAngleX".into()),
+        },
+        Command::SetStandardParameter {
+            role: StandardRole::MouthOpen,
+            parameter: Some("ParamMouthOpenY".into()),
+        },
+        Command::AddHitArea {
+            name: "Head".into(),
+            mesh: "Face".into(),
+        },
+        Command::AddHitArea {
+            name: "Body".into(),
+            mesh: "Body".into(),
+        },
+        Command::SetModelInfo {
+            title: "Sample".into(),
+            author: "Someone".into(),
+            license: "CC0".into(),
+            notes: String::new(),
+        },
+    ]);
+    for command in steps {
+        model.apply(command).unwrap();
+    }
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(420.0, 760.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, state: &mut (Model, ViewState)| {
+                let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::En);
+                set_mode(&ctx, mode);
+                let (model, view) = state;
+                model_settings::show(ui, model, view);
+            },
+            (model, ViewState::default()),
+        );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn model_settings_panel_in_the_dark_theme() {
+    model_settings_snapshot(Mode::Dark, "model_settings_dark");
+}
+
+#[test]
+fn model_settings_panel_in_the_light_theme() {
+    model_settings_snapshot(Mode::Light, "model_settings_light");
+}

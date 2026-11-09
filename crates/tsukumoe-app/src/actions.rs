@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 47] = [
+pub const ACTIONS: [&str; 48] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -54,6 +54,7 @@ pub const ACTIONS: [&str; 47] = [
     "panel.show.timeline",
     "panel.show.expressions",
     "panel.show.physics",
+    "panel.show.model_settings",
     "panel.show.palette",
     "panel.show.ai_diff",
     "viewport.zoom-in",

@@ -18,8 +18,8 @@ use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::options::Options;
 use crate::panels::palette::Palette;
 use crate::panels::{
-    expressions, history, inspector, keys, parameters, physics, splash, timeline, titlebar, tree,
-    viewport,
+    expressions, history, inspector, keys, model_settings, parameters, physics, splash, timeline,
+    titlebar, tree, viewport,
 };
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
@@ -2072,6 +2072,7 @@ impl PanelHost for Panels<'_> {
             "timeline" => Icon::Play,
             "expressions" => Icon::Layers,
             "physics" => Icon::Link,
+            "model_settings" => Icon::Settings,
             "palette" => Icon::Search,
             "ai_diff" => Icon::Sparkles,
             _ => return None,
@@ -2111,6 +2112,13 @@ impl PanelHost for Panels<'_> {
             "physics" => {
                 for physics::Out::Command(command, label) in
                     physics::show(ui, doc.dispatcher.model(), &mut editor.view)
+                {
+                    editor.submit_labeled(&ctx, command, Some(label));
+                }
+            }
+            "model_settings" => {
+                for model_settings::Out::Command(command, label) in
+                    model_settings::show(ui, doc.dispatcher.model(), &mut editor.view)
                 {
                     editor.submit_labeled(&ctx, command, Some(label));
                 }

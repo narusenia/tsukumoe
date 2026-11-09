@@ -63,6 +63,26 @@ impl StandardRole {
         Self::ALL.get(usize::from(v)).copied()
     }
 
+    /// The name in snake case, as in JSON.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::AngleX => "angle_x",
+            Self::AngleY => "angle_y",
+            Self::AngleZ => "angle_z",
+            Self::BodyAngleX => "body_angle_x",
+            Self::BodyAngleY => "body_angle_y",
+            Self::BodyAngleZ => "body_angle_z",
+            Self::EyeLOpen => "eye_l_open",
+            Self::EyeROpen => "eye_r_open",
+            Self::EyeBallX => "eye_ball_x",
+            Self::EyeBallY => "eye_ball_y",
+            Self::MouthOpen => "mouth_open",
+            Self::MouthForm => "mouth_form",
+            Self::BrowLY => "brow_l_y",
+            Self::BrowRY => "brow_r_y",
+        }
+    }
+
     /// The standard parameter id (`ParamAngleX`, ...) for this role.
     pub fn standard_name(self) -> &'static str {
         match self {

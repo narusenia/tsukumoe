@@ -44,7 +44,8 @@
             "history",
             "timeline",
             "expressions",
-            "physics"
+            "physics",
+            "model_settings"
           ],
           "active": 0
         }
