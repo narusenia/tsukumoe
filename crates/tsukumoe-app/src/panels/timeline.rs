@@ -14,7 +14,7 @@ use tsukumoe_ui::{Icon, Theme, Variant, button, checkbox, hint, icon_button, num
 
 use crate::view::ViewState;
 
-const LABEL_WIDTH: f32 = 150.0;
+pub(super) const LABEL_WIDTH: f32 = 150.0;
 const RULER_HEIGHT: f32 = 22.0;
 const LANE_HEIGHT: f32 = 26.0;
 const KEY_RADIUS: f32 = 5.0;
@@ -37,7 +37,12 @@ pub struct State {
     pub curve: Option<usize>,
     pub key: Option<usize>,
     /// The curve being dragged or typed into, until the edit ends.
-    work: Option<(usize, Curve)>,
+    pub(super) work: Option<(usize, Curve)>,
+    /// The segment the curve editor's kind buttons act on.
+    pub segment: Option<usize>,
+    /// The keys picked in the curve editor (`key` is the main one).
+    pub picked: Vec<usize>,
+    pub(super) drag: Option<super::curve_editor::Drag>,
     /// The playhead moved or the motion changed: the parameters follow.
     apply: bool,
     scrubbing: bool,
@@ -54,6 +59,9 @@ impl Default for State {
             curve: None,
             key: None,
             work: None,
+            segment: None,
+            picked: Vec::new(),
+            drag: None,
             apply: false,
             scrubbing: false,
         }
@@ -80,6 +88,9 @@ impl State {
         self.curve = None;
         self.key = None;
         self.work = None;
+        self.segment = None;
+        self.picked.clear();
+        self.drag = None;
         self.playing = false;
         self.time = 0.0;
         self.apply = true;
@@ -149,7 +160,7 @@ pub fn values_at(model: &Model, motion: &Motion, time: f32) -> Vec<(String, f32)
         .collect()
 }
 
-fn set_curve(motion: &str, index: usize, curve: &Curve) -> Command {
+pub(super) fn set_curve(motion: &str, index: usize, curve: &Curve) -> Command {
     Command::SetMotionCurve {
         motion: motion.to_owned(),
         curve: index,
@@ -246,7 +257,19 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
         ui.ctx().request_repaint();
     }
     actions_row(ui, model, view, &name, &motion, &mut outs);
-    body(ui, model, view, &name, &motion, &mut outs);
+    // The curve editor takes the lower part when a curve is picked.
+    let editor = view.timeline.curve.filter(|i| *i < motion.curves.len());
+    let avail = ui.available_height();
+    let editor_height = editor.map_or(0.0, |_| (avail * 0.5).clamp(120.0, 340.0).min(avail * 0.7));
+    ui.scope(|ui| {
+        ui.set_max_height((avail - editor_height).max(40.0));
+        body(ui, model, view, &name, &motion, &mut outs);
+    });
+    if let Some(ci) = editor {
+        ui.allocate_ui(vec2(ui.available_width(), editor_height), |ui| {
+            super::curve_editor::show(ui, model, view, &name, ci, &mut outs);
+        });
+    }
     key_fields(ui, view, &motion);
     commit_work(ui, view, &name, &motion, &mut outs);
     if std::mem::take(&mut view.timeline.apply) {
@@ -966,5 +989,21 @@ mod tests {
         h.run();
         h.run();
         assert!(!h.state().view.timeline.playing);
+    }
+
+    #[test]
+    fn the_curve_editor_switches_the_kind_of_the_picked_segment() {
+        let mut h = harness(model());
+        h.state_mut().view.timeline.curve = Some(0);
+        h.state_mut().view.timeline.key = Some(0);
+        h.run();
+        h.get_by_label("Bezier").click();
+        h.run();
+        let Some(Out::Command(Command::SetMotionCurve { segments, .. }, _)) = h.state().outs.last()
+        else {
+            panic!("a SetMotionCurve, got {}", h.state().outs.len());
+        };
+        assert!(matches!(segments[0], Segment::Bezier(_)));
+        assert_eq!(segments[0].end(), [2.0, 10.0]);
     }
 }
