@@ -54,6 +54,10 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let value = view.param(name, p);
     let keys = param_ops::primary(model, name, selection).map(|(_, k)| k);
     let range = p.max - p.min;
+    let on_key = keys
+        .as_deref()
+        .is_some_and(|k| param_ops::on_key(k, value, range).is_some());
+    let has_keys = keys.is_some();
     ui.horizontal(|ui| {
         if button(ui, &t("param-bind"), Variant::Secondary).clicked() {
             outs.push(match param_ops::bind(model, name, selection) {
@@ -61,12 +65,16 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                 Err(e) => Out::Error(e.key()),
             });
         }
-        if keys.is_some() && button(ui, &t("param-unbind"), Variant::Secondary).clicked() {
-            outs.push(match param_ops::unbind(model, name, selection) {
-                Ok(op) => Out::Confirm(Kind::Unbind, name.to_owned(), op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
+        ui.add_enabled_ui(has_keys, |ui| {
+            if button(ui, &t("param-unbind"), Variant::Secondary).clicked() {
+                outs.push(match param_ops::unbind(model, name, selection) {
+                    Ok(op) => Out::Confirm(Kind::Unbind, name.to_owned(), op),
+                    Err(e) => Out::Error(e.key()),
+                });
+            }
+        });
+    });
+    ui.horizontal(|ui| {
         let step = |dir: i32, view: &mut ViewState| {
             if let Some(k) = keys
                 .as_deref()
@@ -75,24 +83,31 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
                 view.set_param(name, p, k);
             }
         };
-        if icon_button(ui, Icon::ChevronLeft, &t("param-key-prev"), Variant::Ghost).clicked() {
-            step(-1, view);
-        }
-        if icon_button(ui, Icon::ChevronRight, &t("param-key-next"), Variant::Ghost).clicked() {
-            step(1, view);
-        }
-        if icon_button(ui, Icon::Plus, &t("param-key-add"), Variant::Ghost).clicked() {
-            outs.push(match param_ops::add_key(model, name, value, selection) {
-                Ok(op) => Out::Op(op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
-        if icon_button(ui, Icon::Minus, &t("param-key-remove"), Variant::Ghost).clicked() {
-            outs.push(match param_ops::remove_key(model, name, value, selection) {
-                Ok(op) => Out::Confirm(Kind::Key, name.to_owned(), op),
-                Err(e) => Out::Error(e.key()),
-            });
-        }
+        ui.add_enabled_ui(has_keys, |ui| {
+            if icon_button(ui, Icon::ChevronLeft, &t("param-key-prev"), Variant::Ghost).clicked() {
+                step(-1, view);
+            }
+            if icon_button(ui, Icon::ChevronRight, &t("param-key-next"), Variant::Ghost).clicked() {
+                step(1, view);
+            }
+        });
+        tsukumoe_ui::group_rule(ui);
+        ui.add_enabled_ui(has_keys && !on_key, |ui| {
+            if icon_button(ui, Icon::Plus, &t("param-key-add"), Variant::Secondary).clicked() {
+                outs.push(match param_ops::add_key(model, name, value, selection) {
+                    Ok(op) => Out::Op(op),
+                    Err(e) => Out::Error(e.key()),
+                });
+            }
+        });
+        ui.add_enabled_ui(on_key, |ui| {
+            if icon_button(ui, Icon::Minus, &t("param-key-remove"), Variant::Ghost).clicked() {
+                outs.push(match param_ops::remove_key(model, name, value, selection) {
+                    Ok(op) => Out::Confirm(Kind::Key, name.to_owned(), op),
+                    Err(e) => Out::Error(e.key()),
+                });
+            }
+        });
     });
     if let Some(keys) = &keys {
         let on = param_ops::on_key(keys, value, range).is_some();
@@ -469,13 +484,10 @@ mod tests {
         h.state_mut().model.apply(command).unwrap();
         h.state_mut().outs.clear();
         h.run();
-        // Bound: add a key at the slider (the default 0 is a key: refused with a message).
+        // Bound: the slider is on a key (the default 0), so adding one here is off.
         h.get_by_label("Add a key here").click();
         h.run();
-        assert_eq!(
-            h.state().outs.last(),
-            Some(&Out::Error("param-err-key-exists"))
-        );
+        assert_eq!(h.state().outs.last(), None);
         // Move off the keys and add.
         let p = h
             .state()

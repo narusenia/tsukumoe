@@ -929,6 +929,7 @@ fn header(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) {
         if icon_button(ui, Icon::EyeOff, &tr(&ctx, "tree-hidden-only"), toggle(on)).clicked() {
             view.tree_mut(panel).hidden_only = !on;
         }
+        tsukumoe_ui::group_rule(ui);
         // The sort order: the button opens a short menu; the tooltip names the one in use.
         let sort = view.tree(panel).sort;
         let sorts = [
@@ -951,6 +952,7 @@ fn header(ui: &mut Ui, model: &Model, view: &mut ViewState, panel: Panel) {
                 }
             }
         });
+        tsukumoe_ui::group_rule(ui);
         if icon_button(
             ui,
             Icon::ChevronsUpDown,

@@ -32,6 +32,13 @@ pub fn section_header(ui: &mut Ui, text: &str) -> Response {
     response
 }
 
+/// A thin vertical rule between groups of buttons in a row.
+pub fn group_rule(ui: &mut Ui) {
+    let t = Theme::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(1.0, t.metrics.control - 8.0), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, t.colors.border_strong);
+}
+
 /// A row of a form: `name` in a column whose width follows the panel, then the
 /// control, filling what is left. Every field of one form starts at one place.
 pub fn form_row<R>(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui) -> R) -> R {

@@ -10,7 +10,7 @@ mod toggle;
 
 pub use button::{Variant, button, icon_button, icon_text_button};
 pub use container::{collapsible, list, panel, selectable_row, tabs};
-pub use display::{Tone, badge, form_row, hint, label, progress, section_header, tip};
+pub use display::{Tone, badge, form_row, group_rule, hint, label, progress, section_header, tip};
 pub use field::{color_picker, number, number_edit, number_or, select, slider, text_input};
 pub use overlay::{
     DIALOG_WIDTH, Toasts, dialog, dialog_sized, menu_item, menu_item_checked, menu_item_icon,
