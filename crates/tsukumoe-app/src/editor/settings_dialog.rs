@@ -52,6 +52,8 @@ pub struct SettingsState {
     pub tab: SettingsTab,
     texts: Vec<String>,
     error: Option<String>,
+    /// The words the shortcut list is narrowed by.
+    filter: String,
     /// The pie settings being edited: 0 the common slots, then one per tool.
     pie_mode: usize,
 }
@@ -76,6 +78,7 @@ impl Editor {
             tab,
             texts,
             error: None,
+            filter: String::new(),
             pie_mode: 0,
         })));
     }
@@ -135,6 +138,7 @@ impl Editor {
                                         ui,
                                         &mut state.texts,
                                         &mut state.error,
+                                        &mut state.filter,
                                     );
                                 }
                                 SettingsTab::View => self.view_contents(ctx, ui),
@@ -577,9 +581,14 @@ impl Editor {
         ui: &mut Ui,
         texts: &mut [String],
         error: &mut Option<String>,
+        filter: &mut String,
     ) {
         let t = |key: &str| tr(ctx, key);
         let mut changed = false;
+        let name = t("filter-name");
+        text_input(ui, filter, &name, &name);
+        ui.add_space(4.0);
+        let words: Vec<String> = filter.split_whitespace().map(str::to_lowercase).collect();
         // Two columns so every field starts at the same place, with room between the
         // name and the field, and a field only as wide as a key chord needs.
         egui::Grid::new("tsukumoe-keymap")
@@ -587,9 +596,14 @@ impl Editor {
             .spacing([20.0, 6.0])
             .show(ui, |ui| {
                 for (action, text) in ACTIONS.iter().zip(texts.iter_mut()) {
+                    let label = t(&actions::label_key(action));
+                    let haystack = format!("{label} {action}").to_lowercase();
+                    if !words.iter().all(|w| haystack.contains(w)) {
+                        continue;
+                    }
                     ui.scope(|ui| {
                         ui.set_min_width(300.0);
-                        ui.label(t(&actions::label_key(action)));
+                        ui.label(label);
                     });
                     let r = ui
                         .scope(|ui| {
