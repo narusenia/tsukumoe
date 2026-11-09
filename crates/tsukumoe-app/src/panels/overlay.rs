@@ -183,12 +183,79 @@ pub fn top_right(ctx: &egui::Context, rect: Rect, add: impl FnOnce(&mut Ui)) {
 /// The widest the top right box grows.
 const TOP_RIGHT_WIDTH: f32 = 230.0;
 
-/// A box at the bottom right that lets clicks through, for read-only lines.
+/// What a press in the zoom bar asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomOp {
+    In,
+    Out,
+    Reset,
+}
+
+/// The height the zoom bar takes at the bottom right, margin included.
+const ZOOM_BAR_HEIGHT: f32 = 40.0;
+
+/// A small bar at the bottom right: zoom out, the zoom in percent, zoom in, and
+/// back to the fitted view.
+pub fn zoom_bar(ctx: &egui::Context, rect: Rect, zoom: f32) -> Option<ZoomOp> {
+    let mut op = None;
+    area(
+        "tsukumoe-viewport-zoom",
+        rect.right_bottom() + vec2(-MARGIN, -MARGIN),
+        Align2::RIGHT_BOTTOM,
+    )
+    .show(ctx, |ui| {
+        boxed(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let name = |key: &str| tr(ctx, key);
+                let ghost = tsukumoe_ui::Variant::Ghost;
+                if tsukumoe_ui::icon_button(
+                    ui,
+                    Icon::ZoomOut,
+                    &name("action-viewport-zoom-out"),
+                    ghost,
+                )
+                .clicked()
+                {
+                    op = Some(ZoomOp::Out);
+                }
+                ui.add_sized(
+                    vec2(44.0, ui.spacing().interact_size.y),
+                    egui::Label::new(format!("{:.0}%", zoom * 100.0)),
+                );
+                if tsukumoe_ui::icon_button(
+                    ui,
+                    Icon::ZoomIn,
+                    &name("action-viewport-zoom-in"),
+                    ghost,
+                )
+                .clicked()
+                {
+                    op = Some(ZoomOp::In);
+                }
+                if tsukumoe_ui::icon_button(
+                    ui,
+                    Icon::RotateCcw,
+                    &name("action-viewport-reset-camera"),
+                    ghost,
+                )
+                .clicked()
+                {
+                    op = Some(ZoomOp::Reset);
+                }
+            });
+        });
+    });
+    op
+}
+
+/// A box at the bottom right, above the zoom bar, that lets clicks through, for
+/// read-only lines.
 pub fn info(ctx: &egui::Context, rect: Rect, lines: &[String]) {
     let theme = Theme::get(ctx);
     area(
         "tsukumoe-viewport-info",
-        rect.right_bottom() + vec2(-MARGIN, -MARGIN),
+        rect.right_bottom() + vec2(-MARGIN, -MARGIN - ZOOM_BAR_HEIGHT),
         Align2::RIGHT_BOTTOM,
     )
     .interactable(false)
@@ -251,5 +318,26 @@ mod tests {
         harness.get_by_label("End the solo").click();
         harness.run();
         assert!(*harness.state());
+    }
+
+    #[test]
+    fn the_zoom_bar_shows_the_percent_and_reports_its_buttons() {
+        let mut harness = Harness::builder()
+            .with_size(vec2(300.0, 100.0))
+            .build_ui_state(
+                |ui, ops: &mut Vec<ZoomOp>| {
+                    tsukumoe_ui::init(ui.ctx());
+                    tsukumoe_ui::set_language(ui.ctx(), tsukumoe_ui::Language::En);
+                    ops.extend(zoom_bar(ui.ctx(), ui.max_rect(), 1.5));
+                },
+                Vec::new(),
+            );
+        harness.run();
+        harness.get_by_label("150%");
+        harness.get_by_label("Zoom in").click();
+        harness.run();
+        harness.get_by_label("Reset view").click();
+        harness.run();
+        assert_eq!(harness.state(), &vec![ZoomOp::In, ZoomOp::Reset]);
     }
 }

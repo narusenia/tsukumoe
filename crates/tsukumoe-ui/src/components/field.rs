@@ -50,8 +50,16 @@ pub fn number_or(
     let m = Theme::get(ui.ctx()).metrics;
     let fine = ui.input(|i| i.modifiers.shift);
     let start_id = Id::unique(("number-start", name, ui.next_auto_id()));
+    let width = if ui
+        .data(|d| d.get_temp::<bool>(Id::unique("form-row-fill")))
+        .unwrap_or(false)
+    {
+        ui.available_width().clamp(64.0, 160.0)
+    } else {
+        64.0
+    };
     let mut response = ui.add_sized(
-        Vec2::new(64.0, m.control),
+        Vec2::new(width, m.control),
         DragValue::new(value)
             .range(range)
             .speed(if fine { speed * 0.1 } else { speed })

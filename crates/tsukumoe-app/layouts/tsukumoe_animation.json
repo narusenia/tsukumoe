@@ -57,9 +57,7 @@
     "width": 300.0
   },
   "right": {
-    "panels": [
-      "palette"
-    ],
+    "panels": [],
     "open": null,
     "pinned": false,
     "width": 300.0

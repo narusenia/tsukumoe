@@ -1179,7 +1179,7 @@ impl Editor {
             }
             "edit.undo" => drop(self.undo()),
             "edit.redo" => drop(self.redo()),
-            "view.palette" => self.open_palette(),
+            "view.palette" => self.open_palette(ctx),
             "view.settings" => self.open_settings(SettingsTab::General),
             "view.pie-settings" => self.open_settings(SettingsTab::Pie),
             "view.drag-settings" | "view.confirm-settings" => {
@@ -1554,11 +1554,13 @@ impl Editor {
         }
     }
 
-    /// Shows the command palette panel and puts the cursor in its search field.
-    pub fn open_palette(&mut self) {
-        self.layouts.current_mut(self.workspace).reveal("palette");
-        self.layouts_dirty = true;
-        self.palette.focus = true;
+    /// Opens the command palette at the pointer (the middle of the window when
+    /// the pointer is outside it).
+    pub fn open_palette(&mut self, ctx: &Context) {
+        let at = ctx
+            .pointer_latest_pos()
+            .unwrap_or_else(|| ctx.content_rect().center());
+        self.palette.open_at(at);
     }
 
     pub fn undo(&mut self) -> bool {
@@ -1615,7 +1617,7 @@ impl Editor {
         }
         self.view.grid_live = self.grid_live.is_some();
         // A dialog is modal: shortcuts wait until it is closed.
-        if self.dialog.is_none() {
+        if self.dialog.is_none() && !self.palette.is_open() {
             for action in self.keymap.triggered(&ctx, active) {
                 self.run_action(&ctx, &action);
             }
@@ -1638,6 +1640,13 @@ impl Editor {
             }
         });
         self.dialogs(&ctx);
+        match self.palette.show(&ctx, &self.keymap) {
+            Some(crate::panels::palette::Out::Action(action)) => {
+                self.run_action(&ctx, &action);
+            }
+            Some(crate::panels::palette::Out::Command(command)) => drop(self.submit(&ctx, command)),
+            None => {}
+        }
         self.save_trees(&ctx);
         // Writing while a divider is dragged would spam the disk.
         if self.layouts_dirty && !ctx.input(|i| i.pointer.any_down()) {
@@ -1911,6 +1920,7 @@ impl Editor {
                     cancel = true;
                 }
             });
+            done |= !blank && ui.input(|i| i.key_pressed(egui::Key::Enter));
         });
         open &= !cancel;
         if done {
@@ -2237,7 +2247,6 @@ impl PanelHost for Panels<'_> {
             "physics" => Icon::Activity,
             "model_settings" => Icon::Settings,
             "bones" => Icon::Bone,
-            "palette" => Icon::Search,
             "ai_diff" => Icon::Sparkles,
             _ => return None,
         })
@@ -2355,11 +2364,6 @@ impl PanelHost for Panels<'_> {
                             editor.submit(&ctx, command);
                         }
                     }
-                }
-            }
-            "palette" => {
-                if let Some(command) = editor.palette.show(ui) {
-                    editor.submit(&ctx, command);
                 }
             }
             "viewport" => match self.rs {
@@ -3367,12 +3371,12 @@ mod tests {
         assert_eq!(*editor.layouts.current(other), before);
         // A layout that lacks the panel gets it in the right strip.
         let layout = editor.layouts.current_mut(editor.workspace);
-        layout.remove("palette");
-        assert!(!layout.contains("palette"));
-        editor.run_action(&ctx, "panel.show.palette");
+        layout.remove("ai_diff");
+        assert!(!layout.contains("ai_diff"));
+        editor.run_action(&ctx, "panel.show.ai_diff");
         let layout = editor.layouts.current(editor.workspace);
         assert!(
-            layout.right.panels.contains(&"palette".to_owned()) && layout.is_visible("palette")
+            layout.right.panels.contains(&"ai_diff".to_owned()) && layout.is_visible("ai_diff")
         );
         // An unknown panel is not an action.
         assert!(!editor.run_action(&ctx, "panel.show.nope"));

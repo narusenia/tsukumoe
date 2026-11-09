@@ -386,6 +386,14 @@ impl Viewport {
         {
             actions.push(action);
         }
+        if let Some(op) = overlay::zoom_bar(ui.ctx(), rect, view.camera.zoom) {
+            match op {
+                overlay::ZoomOp::In => view.camera.zoom_at(1.25, [0.5, 0.5]),
+                overlay::ZoomOp::Out => view.camera.zoom_at(0.8, [0.5, 0.5]),
+                overlay::ZoomOp::Reset => view.camera.reset(),
+            }
+            view.touch();
+        }
         if let Some(scene) = &self.scene {
             let mapper = Mapper {
                 origin: [rect.min.x, rect.min.y],

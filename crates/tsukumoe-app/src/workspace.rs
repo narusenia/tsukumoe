@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tsukumoe_ui::dock::Layout;
 
 /// The standard panels, by id. Every layout must stay within this set.
-pub const PANELS: [&str; 14] = [
+pub const PANELS: [&str; 13] = [
     "viewport",
     "tree",
     "deformers",
@@ -22,7 +22,6 @@ pub const PANELS: [&str; 14] = [
     "expressions",
     "physics",
     "model_settings",
-    "palette",
     "ai_diff",
 ];
 
@@ -339,7 +338,7 @@ mod tests {
         // Saved before the panel existed: seven panels, none of them the new one.
         let old = r#"{"current":{"modeling":{"root":{"type":"split","axis":"horizontal","ratio":0.5,
             "a":{"type":"tabs","tabs":["viewport","tree"]},
-            "b":{"type":"tabs","tabs":["parameters","inspector","history","palette","ai_diff"]}}}}}"#;
+            "b":{"type":"tabs","tabs":["parameters","inspector","history","ai_diff"]}}}}}"#;
         let l = Layouts::from_json(old);
         let layout = l.current(Workspace::Modeling);
         assert!(layout.right.panels.contains(&"deformers".to_owned()));

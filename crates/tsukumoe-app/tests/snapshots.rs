@@ -1494,3 +1494,38 @@ fn inspector_panel_in_the_dark_theme() {
         "inspector",
     );
 }
+
+/// The command palette open at a point, with a query typed in.
+fn palette_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::panels::palette::Palette;
+
+    let mut palette = Palette::default();
+    palette.open_at(egui::pos2(24.0, 24.0));
+    palette.query = "mesh".into();
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(520.0, 420.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, palette: &mut Palette| {
+                let ctx = ui.ctx().clone();
+                egui_extras::install_image_loaders(&ctx);
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::Ja);
+                set_mode(&ctx, mode);
+                palette.show(&ctx, &tsukumoe_app::actions::cubism_compatible());
+            },
+            palette,
+        );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn palette_in_the_dark_theme() {
+    palette_snapshot(Mode::Dark, "palette_dark");
+}
+
+#[test]
+fn palette_in_the_light_theme() {
+    palette_snapshot(Mode::Light, "palette_light");
+}

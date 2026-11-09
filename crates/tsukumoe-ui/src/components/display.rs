@@ -1,7 +1,7 @@
 // Copyright 2026 Tsukumoe Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use egui::{Color32, Rect, Response, RichText, Sense, TextStyle, Ui, vec2};
+use egui::{Color32, Id, Rect, Response, RichText, Sense, TextStyle, Ui, vec2};
 
 use crate::icons::Icon;
 use crate::theme::Theme;
@@ -55,7 +55,12 @@ pub fn form_row<R>(ui: &mut Ui, name: &str, add: impl FnOnce(&mut Ui) -> R) -> R
             },
         );
         ui.spacing_mut().combo_width = ui.available_width().max(48.0);
-        add(ui)
+        // A number field in the row takes the width left, like the other fields.
+        let fill = Id::unique("form-row-fill");
+        ui.data_mut(|d| d.insert_temp(fill, true));
+        let out = add(ui);
+        ui.data_mut(|d| d.remove_temp::<bool>(fill));
+        out
     })
     .inner
 }
