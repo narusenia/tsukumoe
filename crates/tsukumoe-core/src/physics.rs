@@ -5,9 +5,13 @@
 //!
 //! The simulation is in `simulate.rs`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::elements::{ParameterId, Point};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
 pub enum Channel {
     X,
     Y,
@@ -29,7 +33,8 @@ impl Channel {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Range {
     pub min: f32,
     pub max: f32,
@@ -55,7 +60,8 @@ pub struct PhysicsOutput {
     pub reflect: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Particle {
     pub position: Point,
     pub mobility: f32,
@@ -74,7 +80,8 @@ pub struct PendulumGroup {
     pub angle_range: Range,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ChainJoint {
     pub length: f32,
     pub stiffness: f32,

@@ -9,6 +9,7 @@ use crate::driver::Driver;
 use crate::elements::{Parameter, Part};
 use crate::keyform::Binding;
 use crate::model::Model;
+use crate::physics::PhysicsRig;
 use crate::playback::{Expression, Motion};
 use crate::rig::{ArtMesh, Glue, RotationDeformer, WarpDeformer};
 use crate::table::Table;
@@ -69,6 +70,8 @@ pub(crate) enum Change {
     Glue(Edit<Glue>),
     Motion(Box<Edit<Motion>>),
     Expression(Edit<Expression>),
+    /// The whole physics rig, before and after.
+    Physics(Box<(PhysicsRig, PhysicsRig)>),
     /// A parameter moved in the iteration order, from position `from` to `to`.
     ParameterOrder {
         id: Id<Parameter>,
@@ -90,6 +93,7 @@ impl Change {
             Change::Glue(e) => e.set(&mut model.glues, &e.before),
             Change::Motion(e) => e.set(&mut model.motions, &e.before),
             Change::Expression(e) => e.set(&mut model.expressions, &e.before),
+            Change::Physics(e) => model.physics = e.0.clone(),
             Change::ParameterOrder { id, from, .. } => {
                 model.parameters.move_to(*id, *from);
             }
@@ -108,6 +112,7 @@ impl Change {
             Change::Glue(e) => e.set(&mut model.glues, &e.after),
             Change::Motion(e) => e.set(&mut model.motions, &e.after),
             Change::Expression(e) => e.set(&mut model.expressions, &e.after),
+            Change::Physics(e) => model.physics = e.1.clone(),
             Change::ParameterOrder { id, to, .. } => {
                 model.parameters.move_to(*id, *to);
             }

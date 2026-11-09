@@ -14,6 +14,7 @@ use crate::arena::Id;
 use crate::elements::{Parameter, Part, Point};
 use crate::history::{Change, Edit, Editable, Record};
 use crate::model::Model;
+use crate::physics::{ChainJoint, Particle, Range};
 use crate::playback::{ExpressionBlend, Segment};
 use crate::rig::{
     ArtMesh, BlendMode, DeformerRef, Glue, GlueNode, RotationDeformer, RotationKeyform,
@@ -24,8 +25,10 @@ use crate::table::InsertError;
 mod expression;
 mod keyform;
 mod motion;
+mod physics;
 use crate::validate::ModelError;
 use keyform::refused;
+pub use physics::{PhysicsInputDef, PhysicsOutputDef};
 
 /// An element a keyform grid can sit on: a mesh, a glue, or a warp or rotation
 /// deformer (the deformers share one namespace, so only the name is needed).
@@ -416,6 +419,37 @@ pub enum Command {
     RemoveExpressionParameter {
         expression: String,
         parameter: String,
+    },
+    /// Adds a pendulum group: a root and one particle, no inputs or outputs.
+    AddPendulum { name: String },
+    /// Removes a pendulum group by name.
+    RemovePendulum { name: String },
+    /// Renames a pendulum group.
+    RenamePendulum { name: String, new_name: String },
+    /// Replaces the inputs, outputs, particles and ranges of a pendulum group.
+    /// Particle 0 is the root; an output's `particle` indexes `particles`.
+    SetPendulum {
+        name: String,
+        inputs: Vec<PhysicsInputDef>,
+        outputs: Vec<PhysicsOutputDef>,
+        particles: Vec<Particle>,
+        position_range: Range,
+        angle_range: Range,
+    },
+    /// Adds a physics chain of three joints, no inputs or outputs.
+    AddPhysicsChain { name: String },
+    /// Removes a physics chain by name.
+    RemovePhysicsChain { name: String },
+    /// Renames a physics chain.
+    RenamePhysicsChain { name: String, new_name: String },
+    /// Replaces the joints, gravity, wind, inputs and outputs of a chain.
+    SetPhysicsChain {
+        name: String,
+        joints: Vec<ChainJoint>,
+        gravity: Point,
+        wind: Point,
+        inputs: Vec<PhysicsInputDef>,
+        outputs: Vec<PhysicsOutputDef>,
     },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
@@ -869,6 +903,14 @@ impl Model {
             | Command::RemoveMotionCurve { .. }
             | Command::SetMotionCurveFade { .. }
             | Command::SetMotionCurve { .. } => self.run_motion(command, changes)?,
+            Command::AddPendulum { .. }
+            | Command::RemovePendulum { .. }
+            | Command::RenamePendulum { .. }
+            | Command::SetPendulum { .. }
+            | Command::AddPhysicsChain { .. }
+            | Command::RemovePhysicsChain { .. }
+            | Command::RenamePhysicsChain { .. }
+            | Command::SetPhysicsChain { .. } => self.run_physics(command, changes)?,
             Command::AddExpression { .. }
             | Command::RemoveExpression { .. }
             | Command::RenameExpression { .. }
@@ -1402,6 +1444,81 @@ mod tests {
             },
             Command::RemoveExpression {
                 name: "Grin".into(),
+            },
+            Command::AddPendulum {
+                name: "Hair".into(),
+            },
+            Command::SetPendulum {
+                name: "Hair".into(),
+                inputs: vec![PhysicsInputDef {
+                    parameter: "ParamAngleZ".into(),
+                    channel: crate::physics::Channel::Angle,
+                    weight: 60.0,
+                    reflect: false,
+                }],
+                outputs: vec![PhysicsOutputDef {
+                    parameter: "ParamAngleZ".into(),
+                    channel: crate::physics::Channel::Angle,
+                    particle: 1,
+                    scale: 1.0,
+                    weight: 100.0,
+                    reflect: false,
+                }],
+                particles: vec![
+                    Particle {
+                        position: [0.0, 0.0],
+                        mobility: 1.0,
+                        delay: 1.0,
+                        acceleration: 1.0,
+                        radius: 0.0,
+                    },
+                    Particle {
+                        position: [0.0, 10.0],
+                        mobility: 0.9,
+                        delay: 0.9,
+                        acceleration: 1.5,
+                        radius: 10.0,
+                    },
+                ],
+                position_range: Range {
+                    min: -10.0,
+                    max: 10.0,
+                    default: 0.0,
+                },
+                angle_range: Range {
+                    min: -10.0,
+                    max: 10.0,
+                    default: 0.0,
+                },
+            },
+            Command::RenamePendulum {
+                name: "Hair".into(),
+                new_name: "Tail".into(),
+            },
+            Command::RemovePendulum {
+                name: "Tail".into(),
+            },
+            Command::AddPhysicsChain {
+                name: "Rope".into(),
+            },
+            Command::SetPhysicsChain {
+                name: "Rope".into(),
+                joints: vec![ChainJoint {
+                    length: 1.0,
+                    stiffness: 0.5,
+                    damping: 0.1,
+                }],
+                gravity: [0.0, -9.8],
+                wind: [0.0, 0.0],
+                inputs: vec![],
+                outputs: vec![],
+            },
+            Command::RenamePhysicsChain {
+                name: "Rope".into(),
+                new_name: "Cord".into(),
+            },
+            Command::RemovePhysicsChain {
+                name: "Cord".into(),
             },
         ]
     }

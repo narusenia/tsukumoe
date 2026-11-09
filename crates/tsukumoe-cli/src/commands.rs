@@ -10,6 +10,8 @@ use std::fmt::Write;
 use schemars::schema_for;
 use serde_json::{Value, json};
 use tsukumoe_core::command::{Command, ElementRef, MotionTarget, RotationBase};
+use tsukumoe_core::command::{PhysicsInputDef, PhysicsOutputDef};
+use tsukumoe_core::physics::{ChainJoint, Channel, Particle, Range};
 use tsukumoe_core::playback::ExpressionBlend;
 use tsukumoe_core::playback::Segment;
 use tsukumoe_core::rig::{BlendMode, GlueNode};
@@ -458,6 +460,81 @@ pub fn examples() -> Vec<Command> {
             expression: "Smile".into(),
             parameter: "ParamMouthForm".into(),
         },
+        Command::AddPendulum {
+            name: "Hair".into(),
+        },
+        Command::RemovePendulum {
+            name: "Hair".into(),
+        },
+        Command::RenamePendulum {
+            name: "Hair".into(),
+            new_name: "Tail".into(),
+        },
+        Command::SetPendulum {
+            name: "Hair".into(),
+            inputs: vec![PhysicsInputDef {
+                parameter: "ParamAngleX".into(),
+                channel: Channel::Angle,
+                weight: 60.0,
+                reflect: false,
+            }],
+            outputs: vec![PhysicsOutputDef {
+                parameter: "ParamHairSway".into(),
+                channel: Channel::Angle,
+                particle: 1,
+                scale: 1.0,
+                weight: 100.0,
+                reflect: false,
+            }],
+            particles: vec![
+                Particle {
+                    position: [0.0, 0.0],
+                    mobility: 1.0,
+                    delay: 1.0,
+                    acceleration: 1.0,
+                    radius: 0.0,
+                },
+                Particle {
+                    position: [0.0, 10.0],
+                    mobility: 0.9,
+                    delay: 0.9,
+                    acceleration: 1.5,
+                    radius: 10.0,
+                },
+            ],
+            position_range: Range {
+                min: -10.0,
+                max: 10.0,
+                default: 0.0,
+            },
+            angle_range: Range {
+                min: -10.0,
+                max: 10.0,
+                default: 0.0,
+            },
+        },
+        Command::AddPhysicsChain {
+            name: "Rope".into(),
+        },
+        Command::RemovePhysicsChain {
+            name: "Rope".into(),
+        },
+        Command::RenamePhysicsChain {
+            name: "Rope".into(),
+            new_name: "Cord".into(),
+        },
+        Command::SetPhysicsChain {
+            name: "Rope".into(),
+            joints: vec![ChainJoint {
+                length: 1.0,
+                stiffness: 0.5,
+                damping: 0.1,
+            }],
+            gravity: [0.0, -9.8],
+            wind: [0.0, 0.0],
+            inputs: vec![],
+            outputs: vec![],
+        },
         Command::Batch {
             commands: vec![add_parameter, add_part],
         },
@@ -537,6 +614,14 @@ pub fn tag(command: &Command) -> &'static str {
         Command::SetExpressionFade { .. } => "set_expression_fade",
         Command::SetExpressionParameter { .. } => "set_expression_parameter",
         Command::RemoveExpressionParameter { .. } => "remove_expression_parameter",
+        Command::AddPendulum { .. } => "add_pendulum",
+        Command::RemovePendulum { .. } => "remove_pendulum",
+        Command::RenamePendulum { .. } => "rename_pendulum",
+        Command::SetPendulum { .. } => "set_pendulum",
+        Command::AddPhysicsChain { .. } => "add_physics_chain",
+        Command::RemovePhysicsChain { .. } => "remove_physics_chain",
+        Command::RenamePhysicsChain { .. } => "rename_physics_chain",
+        Command::SetPhysicsChain { .. } => "set_physics_chain",
     }
 }
 

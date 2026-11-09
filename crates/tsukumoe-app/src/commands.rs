@@ -208,6 +208,14 @@ mod tests {
             Command::SetExpressionFade { .. } => "set_expression_fade",
             Command::SetExpressionParameter { .. } => "set_expression_parameter",
             Command::RemoveExpressionParameter { .. } => "remove_expression_parameter",
+            Command::AddPendulum { .. } => "add_pendulum",
+            Command::RemovePendulum { .. } => "remove_pendulum",
+            Command::RenamePendulum { .. } => "rename_pendulum",
+            Command::SetPendulum { .. } => "set_pendulum",
+            Command::AddPhysicsChain { .. } => "add_physics_chain",
+            Command::RemovePhysicsChain { .. } => "remove_physics_chain",
+            Command::RenamePhysicsChain { .. } => "rename_physics_chain",
+            Command::SetPhysicsChain { .. } => "set_physics_chain",
         }
     }
 
@@ -563,6 +571,50 @@ mod tests {
             Command::RemoveExpressionParameter {
                 expression: String::new(),
                 parameter: String::new(),
+            },
+            Command::AddPendulum {
+                name: String::new(),
+            },
+            Command::RemovePendulum {
+                name: String::new(),
+            },
+            Command::RenamePendulum {
+                name: String::new(),
+                new_name: String::new(),
+            },
+            Command::SetPendulum {
+                name: String::new(),
+                inputs: vec![],
+                outputs: vec![],
+                particles: vec![],
+                position_range: tsukumoe_core::physics::Range {
+                    min: 0.0,
+                    max: 0.0,
+                    default: 0.0,
+                },
+                angle_range: tsukumoe_core::physics::Range {
+                    min: 0.0,
+                    max: 0.0,
+                    default: 0.0,
+                },
+            },
+            Command::AddPhysicsChain {
+                name: String::new(),
+            },
+            Command::RemovePhysicsChain {
+                name: String::new(),
+            },
+            Command::RenamePhysicsChain {
+                name: String::new(),
+                new_name: String::new(),
+            },
+            Command::SetPhysicsChain {
+                name: String::new(),
+                joints: vec![],
+                gravity: [0.0, 0.0],
+                wind: [0.0, 0.0],
+                inputs: vec![],
+                outputs: vec![],
             },
             Command::Batch { commands: vec![] },
         ];

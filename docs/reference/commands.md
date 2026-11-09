@@ -1036,6 +1036,123 @@ Removes the item of an expression for a parameter.
 {"type":"remove_expression_parameter","expression":"Smile","parameter":"ParamMouthForm"}
 ```
 
+### `add_pendulum`
+
+Adds a pendulum group: a root and one particle, no inputs or outputs.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"add_pendulum"` | yes |  |
+
+```json
+{"type":"add_pendulum","name":"Hair"}
+```
+
+### `remove_pendulum`
+
+Removes a pendulum group by name.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_pendulum"` | yes |  |
+
+```json
+{"type":"remove_pendulum","name":"Hair"}
+```
+
+### `rename_pendulum`
+
+Renames a pendulum group.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_pendulum"` | yes |  |
+
+```json
+{"type":"rename_pendulum","name":"Hair","new_name":"Tail"}
+```
+
+### `set_pendulum`
+
+Replaces the inputs, outputs, particles and ranges of a pendulum group.
+Particle 0 is the root; an output's `particle` indexes `particles`.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `angle_range` | Command | yes |  |
+| `inputs` | Command[] | yes |  |
+| `name` | string | yes |  |
+| `outputs` | Command[] | yes |  |
+| `particles` | Command[] | yes |  |
+| `position_range` | Command | yes |  |
+| `type` | `"set_pendulum"` | yes |  |
+
+```json
+{"type":"set_pendulum","name":"Hair","inputs":[{"parameter":"ParamAngleX","channel":"angle","weight":60.0,"reflect":false}],"outputs":[{"parameter":"ParamHairSway","channel":"angle","particle":1,"scale":1.0,"weight":100.0,"reflect":false}],"particles":[{"position":[0.0,0.0],"mobility":1.0,"delay":1.0,"acceleration":1.0,"radius":0.0},{"position":[0.0,10.0],"mobility":0.9,"delay":0.9,"acceleration":1.5,"radius":10.0}],"position_range":{"min":-10.0,"max":10.0,"default":0.0},"angle_range":{"min":-10.0,"max":10.0,"default":0.0}}
+```
+
+### `add_physics_chain`
+
+Adds a physics chain of three joints, no inputs or outputs.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"add_physics_chain"` | yes |  |
+
+```json
+{"type":"add_physics_chain","name":"Rope"}
+```
+
+### `remove_physics_chain`
+
+Removes a physics chain by name.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_physics_chain"` | yes |  |
+
+```json
+{"type":"remove_physics_chain","name":"Rope"}
+```
+
+### `rename_physics_chain`
+
+Renames a physics chain.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_physics_chain"` | yes |  |
+
+```json
+{"type":"rename_physics_chain","name":"Rope","new_name":"Cord"}
+```
+
+### `set_physics_chain`
+
+Replaces the joints, gravity, wind, inputs and outputs of a chain.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `gravity` | number[2] | yes |  |
+| `inputs` | Command[] | yes |  |
+| `joints` | Command[] | yes |  |
+| `name` | string | yes |  |
+| `outputs` | Command[] | yes |  |
+| `type` | `"set_physics_chain"` | yes |  |
+| `wind` | number[2] | yes |  |
+
+```json
+{"type":"set_physics_chain","name":"Rope","joints":[{"length":1.0,"stiffness":0.5,"damping":0.1}],"gravity":[0.0,-9.8],"wind":[0.0,0.0],"inputs":[],"outputs":[]}
+```
+
 ### `batch`
 
 Applies the commands in order as one undo step; if one fails, none
