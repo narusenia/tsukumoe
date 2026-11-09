@@ -30,8 +30,10 @@ pub fn shown_with(tool: Tool) -> bool {
 pub fn selection_bounds(scene: &Scene, model: &Model, view: &ViewState) -> Option<[f32; 4]> {
     let names = view.meshes_of(model);
     let mut b = scene.drawn_bounds(names.iter().map(String::as_str));
+    // The grid as the picture shows it at the sliders, not at the defaults.
+    let at = crate::keyed::values(model, view);
     if let Some(Selection::Warp(name)) = &view.selection
-        && let Some(shape) = crate::deformer_tool::Shape::of(model, name, 0.0)
+        && let Some(shape) = crate::deformer_tool::Shape::of_at(model, name, 0.0, &at)
     {
         for p in shape.world_points() {
             b = Some(b.map_or([p[0], p[1], p[0], p[1]], |b| {
@@ -449,6 +451,62 @@ mod tests {
             other => view.selection = other,
         }
         selection_bounds(&scene, model, &view)
+    }
+
+    #[test]
+    fn a_selected_warps_box_follows_its_grid_at_the_sliders() {
+        use tsukumoe_core::command::ElementRef;
+        let mut m = Model::new();
+        for c in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddParameter {
+                name: "X".into(),
+                min: 0.0,
+                max: 1.0,
+                default: 0.0,
+                repeat: false,
+            },
+            Command::AddWarpDeformer {
+                name: "Wp".into(),
+                part: "P".into(),
+                parent: None,
+                rows: 1,
+                columns: 1,
+                base_points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            },
+            Command::BindParameter {
+                parameter: "X".into(),
+                elements: vec![ElementRef::Deformer { name: "Wp".into() }],
+            },
+            Command::SetWarpKeyform {
+                name: "Wp".into(),
+                key: vec![1],
+                points: vec![[10.0, 0.0], [11.0, 0.0], [10.0, 1.0], [11.0, 1.0]],
+                opacity: 1.0,
+            },
+        ] {
+            m.apply(c).unwrap();
+        }
+        let mut scene = Scene::new(&m).unwrap();
+        let mut view = ViewState::default();
+        view.selection = Some(Selection::Warp("Wp".into()));
+        let x = |scene: &mut Scene, view: &ViewState| {
+            scene.apply(view);
+            scene.advance(0.0);
+            selection_bounds(scene, &m, view).unwrap()
+        };
+        assert_eq!(x(&mut scene, &view)[2], 1.0);
+        let id = m.parameters().find("X").unwrap();
+        let p = m.parameters().get(id).unwrap().clone();
+        view.set_param("X", &p, 1.0);
+        assert_eq!(
+            x(&mut scene, &view)[2],
+            11.0,
+            "the box moves with the sliders"
+        );
     }
 
     #[test]
