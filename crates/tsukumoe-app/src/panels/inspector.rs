@@ -10,11 +10,10 @@ use egui::{Id, Ui};
 use tsukumoe_core::command::{Command, RotationBase};
 use tsukumoe_core::elements::ParameterId;
 use tsukumoe_core::model::Model;
-use tsukumoe_ui::{
-    Icon, checkbox, form_row, hint, icon_button, label, number_or, section_header, tr,
-};
+use tsukumoe_ui::{Icon, checkbox, form_row, hint, icon_button, number_or, section_header, tr};
 
 use crate::deformer_tool::DeformerTool;
+use crate::param_ops;
 use crate::view::Selection;
 
 /// A numeric field that edits a local copy while it is dragged or typed into,
@@ -42,6 +41,20 @@ fn commit_field(
         }
     }
     None
+}
+
+/// A read-only row of the form: the name, then the value in the muted tone.
+fn info_row(ui: &mut Ui, name: &str, value: &str) {
+    form_row(ui, name, |ui| {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(value)
+                    .color(tsukumoe_ui::Theme::get(ui.ctx()).colors.text_muted),
+            )
+            .truncate(),
+        )
+        .on_hover_text(value);
+    });
 }
 
 /// A numeric field whose every change is reported at once: `Some((value, ended))`
@@ -103,7 +116,7 @@ fn order_buttons(
 ) -> Option<Command> {
     use crate::draw_style::{Place, reorder};
     let mut out = None;
-    ui.horizontal(|ui| {
+    form_row(ui, &tr(ctx, "inspector-order-move"), |ui| {
         for (place, key, icon) in [
             (Place::Front, "inspector-order-front", Icon::ChevronsUp),
             (Place::Forward, "inspector-order-forward", Icon::ChevronUp),
@@ -143,23 +156,26 @@ fn mask_rows(ui: &mut Ui, ctx: &egui::Context, model: &Model, mesh: &str) -> Opt
     section_header(ui, &tr(ctx, "inspector-masks"));
     for (i, mask) in names.iter().enumerate() {
         ui.horizontal(|ui| {
-            label(ui, mask.clone());
-            if tsukumoe_ui::icon_button(
-                ui,
-                tsukumoe_ui::Icon::Close,
-                &tr(ctx, "inspector-mask-remove"),
-                tsukumoe_ui::Variant::Ghost,
-            )
-            .clicked()
-            {
-                let mut rest = names.clone();
-                rest.remove(i);
-                out = Some(set(rest, m.mask_inverted));
-            }
+            ui.add(egui::Label::new(mask.clone()).truncate());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if tsukumoe_ui::icon_button(
+                    ui,
+                    tsukumoe_ui::Icon::Close,
+                    &tr(ctx, "inspector-mask-remove"),
+                    tsukumoe_ui::Variant::Ghost,
+                )
+                .clicked()
+                {
+                    let mut rest = names.clone();
+                    rest.remove(i);
+                    out = Some(set(rest, m.mask_inverted));
+                }
+            });
         });
     }
     let candidates = crate::draw_style::mask_candidates(model, mesh);
     if !candidates.is_empty() {
+        ui.spacing_mut().combo_width = ui.available_width();
         egui::ComboBox::from_id_salt(("mask-add", mesh))
             .selected_text(tr(ctx, "inspector-mask-add"))
             .show_ui(ui, |ui| {
@@ -199,8 +215,8 @@ fn blend_row(
     };
     let mut chosen = None;
     let name = tr(ctx, "inspector-blend-mode");
-    ui.horizontal(|ui| {
-        egui::ComboBox::from_label(name)
+    form_row(ui, &name, |ui| {
+        egui::ComboBox::from_id_salt(("blend-mode", mesh))
             .selected_text(tr(ctx, key(current)))
             .show_ui(ui, |ui| {
                 for m in [BlendMode::Normal, BlendMode::Additive, BlendMode::Multiply] {
@@ -209,7 +225,9 @@ fn blend_row(
                         chosen = Some(m);
                     }
                 }
-            });
+            })
+            .response
+            .accessible_name(&name);
     });
     chosen.map(|blend_mode| Command::SetMeshBlendMode {
         name: mesh.to_owned(),
@@ -429,21 +447,34 @@ pub fn show_at(
             let id = model.meshes().find(name)?;
             let mesh = model.meshes().get(id)?;
             section_header(ui, name);
-            hint(
+            let part = model.parts().name(mesh.part).unwrap_or_default().to_owned();
+            info_row(ui, &tr(&ctx, "inspector-part"), &part);
+            if let Some(parent) = mesh
+                .parent
+                .and_then(|r| crate::deformer_tool::name_of(model, r))
+            {
+                info_row(ui, &tr(&ctx, "inspector-parent"), &parent);
+            }
+            if let Some(binding) = param_ops::binding_of(
+                model,
+                &tsukumoe_core::command::ElementRef::Mesh { name: name.clone() },
+            ) {
+                let axes: Vec<&str> = binding
+                    .axes()
+                    .iter()
+                    .filter_map(|a| model.parameters().name(a.parameter))
+                    .collect();
+                info_row(ui, &tr(&ctx, "inspector-bound"), &axes.join(", "));
+            }
+            info_row(
                 ui,
-                format!(
-                    "{}: {}",
-                    tr(&ctx, "inspector-vertices"),
-                    mesh.positions.len()
-                ),
+                &tr(&ctx, "inspector-vertices"),
+                &mesh.positions.len().to_string(),
             );
-            hint(
+            info_row(
                 ui,
-                format!(
-                    "{}: {}",
-                    tr(&ctx, "inspector-triangles"),
-                    mesh.indices.len() / 3
-                ),
+                &tr(&ctx, "inspector-triangles"),
+                &(mesh.indices.len() / 3).to_string(),
             );
             let (opacity, draw_order) = crate::keyed::mesh_attrs(model, name, at)
                 .unwrap_or((mesh.opacity, mesh.draw_order));
@@ -804,7 +835,8 @@ mod tests {
                 (m, Selection::Mesh("A".into()), Vec::new()),
             );
         h.run();
-        h.get_by_label("Blend mode").click();
+        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Blend mode")
+            .click();
         h.run();
         h.get_by_label("Multiply").click();
         h.run();

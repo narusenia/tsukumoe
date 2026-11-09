@@ -11,7 +11,8 @@ use tsukumoe_core::command::Command;
 use tsukumoe_core::model::Model;
 use tsukumoe_core::playback::{Expression, ExpressionBlend};
 use tsukumoe_ui::{
-    Icon, Variant, button, hint, icon_button, number_edit, section_header, slider, tr,
+    Icon, Variant, button, form_row, hint, icon_button, number, number_edit, section_header,
+    slider, tr,
 };
 
 use crate::view::ViewState;
@@ -241,10 +242,14 @@ fn toolbar(ui: &mut Ui, model: &Model, view: &mut ViewState, st: &mut State, out
 fn fades(ui: &mut Ui, name: &str, expression: &Expression, outs: &mut Vec<Out>) {
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
-    ui.horizontal(|ui| {
+    {
         let mut next = (expression.fade_in, expression.fade_out);
-        let a = number_edit(ui, next.0, 0.0..=60.0, 0.05, &t("expressions-fade-in"));
-        let b = number_edit(ui, next.1, 0.0..=60.0, 0.05, &t("expressions-fade-out"));
+        let a = form_row(ui, &t("expressions-fade-in"), |ui| {
+            number_edit(ui, next.0, 0.0..=60.0, 0.05, &t("expressions-fade-in"))
+        });
+        let b = form_row(ui, &t("expressions-fade-out"), |ui| {
+            number_edit(ui, next.1, 0.0..=60.0, 0.05, &t("expressions-fade-out"))
+        });
         next = (a.unwrap_or(next.0), b.unwrap_or(next.1));
         if a.is_some() || b.is_some() {
             outs.push(Out::Command(
@@ -256,7 +261,7 @@ fn fades(ui: &mut Ui, name: &str, expression: &Expression, outs: &mut Vec<Out>) 
                 format!("expression_fade: {name}"),
             ));
         }
-    });
+    }
 }
 
 fn items(ui: &mut Ui, model: &Model, name: &str, expression: &Expression, outs: &mut Vec<Out>) {
@@ -379,7 +384,20 @@ fn actions(
         } else if button(ui, &t("expressions-preview"), Variant::Primary).clicked() {
             st.start(model, view, expression);
         }
-        slider(ui, &mut st.weight, 0.0..=1.0, &t("expressions-weight"));
+        hint(ui, t("expressions-weight"));
+        ui.allocate_ui(
+            egui::vec2((ui.available_width() - 70.0).max(40.0), 24.0),
+            |ui| {
+                slider(ui, &mut st.weight, 0.0..=1.0, &t("expressions-weight"));
+            },
+        );
+        number(
+            ui,
+            &mut st.weight,
+            0.0..=1.0,
+            0.01,
+            &t("expressions-weight"),
+        );
     });
 }
 

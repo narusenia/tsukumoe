@@ -12,7 +12,8 @@ use tsukumoe_core::command::{Command, PhysicsInputDef, PhysicsOutputDef};
 use tsukumoe_core::model::Model;
 use tsukumoe_core::physics::{ChainJoint, Channel, Particle, PendulumGroup, PhysicsChain, Range};
 use tsukumoe_ui::{
-    Icon, Variant, button, checkbox, hint, icon_button, number_edit, section_header, slider, tr,
+    Icon, Variant, button, checkbox, form_row, hint, icon_button, number_edit, section_header,
+    slider, tr,
 };
 
 use crate::physics_preset::{self as preset, HEAD_INPUTS, Preset, feel_of};
@@ -370,8 +371,7 @@ fn pendulum(
         (&mut feel.stickiness, "physics-stickiness"),
         (&mut feel.length, "physics-length-knob"),
     ] {
-        ui.horizontal(|ui| {
-            ui.label(t(key));
+        form_row(ui, &t(key), |ui| {
             knob |= done(&slider(ui, value, 0.0..=1.0, &t(key)));
         });
     }

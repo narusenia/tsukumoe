@@ -1368,3 +1368,129 @@ fn view_aids_in_the_dark_theme() {
 fn view_aids_in_the_light_theme() {
     view_aids_snapshot(Mode::Light, "view_aids_light");
 }
+
+/// One of the lower or side panels over a small model with a motion, an
+/// expression, a pendulum and a mesh selected.
+fn panel_snapshot(mode: Mode, name: &str, size: egui::Vec2, panel: &'static str) {
+    use tsukumoe_app::panels::{expressions, inspector, physics, timeline};
+    use tsukumoe_app::view::{Selection, ViewState};
+    use tsukumoe_core::command::Command;
+    use tsukumoe_core::model::Model;
+    use tsukumoe_core::playback::Segment;
+
+    let mut model = Model::new();
+    let pts = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+    let steps = [
+        Command::AddParameter {
+            name: "ParamAngleX".into(),
+            min: -30.0,
+            max: 30.0,
+            default: 0.0,
+            repeat: false,
+        },
+        Command::AddPart {
+            name: "Head".into(),
+            parent: None,
+        },
+        Command::AddMesh {
+            name: "Face".into(),
+            part: "Head".into(),
+            positions: pts.clone(),
+            uvs: pts,
+            indices: vec![0, 1, 2],
+        },
+        Command::AddMotion {
+            name: "Idle".into(),
+            duration: 3.0,
+            fps: 30.0,
+            looped: true,
+        },
+        Command::AddMotionCurve {
+            motion: "Idle".into(),
+            target: tsukumoe_core::command::MotionTarget::Parameter {
+                name: "ParamAngleX".into(),
+            },
+        },
+        Command::SetMotionCurve {
+            motion: "Idle".into(),
+            curve: 0,
+            start: [0.0, 0.0],
+            segments: vec![Segment::Linear([1.5, 20.0]), Segment::Linear([3.0, 0.0])],
+        },
+        Command::AddExpression {
+            name: "Smile".into(),
+            fade_in: 0.5,
+            fade_out: 0.5,
+        },
+        Command::AddPendulum {
+            name: "Hair".into(),
+        },
+    ];
+    for command in steps {
+        model.apply(command).unwrap();
+    }
+    let mut view = ViewState::default();
+    view.timeline.motion = Some("Idle".into());
+    view.expression.name = Some("Smile".into());
+    view.physics.selected = Some((physics::Kind::Pendulum, "Hair".into()));
+    view.select_only(Selection::Mesh("Face".into()));
+    let mut harness = Harness::builder().with_size(size).wgpu().build_ui_state(
+        move |ui, state: &mut (Model, ViewState)| {
+            let ctx = ui.ctx().clone();
+            egui_extras::install_image_loaders(&ctx);
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let (model, view) = state;
+            match panel {
+                "timeline" => drop(timeline::show(ui, model, view)),
+                "expressions" => drop(expressions::show(ui, model, view)),
+                "physics" => drop(physics::show(ui, model, view)),
+                _ => drop(inspector::show(ui, model, view.selection.as_ref(), None)),
+            }
+        },
+        (model, view),
+    );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn timeline_panel_in_the_dark_theme() {
+    panel_snapshot(
+        Mode::Dark,
+        "timeline_dark",
+        egui::vec2(840.0, 300.0),
+        "timeline",
+    );
+}
+
+#[test]
+fn expressions_panel_in_the_dark_theme() {
+    panel_snapshot(
+        Mode::Dark,
+        "expressions_dark",
+        egui::vec2(640.0, 300.0),
+        "expressions",
+    );
+}
+
+#[test]
+fn physics_panel_in_the_dark_theme() {
+    panel_snapshot(
+        Mode::Dark,
+        "physics_dark",
+        egui::vec2(640.0, 460.0),
+        "physics",
+    );
+}
+
+#[test]
+fn inspector_panel_in_the_dark_theme() {
+    panel_snapshot(
+        Mode::Dark,
+        "inspector_dark",
+        egui::vec2(240.0, 460.0),
+        "inspector",
+    );
+}

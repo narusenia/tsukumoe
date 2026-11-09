@@ -44,6 +44,9 @@ const MIN_SLIDER_WIDTH: f32 = 28.0;
 const LINK_WIDTH: f32 = 24.0;
 /// The width of the reset button at the end of a row.
 const RESET_WIDTH: f32 = 24.0;
+/// Below this width a row takes two lines.
+const TWO_LINE_BELOW: f32 = 300.0;
+
 /// A slider snaps to a key within this many points.
 const SNAP_POINTS: f32 = 6.0;
 
@@ -212,53 +215,109 @@ fn row(
     let mut value = view.param(name, p);
     let mut changed = false;
     let bg = ui.painter().add(egui::Shape::Noop);
-    let row = ui.horizontal(|ui| {
-        grip(ui, name);
-        link_button(ui, model, view, name, outs);
-        // What follows the slider: the number, the reset button and the gaps before them.
-        let after = NUMBER_WIDTH + RESET_WIDTH + 2.0 * ui.spacing().item_spacing.x;
-        // The name gives way in a narrow panel, so the slider keeps its least width
-        // and the number stays inside.
-        let label = (ui.available_width() - after - MIN_SLIDER_WIDTH - ui.spacing().item_spacing.x)
-            .clamp(MIN_LABEL_WIDTH, LABEL_WIDTH);
-        ui.allocate_ui_with_layout(
-            Vec2::new(label, m.control),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                // The slider starts at the same x on every row, whatever the name.
-                ui.set_min_width(label);
-                name_label(ui, model, view, name, outs);
-            },
-        );
-        let width = (ui.available_width() - after).max(MIN_SLIDER_WIDTH);
-        let slider_rect = ui
-            .allocate_ui(Vec2::new(width, m.control), |ui| {
-                let r = slider(ui, &mut value, p.min..=p.max, name);
-                changed |= r.changed();
-                r.rect
-            })
-            .inner;
-        if let Some(keys) = &keys {
-            if changed && !shift {
-                let threshold = (p.max - p.min) * SNAP_POINTS / slider_rect.width().max(1.0);
-                value = param_ops::snap(keys, value, threshold);
+    let narrow = ui.available_width() < TWO_LINE_BELOW;
+    let row = ui.scope(|ui| {
+        if narrow {
+            // Name and buttons above, slider and number below, each as wide as the panel allows.
+            let gap = ui.spacing().item_spacing.x;
+            ui.horizontal(|ui| {
+                grip(ui, name);
+                let label = (ui.available_width() - m.control - RESET_WIDTH - 2.0 * gap)
+                    .max(MIN_LABEL_WIDTH);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(label, m.control),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_min_width(label);
+                        name_label(ui, model, view, name, outs);
+                    },
+                );
+                link_button(ui, model, view, name, outs);
+                if reset_button(ui, value == p.default) {
+                    value = p.default;
+                    changed = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(GRIP_WIDTH + gap);
+                let width = (ui.available_width() - NUMBER_WIDTH - gap).max(MIN_SLIDER_WIDTH);
+                let slider_rect = ui
+                    .allocate_ui(Vec2::new(width, m.control), |ui| {
+                        let r = slider(ui, &mut value, p.min..=p.max, name);
+                        changed |= r.changed();
+                        r.rect
+                    })
+                    .inner;
+                if let Some(keys) = &keys {
+                    if changed && !shift {
+                        let threshold =
+                            (p.max - p.min) * SNAP_POINTS / slider_rect.width().max(1.0);
+                        value = param_ops::snap(keys, value, threshold);
+                    }
+                    paint_keys(ui, slider_rect, keys, p.min, p.max, value);
+                }
+                let speed = f64::from((p.max - p.min).abs()) / 200.0;
+                changed |= number_or(
+                    ui,
+                    &mut value,
+                    p.min..=p.max,
+                    speed.max(1e-4),
+                    name,
+                    Some(p.default),
+                )
+                .changed();
+            });
+            return;
+        }
+        ui.horizontal(|ui| {
+            grip(ui, name);
+            link_button(ui, model, view, name, outs);
+            // What follows the slider: the number, the reset button and the gaps before them.
+            let after = NUMBER_WIDTH + RESET_WIDTH + 2.0 * ui.spacing().item_spacing.x;
+            // The name gives way in a narrow panel, so the slider keeps its least width
+            // and the number stays inside.
+            let label =
+                (ui.available_width() - after - MIN_SLIDER_WIDTH - ui.spacing().item_spacing.x)
+                    .clamp(MIN_LABEL_WIDTH, LABEL_WIDTH);
+            ui.allocate_ui_with_layout(
+                Vec2::new(label, m.control),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    // The slider starts at the same x on every row, whatever the name.
+                    ui.set_min_width(label);
+                    name_label(ui, model, view, name, outs);
+                },
+            );
+            let width = (ui.available_width() - after).max(MIN_SLIDER_WIDTH);
+            let slider_rect = ui
+                .allocate_ui(Vec2::new(width, m.control), |ui| {
+                    let r = slider(ui, &mut value, p.min..=p.max, name);
+                    changed |= r.changed();
+                    r.rect
+                })
+                .inner;
+            if let Some(keys) = &keys {
+                if changed && !shift {
+                    let threshold = (p.max - p.min) * SNAP_POINTS / slider_rect.width().max(1.0);
+                    value = param_ops::snap(keys, value, threshold);
+                }
+                paint_keys(ui, slider_rect, keys, p.min, p.max, value);
             }
-            paint_keys(ui, slider_rect, keys, p.min, p.max, value);
-        }
-        let speed = f64::from((p.max - p.min).abs()) / 200.0;
-        changed |= number_or(
-            ui,
-            &mut value,
-            p.min..=p.max,
-            speed.max(1e-4),
-            name,
-            Some(p.default),
-        )
-        .changed();
-        if reset_button(ui, value == p.default) {
-            value = p.default;
-            changed = true;
-        }
+            let speed = f64::from((p.max - p.min).abs()) / 200.0;
+            changed |= number_or(
+                ui,
+                &mut value,
+                p.min..=p.max,
+                speed.max(1e-4),
+                name,
+                Some(p.default),
+            )
+            .changed();
+            if reset_button(ui, value == p.default) {
+                value = p.default;
+                changed = true;
+            }
+        });
     });
     highlight(
         ui,
