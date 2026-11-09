@@ -759,6 +759,7 @@ pub fn accepted(tool: Tool, kind: Kind) -> bool {
         Tool::Select => true,
         Tool::Mesh => kind == Kind::Mesh,
         Tool::Deformer => kind != Kind::Part,
+        Tool::Bone => kind == Kind::Mesh,
     }
 }
 

@@ -18,7 +18,8 @@
       "b": {
         "type": "tabs",
         "tabs": [
-          "parameters"
+          "parameters",
+          "bones"
         ],
         "active": 0
       }

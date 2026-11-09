@@ -20,6 +20,7 @@ pub enum Selection {
     Warp(String),
     Rotation(String),
     Glue(String),
+    Bone(String),
     Parameter(String),
 }
 
@@ -139,6 +140,8 @@ pub struct ViewState {
     pub expression: crate::panels::expressions::State,
     /// The physics panel's pick. Not saved.
     pub physics: crate::panels::physics::State,
+    /// The bones panel's text being typed. Not saved.
+    pub bones: crate::panels::bones::State,
     /// The model settings panel's text being typed. Not saved.
     pub model_settings: crate::panels::model_settings::State,
     /// Proportional edit options; not saved with the project or the layout.
@@ -188,6 +191,14 @@ impl ViewState {
     /// The mesh chosen last: what the mesh tool edits.
     pub fn last_mesh(&self) -> Option<String> {
         self.selected_meshes().pop()
+    }
+
+    /// The bone chosen last: what the bone tool paints weights for.
+    pub fn last_bone(&self) -> Option<String> {
+        self.selected().into_iter().rev().find_map(|s| match s {
+            Selection::Bone(n) => Some(n),
+            _ => None,
+        })
     }
 
     /// The deformer chosen last: what the deformer tool edits.
@@ -412,7 +423,7 @@ pub fn meshes_of_item(model: &tsukumoe_core::model::Model, item: &Selection) -> 
                     .collect()
             })
             .unwrap_or_default(),
-        Selection::Parameter(_) => Vec::new(),
+        Selection::Parameter(_) | Selection::Bone(_) => Vec::new(),
     }
 }
 

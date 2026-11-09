@@ -10,7 +10,9 @@ use egui::Ui;
 use tsukumoe_core::command::Command;
 use tsukumoe_core::model::Model;
 use tsukumoe_core::playback::{Expression, ExpressionBlend};
-use tsukumoe_ui::{Icon, Variant, button, hint, icon_button, number, section_header, slider, tr};
+use tsukumoe_ui::{
+    Icon, Variant, button, hint, icon_button, number_edit, section_header, slider, tr,
+};
 
 use crate::view::ViewState;
 
@@ -152,11 +154,6 @@ fn blend_key(blend: ExpressionBlend) -> &'static str {
     }
 }
 
-/// Whether a number field finished an edit this frame.
-fn done(r: &egui::Response) -> bool {
-    r.drag_stopped() || (r.changed() && !r.dragged() && !r.has_focus())
-}
-
 pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let mut outs = Vec::new();
     let ctx = ui.ctx().clone();
@@ -246,15 +243,10 @@ fn fades(ui: &mut Ui, name: &str, expression: &Expression, outs: &mut Vec<Out>) 
     let t = |k: &str| tr(&ctx, k);
     ui.horizontal(|ui| {
         let mut next = (expression.fade_in, expression.fade_out);
-        let a = number(ui, &mut next.0, 0.0..=60.0, 0.05, &t("expressions-fade-in"));
-        let b = number(
-            ui,
-            &mut next.1,
-            0.0..=60.0,
-            0.05,
-            &t("expressions-fade-out"),
-        );
-        if done(&a) || done(&b) {
+        let a = number_edit(ui, next.0, 0.0..=60.0, 0.05, &t("expressions-fade-in"));
+        let b = number_edit(ui, next.1, 0.0..=60.0, 0.05, &t("expressions-fade-out"));
+        next = (a.unwrap_or(next.0), b.unwrap_or(next.1));
+        if a.is_some() || b.is_some() {
             outs.push(Out::Command(
                 Command::SetExpressionFade {
                     name: name.to_owned(),
@@ -292,15 +284,15 @@ fn items(ui: &mut Ui, model: &Model, name: &str, expression: &Expression, outs: 
                     })
                     .response
                     .accessible_name(t("expressions-blend"));
-                let mut value = item.value;
-                let r = number(
+                let typed = number_edit(
                     ui,
-                    &mut value,
+                    item.value,
                     -1.0e6..=1.0e6,
                     0.01,
                     &t("expressions-value"),
                 );
-                if blend != item.blend || done(&r) {
+                let value = typed.unwrap_or(item.value);
+                if blend != item.blend || typed.is_some() {
                     outs.push(Out::Command(
                         Command::SetExpressionParameter {
                             expression: name.to_owned(),

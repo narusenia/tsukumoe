@@ -14,6 +14,7 @@
     { "action": "tool.select", "keys": "V" },
     { "action": "tool.mesh-edit", "keys": "M" },
     { "action": "tool.deformer", "keys": "D" },
+    { "action": "tool.bone", "keys": "B" },
     { "action": "mesh.delete-vertices", "context": "viewport", "keys": "Delete" },
     { "action": "mesh.delete-vertices", "context": "viewport", "keys": "Backspace" },
     { "action": "mesh.connect", "context": "viewport", "keys": "E" },

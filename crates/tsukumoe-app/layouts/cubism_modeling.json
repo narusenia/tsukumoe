@@ -28,11 +28,12 @@
         "type": "tabs",
         "tabs": [
           "parameters",
+          "bones",
           "history",
           "timeline",
           "expressions",
           "physics",
-            "model_settings"
+          "model_settings"
         ],
         "active": 0
       }

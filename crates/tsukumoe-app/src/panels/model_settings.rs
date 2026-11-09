@@ -61,7 +61,7 @@ pub fn assign_by_name(model: &Model) -> Vec<Command> {
 
 /// A text field that gives back its text once the edit ends with a change.
 /// Escape drops the edit.
-fn text_field(
+pub(super) fn text_field(
     ui: &mut Ui,
     drafts: &mut HashMap<String, String>,
     key: &str,

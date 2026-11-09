@@ -4,6 +4,8 @@
 //! The standard panels. Each is a state type (or pure functions) plus a `show`
 //! that draws it, so the logic is testable without a window.
 
+pub mod bone_overlay;
+pub mod bones;
 pub mod curve_editor;
 pub mod deformer_overlay;
 pub mod expressions;

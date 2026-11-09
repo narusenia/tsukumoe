@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::actions::{self, ACTIONS, Tool};
 use crate::atlas::Atlas;
+use crate::bone_tool::BoneTool;
 use crate::confirm::{Confirm, KINDS, Kind};
 use crate::deformer_ops::{self, Target};
 use crate::deformer_tool::DeformerTool;
@@ -18,8 +19,8 @@ use crate::mesh_tool::{self, MeshTool, Op, ToolError};
 use crate::options::Options;
 use crate::panels::palette::Palette;
 use crate::panels::{
-    expressions, history, inspector, keys, model_settings, parameters, physics, splash, timeline,
-    titlebar, tree, viewport,
+    bones, expressions, history, inspector, keys, model_settings, parameters, physics, splash,
+    timeline, titlebar, tree, viewport,
 };
 use crate::picker::{FilePicker, PickKind, PickRequest};
 use crate::pie::{Entry, PieConfig};
@@ -140,6 +141,7 @@ pub struct Editor {
     pub mesh_tool: MeshTool,
     /// The deformer tool's selection and drag; view state, not model.
     pub deformer_tool: DeformerTool,
+    pub bone_tool: BoneTool,
     pub pie_config: PieConfig,
     /// Whether the system draws the menus (macOS), leaving only the tabs here.
     pub native_menu: bool,
@@ -220,6 +222,7 @@ impl Editor {
                 .unwrap_or_default(),
             mesh_tool: MeshTool::default(),
             deformer_tool: DeformerTool::default(),
+            bone_tool: BoneTool::default(),
             pie_config,
             native_menu: false,
             pie: None,
@@ -335,6 +338,7 @@ impl Editor {
                 self.load_tree_views();
                 self.mesh_tool = MeshTool::default();
                 self.deformer_tool = DeformerTool::default();
+                self.bone_tool = BoneTool::default();
                 self.recent.push(path);
                 self.persist_state()
             }
@@ -488,7 +492,7 @@ impl Editor {
                     .into_iter()
                     .map(Target::Mesh)
                     .collect(),
-                Selection::Parameter(_) | Selection::Glue(_) => Vec::new(),
+                Selection::Parameter(_) | Selection::Glue(_) | Selection::Bone(_) => Vec::new(),
             };
             for t in found {
                 if !out.contains(&t) {
@@ -2073,6 +2077,7 @@ impl PanelHost for Panels<'_> {
             "expressions" => Icon::Layers,
             "physics" => Icon::Link,
             "model_settings" => Icon::Settings,
+            "bones" => Icon::Link,
             "palette" => Icon::Search,
             "ai_diff" => Icon::Sparkles,
             _ => return None,
@@ -2114,6 +2119,18 @@ impl PanelHost for Panels<'_> {
                     physics::show(ui, doc.dispatcher.model(), &mut editor.view)
                 {
                     editor.submit_labeled(&ctx, command, Some(label));
+                }
+            }
+            "bones" => {
+                for out in bones::show(ui, doc.dispatcher.model(), &mut editor.view) {
+                    match out {
+                        bones::Out::Command(command, label) => {
+                            editor.submit_labeled(&ctx, command, Some(label));
+                        }
+                        bones::Out::Error(key) => {
+                            editor.toasts.push(&ctx, Tone::Error, tr(&ctx, key));
+                        }
+                    }
                 }
             }
             "model_settings" => {
@@ -2207,6 +2224,7 @@ impl PanelHost for Panels<'_> {
                             &editor.drag,
                             &mut editor.mesh_tool,
                             &mut editor.deformer_tool,
+                            &mut editor.bone_tool,
                             &editor.keymap,
                         );
                         let menu_outs = std::mem::take(&mut vp.menu_outs);
@@ -2258,6 +2276,7 @@ fn selection_name(s: &Selection) -> &str {
         | Selection::Warp(n)
         | Selection::Rotation(n)
         | Selection::Glue(n)
+        | Selection::Bone(n)
         | Selection::Parameter(n) => n,
     }
 }

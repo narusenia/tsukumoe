@@ -281,7 +281,7 @@ impl Editor {
         use crate::actions::Tool;
         let t = |key: &str| tr(ctx, key);
         let before = self.pie_config.clone();
-        let tools = [Tool::Select, Tool::Mesh, Tool::Deformer];
+        let tools = Tool::ALL;
         let names: Vec<(String, String)> = ACTIONS
             .iter()
             .map(|a| ((*a).to_owned(), t(&actions::label_key(a))))
@@ -295,6 +295,7 @@ impl Editor {
             t("pie-mode-select"),
             t("pie-mode-mesh"),
             t("pie-mode-deformer"),
+            t("pie-mode-bone"),
         ];
         let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         tsukumoe_ui::tabs(ui, mode, &label_refs);

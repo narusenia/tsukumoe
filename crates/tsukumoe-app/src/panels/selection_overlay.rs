@@ -174,7 +174,7 @@ pub fn hover_meshes(model: &Model, hover: &Selection) -> Vec<String> {
                 .map(|(_, n, _)| n.to_owned())
                 .collect()
         }
-        Selection::Glue(_) | Selection::Parameter(_) => Vec::new(),
+        Selection::Glue(_) | Selection::Bone(_) | Selection::Parameter(_) => Vec::new(),
     }
 }
 

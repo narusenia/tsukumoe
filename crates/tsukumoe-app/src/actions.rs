@@ -13,7 +13,7 @@
 use tsukumoe_ui::Keymap;
 
 /// Every action the editor handles, in the order the shortcut list shows them.
-pub const ACTIONS: [&str; 48] = [
+pub const ACTIONS: [&str; 50] = [
     "file.open",
     "file.save",
     "edit.undo",
@@ -25,6 +25,7 @@ pub const ACTIONS: [&str; 48] = [
     "tool.select",
     "tool.mesh-edit",
     "tool.deformer",
+    "tool.bone",
     "mesh.delete-vertices",
     "mesh.connect",
     "mesh.flip-edge",
@@ -48,6 +49,7 @@ pub const ACTIONS: [&str; 48] = [
     "panel.show.tree",
     "panel.show.deformers",
     "panel.show.parameters",
+    "panel.show.bones",
     "panel.show.keys",
     "panel.show.inspector",
     "panel.show.history",
@@ -114,15 +116,19 @@ pub enum Tool {
     Select,
     Mesh,
     Deformer,
+    Bone,
 }
 
 impl Tool {
+    pub const ALL: [Self; 4] = [Tool::Select, Tool::Mesh, Tool::Deformer, Tool::Bone];
+
     /// The name a pie menu setting uses for this tool.
     pub fn key(self) -> &'static str {
         match self {
             Tool::Select => "select",
             Tool::Mesh => "mesh",
             Tool::Deformer => "deformer",
+            Tool::Bone => "bone",
         }
     }
 
@@ -131,13 +137,12 @@ impl Tool {
             Tool::Select => "tool.select",
             Tool::Mesh => "tool.mesh-edit",
             Tool::Deformer => "tool.deformer",
+            Tool::Bone => "tool.bone",
         }
     }
 
     pub fn from_action(action: &str) -> Option<Self> {
-        [Tool::Select, Tool::Mesh, Tool::Deformer]
-            .into_iter()
-            .find(|t| t.action() == action)
+        Tool::ALL.into_iter().find(|t| t.action() == action)
     }
 }
 
@@ -186,7 +191,7 @@ mod tests {
 
     #[test]
     fn tools_map_to_actions_and_back() {
-        for t in [Tool::Select, Tool::Mesh, Tool::Deformer] {
+        for t in Tool::ALL {
             assert_eq!(Tool::from_action(t.action()), Some(t));
         }
         assert_eq!(Tool::from_action("edit.undo"), None);

@@ -35,7 +35,8 @@
             "expressions",
             "physics",
             "model_settings",
-            "parameters"
+            "parameters",
+            "bones"
           ],
           "active": 0
         }

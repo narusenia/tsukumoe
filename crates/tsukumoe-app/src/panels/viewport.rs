@@ -16,11 +16,13 @@ use tsukumoe_gpu::{DrawOptions, Renderer, Texture};
 use tsukumoe_ui::{Arg, Keymap, Theme, hint, tr, tr_args};
 
 use crate::actions::Tool;
+use crate::bone_tool::{self, BoneTool, Mode};
 use crate::deformer_tool::{self, DeformerTool};
 use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
 use crate::panels::{
-    deformer_overlay, mesh_overlay, overlay, proportional_overlay, selection_overlay, toolbar, tree,
+    bone_overlay, deformer_overlay, mesh_overlay, overlay, proportional_overlay, selection_overlay,
+    toolbar, tree,
 };
 use crate::project::Document;
 use crate::scene::{Preview, Scene, fit_view};
@@ -178,6 +180,7 @@ impl Viewport {
         drag: &DragAssignment,
         mesh: &mut MeshTool,
         deformer: &mut DeformerTool,
+        bone: &mut BoneTool,
         keymap: &Keymap,
     ) -> (
         egui::Response,
@@ -236,7 +239,7 @@ impl Viewport {
             && match view.tool {
                 Tool::Mesh => mesh.is_moving(),
                 Tool::Deformer => deformer.is_moving_points(),
-                Tool::Select => false,
+                Tool::Select | Tool::Bone => false,
             };
         self.navigate(ui, &response, rect, view, radius_wheel);
         self.drag_parameters(ui, &response, doc, view, drag);
@@ -328,6 +331,7 @@ impl Viewport {
             }
             Tool::Deformer => self
                 .deformer_tool_frame(ui, &response, rect, doc, view, drag, deformer, size, keymap),
+            Tool::Bone => self.bone_tool_frame(ui, &response, rect, doc, view, drag, bone, size),
             Tool::Select => {
                 self.select_tool_frame(ui, &response, rect, view, drag, size);
                 self.select_lasso(ui, &response, rect, view, drag, size);
@@ -459,7 +463,7 @@ impl Viewport {
                 ]))
             })()
             .unwrap_or_default(),
-            Tool::Select => Vec::new(),
+            Tool::Select | Tool::Bone => Vec::new(),
         }
     }
 
@@ -802,6 +806,170 @@ impl Viewport {
         });
         tool.proportional = view.proportional;
         (ops, actions)
+    }
+
+    /// The bone tool for one frame: pointer input, then the overlay.
+    #[allow(clippy::too_many_arguments)]
+    fn bone_tool_frame(
+        &self,
+        ui: &Ui,
+        response: &egui::Response,
+        rect: Rect,
+        doc: &Document,
+        view: &mut ViewState,
+        drag: &DragAssignment,
+        tool: &mut BoneTool,
+        size: (u32, u32),
+    ) -> (Vec<Result<Op, ToolError>>, Vec<&'static str>) {
+        let mut ops = Vec::new();
+        let Some(scene) = &self.scene else {
+            return (ops, Vec::new());
+        };
+        let theme = Theme::get(ui.ctx());
+        let painter = ui.painter_at(rect);
+        let mapper = Mapper {
+            origin: [rect.min.x, rect.min.y],
+            size: [rect.width(), rect.height()],
+            view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+        };
+        let model = doc.dispatcher.model();
+        tool.follow(model, view.last_mesh(), view.last_bone());
+        let at = crate::keyed::values(model, view);
+        let space = bone_tool::space_of(model, tool.mesh.as_deref(), &at);
+        let joints = bone_tool::joints(model, &space, &at);
+        let (modifiers, escape) = ui.input(|i| (i.modifiers, i.key_pressed(egui::Key::Escape)));
+        let arrow = |p: Option<egui::Pos2>| p.map(|p| [p.x, p.y]);
+        let pressed = arrow(ui.input(|i| i.pointer.press_origin()));
+        let now = arrow(response.interact_pointer_pos());
+        let primary = PointerButton::Primary;
+        let tool_input = !drag.modifier_down(modifiers);
+        if escape {
+            tool.cancel();
+        }
+        let clicked = tool_input && response.clicked_by(primary);
+        let picked = now.and_then(|p| bone_tool::pick_joint(&joints, &mapper, p));
+        let target = tool.mesh.clone().zip(tool.bone.clone());
+        let mut stroke_vertices = None;
+        match tool.mode {
+            Mode::Bones => {
+                if tool_input
+                    && response.drag_started_by(primary)
+                    && let Some(at) = pressed
+                {
+                    tool.press_joint(&joints, &mapper, at);
+                }
+                if response.dragged_by(primary)
+                    && let Some(at) = now
+                {
+                    tool.drag_to(at);
+                }
+                if response.drag_stopped_by(primary)
+                    && let Some(made) = tool.release_joint(model, &space, &mapper, &at)
+                {
+                    ops.push(made);
+                }
+                if clicked && let Some(p) = now {
+                    match picked {
+                        Some(name) => view.select_only(Selection::Bone(name)),
+                        None => match BoneTool::add_command(
+                            model,
+                            &space,
+                            &mapper,
+                            p,
+                            tool.bone.as_deref(),
+                            &at,
+                        ) {
+                            Ok((name, op)) => {
+                                view.select_only(Selection::Bone(name));
+                                ops.push(Ok(op));
+                            }
+                            Err(e) => ops.push(Err(e)),
+                        },
+                    }
+                }
+            }
+            Mode::Weights => {
+                if clicked && let Some(name) = picked.clone() {
+                    view.select_only(Selection::Bone(name));
+                } else if let Some((mesh, bone)) = &target {
+                    let on_screen: Vec<[f32; 2]> = scene
+                        .drawn_positions(mesh)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|p| mapper.to_screen(p))
+                        .collect();
+                    let painting = tool_input
+                        && (response.drag_started_by(primary)
+                            || response.dragged_by(primary)
+                            || response.clicked_by(primary));
+                    if painting && let Some(p) = now {
+                        tool.stamp(model, mesh, bone, &on_screen, p);
+                    }
+                    if (response.drag_stopped_by(primary) || response.clicked_by(primary))
+                        && let Some(op) = tool.release_stroke()
+                    {
+                        ops.push(Ok(op));
+                    }
+                    stroke_vertices = Some(on_screen);
+                }
+            }
+        }
+        if tool.mode == Mode::Weights
+            && let Some((mesh, bone)) = &target
+        {
+            {
+                let painted = tool
+                    .stroke()
+                    .filter(|(m, _)| m == mesh)
+                    .map(|(_, w)| w.clone());
+                let weights = painted.or_else(|| bone_tool::weights_of(model, mesh));
+                if let (Some(weights), Some(vertices)) = (weights, scene.drawn_positions(mesh)) {
+                    let edges = model
+                        .meshes()
+                        .find(mesh)
+                        .and_then(|id| model.meshes().get(id))
+                        .map(|m| {
+                            m.indices
+                                .as_chunks::<3>()
+                                .0
+                                .iter()
+                                .flat_map(|t| [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]])
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    bone_overlay::paint_weights(
+                        &painter,
+                        &theme,
+                        &mapper,
+                        &vertices,
+                        &edges,
+                        &bone_tool::heat(&weights, bone),
+                    );
+                }
+                if let (Some(hover), true) =
+                    (ui.input(|i| i.pointer.hover_pos()), response.hovered())
+                    && stroke_vertices.is_some()
+                {
+                    bone_overlay::paint_brush(&painter, &theme, hover, tool.brush.radius);
+                }
+            }
+        }
+        bone_overlay::paint_bones(
+            &painter,
+            &theme,
+            &mapper,
+            &joints,
+            tool.bone.as_deref(),
+            tool.dragged_joint(),
+        );
+        let status = format!(
+            "{} / {}",
+            tool.mesh.as_deref().unwrap_or("\u{2014}"),
+            tool.bone.as_deref().unwrap_or("\u{2014}")
+        );
+        overlay::status(ui.ctx(), rect, &status);
+        overlay::flyout(ui.ctx(), rect, |ui| bone_overlay::options(ui, tool));
+        (ops, Vec::new())
     }
 
     /// The mesh edit tool for one frame: pointer input, then the overlay.

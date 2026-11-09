@@ -12,7 +12,7 @@ use tsukumoe_core::command::{Command, PhysicsInputDef, PhysicsOutputDef};
 use tsukumoe_core::model::Model;
 use tsukumoe_core::physics::{ChainJoint, Channel, Particle, PendulumGroup, PhysicsChain, Range};
 use tsukumoe_ui::{
-    Icon, Variant, button, checkbox, hint, icon_button, number, section_header, slider, tr,
+    Icon, Variant, button, checkbox, hint, icon_button, number_edit, section_header, slider, tr,
 };
 
 use crate::physics_preset::{self as preset, HEAD_INPUTS, Preset, feel_of};
@@ -118,14 +118,21 @@ fn channel_key(c: Channel) -> &'static str {
     }
 }
 
-/// Whether a number field finished an edit this frame.
+/// Whether a slider finished an edit this frame. A slider takes its value from
+/// the pointer, so the release frame still has the new value.
 fn done(r: &egui::Response) -> bool {
     r.drag_stopped() || (r.changed() && !r.dragged() && !r.has_focus())
 }
 
-/// A number field that is true when its edit ends.
+/// A number field that is true, with `value` set, when its edit ends.
 fn field(ui: &mut Ui, value: &mut f32, range: std::ops::RangeInclusive<f32>, name: &str) -> bool {
-    done(&number(ui, value, range, 0.05, name))
+    match number_edit(ui, *value, range, 0.05, name) {
+        Some(v) => {
+            *value = v;
+            true
+        }
+        None => false,
+    }
 }
 
 fn param_combo(ui: &mut Ui, model: &Model, value: &mut String, name: &str) -> bool {
@@ -828,6 +835,41 @@ mod tests {
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs[0].parameter, "AngleX");
         assert_eq!(particles.len(), 2);
+    }
+
+    #[test]
+    fn typing_a_weight_sends_the_group_with_the_typed_value() {
+        use egui::accesskit::Role;
+        let mut h = harness(true);
+        h.run();
+        h.get_by_label("Add input").click();
+        h.run();
+        let c = h
+            .state()
+            .outs
+            .iter()
+            .map(|Out::Command(c, _)| c.clone())
+            .next()
+            .unwrap();
+        h.state_mut().model.apply(c).unwrap();
+        h.state_mut().outs.clear();
+        h.run();
+        h.get_by_role_and_label(Role::SpinButton, "Weight").click();
+        h.run();
+        h.get_by_role_and_label(Role::SpinButton, "Weight")
+            .type_text("5");
+        h.run();
+        h.key_press(egui::Key::Enter);
+        h.run();
+        let Some(Out::Command(Command::SetPendulum { inputs, .. }, _)) = h.state().outs.last()
+        else {
+            panic!("a SetPendulum, {} sent", h.state().outs.len());
+        };
+        assert!(
+            (inputs[0].weight - 100.0).abs() > 1e-3,
+            "{}",
+            inputs[0].weight
+        );
     }
 
     #[test]

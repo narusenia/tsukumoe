@@ -22,7 +22,7 @@ fn kind_of(s: &Selection) -> Option<(Kind, &str)> {
         Selection::Warp(n) => Some((Kind::Warp, n)),
         Selection::Rotation(n) => Some((Kind::Rotation, n)),
         Selection::Glue(n) => Some((Kind::Glue, n)),
-        Selection::Parameter(_) => None,
+        Selection::Parameter(_) | Selection::Bone(_) => None,
     }
 }
 

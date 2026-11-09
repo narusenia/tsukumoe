@@ -377,6 +377,18 @@ pub fn show_at(
                 });
             }
         }
+        Selection::Bone(name) => {
+            let id = model.bones().find(name)?;
+            section_header(ui, name);
+            if let Some(parent) = model
+                .bones()
+                .get(id)?
+                .parent
+                .and_then(|p| model.bones().name(p))
+            {
+                hint(ui, parent.to_owned());
+            }
+        }
         Selection::Glue(name) => {
             let g = model
                 .glues()

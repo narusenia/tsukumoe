@@ -11,7 +11,7 @@ use tsukumoe_ui::{Icon, Keymap, Variant, icon_button, tr};
 use crate::actions::{Tool, label_key};
 
 /// The buttons, top to bottom: the action, its icon, and whether it is pressed.
-pub fn buttons(tool: Tool, proportional: bool) -> [(&'static str, Icon, bool); 4] {
+pub fn buttons(tool: Tool, proportional: bool) -> [(&'static str, Icon, bool); 5] {
     [
         (
             Tool::Select.action(),
@@ -20,6 +20,7 @@ pub fn buttons(tool: Tool, proportional: bool) -> [(&'static str, Icon, bool); 4
         ),
         (Tool::Mesh.action(), Icon::Image, tool == Tool::Mesh),
         (Tool::Deformer.action(), Icon::Grid, tool == Tool::Deformer),
+        (Tool::Bone.action(), Icon::Link, tool == Tool::Bone),
         ("proportional.toggle", Icon::Locate, proportional),
     ]
 }
@@ -62,12 +63,12 @@ mod tests {
 
     #[test]
     fn the_pressed_buttons_follow_the_tool_and_the_option() {
-        for tool in [Tool::Select, Tool::Mesh, Tool::Deformer] {
+        for tool in Tool::ALL {
             let b = buttons(tool, false);
             assert_eq!(b.iter().filter(|(_, _, p)| *p).count(), 1);
             assert!(b.iter().any(|(a, _, p)| *p && *a == tool.action()));
         }
-        assert!(buttons(Tool::Select, true)[3].2);
+        assert!(buttons(Tool::Select, true)[4].2);
         assert!(
             buttons(Tool::Select, true)
                 .iter()
@@ -94,6 +95,7 @@ mod tests {
         for (label, action) in [
             ("Mesh edit tool (M)", "tool.mesh-edit"),
             ("Deformer tool (D)", "tool.deformer"),
+            ("Bone tool (B)", "tool.bone"),
             ("Select tool (V)", "tool.select"),
             ("Toggle proportional edit (O)", "proportional.toggle"),
         ] {

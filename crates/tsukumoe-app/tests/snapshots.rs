@@ -1126,3 +1126,184 @@ fn model_settings_panel_in_the_dark_theme() {
 fn model_settings_panel_in_the_light_theme() {
     model_settings_snapshot(Mode::Light, "model_settings_light");
 }
+
+/// The bones panel, and the bone tool's overlay: the bones over a mesh whose
+/// vertices are coloured by the weight of the picked bone, with the brush.
+fn bones_snapshot(mode: Mode, name: &str, overlay: bool) {
+    use tsukumoe_app::bone_tool::{self, BoneTool};
+    use tsukumoe_app::mesh_tool::Mapper;
+    use tsukumoe_app::panels::{bone_overlay, bones, overlay};
+    use tsukumoe_app::view::{Selection, ViewState};
+    use tsukumoe_core::command::{BoneBase, BoneWeight, Command};
+    use tsukumoe_core::deformer_space::Space;
+    use tsukumoe_core::model::Model;
+    use tsukumoe_ui::Theme;
+
+    let base = |x: f32, y: f32| BoneBase {
+        translation: [x, y],
+        rotation_degrees: 0.0,
+        scale: [1.0, 1.0],
+    };
+    let mut positions = Vec::new();
+    for y in 0..4 {
+        for x in 0..5 {
+            positions.push([x as f32, y as f32]);
+        }
+    }
+    let mut indices = Vec::new();
+    for y in 0..3u32 {
+        for x in 0..4u32 {
+            let a = y * 5 + x;
+            indices.extend([a, a + 1, a + 6, a, a + 6, a + 5]);
+        }
+    }
+    let weights: Vec<Vec<BoneWeight>> = positions
+        .iter()
+        .map(|p| {
+            let arm = (p[0] / 4.0).clamp(0.0, 1.0);
+            vec![
+                BoneWeight {
+                    bone: "Arm".into(),
+                    weight: arm,
+                },
+                BoneWeight {
+                    bone: "Root".into(),
+                    weight: 1.0 - arm,
+                },
+            ]
+        })
+        .collect();
+    let build = || {
+        let mut model = Model::new();
+        for command in [
+            Command::AddPart {
+                name: "P".into(),
+                parent: None,
+            },
+            Command::AddMesh {
+                name: "Skin".into(),
+                part: "P".into(),
+                positions: positions.clone(),
+                uvs: positions.clone(),
+                indices: indices.clone(),
+            },
+            Command::AddBone {
+                name: "Root".into(),
+                parent: None,
+                base: base(0.5, 1.5),
+            },
+            Command::AddBone {
+                name: "Arm".into(),
+                parent: Some("Root".into()),
+                base: base(3.0, 0.0),
+            },
+            Command::SetMeshInfluences {
+                name: "Skin".into(),
+                influences: weights.clone(),
+            },
+        ] {
+            model.apply(command).unwrap();
+        }
+        model
+    };
+    let model = build();
+
+    // The panel.
+    let mut view = ViewState::default();
+    view.select_only(Selection::Bone("Arm".into()));
+    let mut panel = Harness::builder()
+        .with_size(egui::vec2(420.0, 320.0))
+        .wgpu()
+        .build_ui_state(
+            move |ui, state: &mut (Model, ViewState)| {
+                let ctx = ui.ctx().clone();
+                tsukumoe_ui::install_cjk_font(&ctx);
+                set_language(&ctx, Language::En);
+                set_mode(&ctx, mode);
+                let (model, view) = state;
+                bones::show(ui, model, view);
+            },
+            (build(), view),
+        );
+    if !overlay {
+        panel.run();
+        panel.snapshot_options(
+            format!("{name}_panel"),
+            &SnapshotOptions::new().threshold(3.0),
+        );
+        return;
+    }
+
+    // The overlay.
+    let size = egui::vec2(480.0, 300.0);
+    let mapper = Mapper {
+        origin: [0.0, 0.0],
+        size: [size.x, size.y],
+        view: [-0.8, -0.4, 5.2, 3.6],
+    };
+    let at = |_: tsukumoe_core::elements::ParameterId| 0.0;
+    let joints = bone_tool::joints(&model, &Space::Drawing, &at);
+    let heat = bone_tool::heat(&bone_tool::weights_of(&model, "Skin").unwrap(), "Arm");
+    let vertices: Vec<[f32; 2]> = (0..4)
+        .flat_map(|y| (0..5).map(move |x| [x as f32, y as f32]))
+        .collect();
+    let edges: Vec<[u32; 2]> = (0..3u32)
+        .flat_map(|y| {
+            (0..4u32).flat_map(move |x| {
+                let a = y * 5 + x;
+                [[a, a + 1], [a, a + 5]]
+            })
+        })
+        .collect();
+    let mut harness = Harness::builder().with_size(size).wgpu().build_ui_state(
+        move |ui, tool: &mut BoneTool| {
+            let ctx = ui.ctx().clone();
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let theme = Theme::get(&ctx);
+            let rect = ui.max_rect();
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
+            bone_overlay::paint_weights(&painter, &theme, &mapper, &vertices, &edges, &heat);
+            bone_overlay::paint_bones(&painter, &theme, &mapper, &joints, Some("Arm"), None);
+            bone_overlay::paint_brush(
+                &painter,
+                &theme,
+                egui::pos2(300.0, 120.0),
+                tool.brush.radius,
+            );
+            overlay::flyout(&ctx, rect, |ui| bone_overlay::options(ui, tool));
+        },
+        {
+            let mut tool = BoneTool::default();
+            tool.mode = bone_tool::Mode::Weights;
+            tool
+        },
+    );
+    harness.run();
+    harness.snapshot_options(
+        format!("{name}_overlay"),
+        &SnapshotOptions::new().threshold(3.0),
+    );
+}
+
+#[test]
+fn bones_panel_in_the_dark_theme() {
+    bones_snapshot(Mode::Dark, "bones_dark", false);
+}
+
+#[test]
+fn bones_panel_in_the_light_theme() {
+    bones_snapshot(Mode::Light, "bones_light", false);
+}
+
+#[test]
+fn bone_weights_overlay_in_the_dark_theme() {
+    bones_snapshot(Mode::Dark, "bones_dark", true);
+}
+
+#[test]
+fn bone_weights_overlay_in_the_light_theme() {
+    bones_snapshot(Mode::Light, "bones_light", true);
+}

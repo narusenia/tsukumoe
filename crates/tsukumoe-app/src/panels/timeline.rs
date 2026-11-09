@@ -10,7 +10,9 @@ use egui::{Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use tsukumoe_core::command::{Command, MotionTarget};
 use tsukumoe_core::model::Model;
 use tsukumoe_core::playback::{Curve, CurveTarget, Motion};
-use tsukumoe_ui::{Icon, Theme, Variant, button, checkbox, hint, icon_button, number, tr};
+use tsukumoe_ui::{
+    Icon, Theme, Variant, button, checkbox, hint, icon_button, number, number_edit, tr,
+};
 
 use crate::view::ViewState;
 
@@ -380,10 +382,14 @@ fn actions_row(
         // Length, rate and loop: one command per finished edit.
         let mut next = (motion.duration, motion.fps, motion.looped);
         let mut changed = false;
-        let r = number(ui, &mut next.0, 0.0..=3600.0, 0.05, &t("timeline-duration"));
-        changed |= r.drag_stopped() || (r.changed() && !r.dragged() && !r.has_focus());
-        let r = number(ui, &mut next.1, 1.0..=240.0, 0.5, &t("timeline-fps"));
-        changed |= r.drag_stopped() || (r.changed() && !r.dragged() && !r.has_focus());
+        if let Some(v) = number_edit(ui, next.0, 0.0..=3600.0, 0.05, &t("timeline-duration")) {
+            next.0 = v;
+            changed = true;
+        }
+        if let Some(v) = number_edit(ui, next.1, 1.0..=240.0, 0.5, &t("timeline-fps")) {
+            next.1 = v;
+            changed = true;
+        }
         changed |= checkbox(ui, &mut next.2, &t("timeline-loop")).changed();
         if changed {
             outs.push(Out::Command(

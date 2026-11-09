@@ -83,6 +83,33 @@ pub fn number_or(
     response.accessible_name(name)
 }
 
+/// A [`number`] field for a value the caller keeps elsewhere (a model): while
+/// it is dragged or typed in, it shows the draft, and gives the finished value
+/// once, when the edit ends and the value is not `value`. Escape drops the edit.
+pub fn number_edit(
+    ui: &mut Ui,
+    value: f32,
+    range: RangeInclusive<f32>,
+    speed: f64,
+    name: &str,
+) -> Option<f32> {
+    let draft_id = Id::unique(("number-draft", name, ui.next_auto_id()));
+    let draft = ui.data(|d| d.get_temp::<f32>(draft_id));
+    let mut shown = draft.unwrap_or(value);
+    let response = number(ui, &mut shown, range, speed, name);
+    let ended = response.drag_stopped() || response.lost_focus();
+    if ended {
+        ui.data_mut(|d| d.remove_temp::<f32>(draft_id));
+        return (shown != value).then_some(shown);
+    }
+    if response.changed() || response.dragged() || response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(draft_id, shown));
+    } else if draft.is_some() {
+        ui.data_mut(|d| d.remove_temp::<f32>(draft_id));
+    }
+    None
+}
+
 /// A single-line text field that fills the width left. `hint` shows while empty;
 /// `name` is what a screen reader announces.
 pub fn text_input(ui: &mut Ui, text: &mut String, name: &str, hint: &str) -> Response {
@@ -151,6 +178,31 @@ mod tests {
     use super::*;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn a_typed_value_comes_back_once_when_the_edit_ends() {
+        let mut h = Harness::new_ui_state(
+            |ui, got: &mut Vec<f32>| {
+                crate::init(ui.ctx());
+                if let Some(v) = number_edit(ui, 1.0, 0.0..=100.0, 0.1, "Width") {
+                    got.push(v);
+                }
+            },
+            Vec::new(),
+        );
+        h.run();
+        h.get_by_label("Width").click();
+        h.run();
+        h.get_by_label("Width").type_text("5");
+        h.run();
+        assert!(h.state().is_empty(), "nothing while typing");
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(h.state().len(), 1);
+        assert!(h.state()[0] != 1.0);
+        h.run();
+        assert_eq!(h.state().len(), 1, "once");
+    }
 
     #[test]
     fn escape_while_typing_puts_back_the_entered_value() {

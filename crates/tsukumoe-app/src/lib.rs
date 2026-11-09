@@ -7,6 +7,7 @@
 pub mod actions;
 pub mod app;
 pub mod atlas;
+pub mod bone_tool;
 pub mod commands;
 pub mod confirm;
 pub mod deformer_ops;
