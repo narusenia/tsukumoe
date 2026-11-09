@@ -1506,10 +1506,14 @@ mod tests {
         let mut under = skinned(part, &[(bone, 1.0)]);
         under.parent = Some(DeformerRef::Rotation(rot));
         m.meshes.insert("Under", under).unwrap();
-        assert!(matches!(
-            m.compile(),
-            Err(CompileError::BoneSpaceMismatch { bone }) if bone == "B"
-        ));
+        // The mesh under a deformer shares the tree of one that hangs from none.
+        let Err(CompileError::Invalid(errors)) = m.compile() else {
+            panic!("a bone space error");
+        };
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            crate::validate::ModelError::GeometryMismatch { owner, field: "space" } if owner == "bone 'B'"
+        )));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use crate::keyform::Binding;
 use crate::model::Model;
 use crate::physics::PhysicsRig;
 use crate::playback::{Expression, Motion};
-use crate::rig::{ArtMesh, Glue, RotationDeformer, WarpDeformer};
+use crate::rig::{ArtMesh, Bone, Glue, RotationDeformer, WarpDeformer};
 use crate::settings::ModelSettings;
 use crate::table::Table;
 
@@ -69,6 +69,7 @@ pub(crate) enum Change {
     Warp(Box<Edit<WarpDeformer>>),
     Rotation(Edit<RotationDeformer>),
     Glue(Edit<Glue>),
+    Bone(Edit<Bone>),
     Motion(Box<Edit<Motion>>),
     Expression(Edit<Expression>),
     /// The whole physics rig, before and after.
@@ -94,6 +95,7 @@ impl Change {
             Change::Warp(e) => e.set(&mut model.warps, &e.before),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.before),
             Change::Glue(e) => e.set(&mut model.glues, &e.before),
+            Change::Bone(e) => e.set(&mut model.bones, &e.before),
             Change::Motion(e) => e.set(&mut model.motions, &e.before),
             Change::Expression(e) => e.set(&mut model.expressions, &e.before),
             Change::Physics(e) => model.physics = e.0.clone(),
@@ -114,6 +116,7 @@ impl Change {
             Change::Warp(e) => e.set(&mut model.warps, &e.after),
             Change::Rotation(e) => e.set(&mut model.rotations, &e.after),
             Change::Glue(e) => e.set(&mut model.glues, &e.after),
+            Change::Bone(e) => e.set(&mut model.bones, &e.after),
             Change::Motion(e) => e.set(&mut model.motions, &e.after),
             Change::Expression(e) => e.set(&mut model.expressions, &e.after),
             Change::Physics(e) => model.physics = e.1.clone(),
@@ -248,6 +251,19 @@ impl Editable for Glue {
     }
     fn change(edit: Edit<Self>) -> Change {
         Change::Glue(edit)
+    }
+}
+
+impl Editable for Bone {
+    const KIND: &'static str = "bone";
+    fn table(model: &Model) -> &Table<Self> {
+        &model.bones
+    }
+    fn table_mut(model: &mut Model) -> &mut Table<Self> {
+        &mut model.bones
+    }
+    fn change(edit: Edit<Self>) -> Change {
+        Change::Bone(edit)
     }
 }
 

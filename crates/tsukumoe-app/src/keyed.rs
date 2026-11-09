@@ -123,7 +123,13 @@ pub fn glue_place(model: &Model, name: &str, at: &dyn Fn(ParameterId) -> f32) ->
     grid_place(model, g.keyforms.as_ref(), at)
 }
 
-/// Where the sliders are for a mesh, a glue or a deformer, `None` if it has no keyforms.
+/// Where the sliders are for a bone, `None` if it has no keyforms.
+pub fn bone_place(model: &Model, name: &str, at: &dyn Fn(ParameterId) -> f32) -> Option<Place> {
+    let b = model.bones().get(model.bones().find(name)?)?;
+    grid_place(model, b.keyforms.as_ref(), at)
+}
+
+/// Where the sliders are for a mesh, a glue, a bone or a deformer, `None` if it has no keyforms.
 pub fn element_place(
     model: &Model,
     element: &ElementRef,
@@ -133,6 +139,7 @@ pub fn element_place(
         ElementRef::Mesh { name } => mesh_place(model, name, at),
         ElementRef::Deformer { name } => deformer_place(model, name, at),
         ElementRef::Glue { name } => glue_place(model, name, at),
+        ElementRef::Bone { name } => bone_place(model, name, at),
     }
 }
 

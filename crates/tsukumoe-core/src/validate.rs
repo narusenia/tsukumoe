@@ -79,6 +79,7 @@ impl Model {
         self.check_deformers(&mut r);
         self.check_glues(&mut r);
         self.check_bones(&mut r);
+        self.check_bone_spaces(&mut r);
         self.check_blend_shapes(&mut r);
         self.check_drivers(&mut r);
         self.check_physics(&mut r);
@@ -299,6 +300,38 @@ impl Model {
             }
             if let Some(grid) = &bone.keyforms {
                 self.check_grid_size(r, &owner, grid.binding, grid.keyforms.len());
+            }
+        }
+    }
+
+    /// Every mesh using a bone tree hangs from the same parent deformer (ADR-0021).
+    fn check_bone_spaces(&self, r: &mut Report) {
+        let root_of = |mut id| {
+            // A cycle is reported by `check_bones`; the walk stops after one lap.
+            for _ in 0..=self.bones.len() {
+                match self.bones.get(id).and_then(|b| b.parent) {
+                    Some(parent) => id = parent,
+                    None => break,
+                }
+            }
+            id
+        };
+        let mut space = Vec::new();
+        for (_, _, mesh) in self.meshes.iter() {
+            let used = mesh
+                .influences
+                .iter()
+                .flat_map(|i| i.bones.iter().flatten());
+            for &bone in used {
+                let root = root_of(bone);
+                match space.iter().find(|(b, _)| *b == root) {
+                    None => space.push((root, mesh.parent)),
+                    Some((_, parent)) if *parent != mesh.parent => {
+                        let name = self.bones.name(bone).unwrap_or_default();
+                        r.geometry(&format!("bone '{name}'"), "space");
+                    }
+                    Some(_) => {}
+                }
             }
         }
     }

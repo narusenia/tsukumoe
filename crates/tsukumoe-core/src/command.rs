@@ -17,12 +17,13 @@ use crate::model::Model;
 use crate::physics::{ChainJoint, Particle, Range};
 use crate::playback::{ExpressionBlend, Segment};
 use crate::rig::{
-    ArtMesh, BlendMode, DeformerRef, Glue, GlueNode, RotationDeformer, RotationKeyform,
-    WarpDeformer,
+    ArtMesh, BlendMode, BoneTransform, DeformerRef, Glue, GlueNode, RotationDeformer,
+    RotationKeyform, WarpDeformer,
 };
 use crate::settings::StandardRole;
 use crate::table::InsertError;
 
+mod bone;
 mod expression;
 mod keyform;
 mod motion;
@@ -41,6 +42,7 @@ pub enum ElementRef {
     Mesh { name: String },
     Deformer { name: String },
     Glue { name: String },
+    Bone { name: String },
 }
 
 /// The base shape of a rotation deformer: origin, angle in degrees, scale and
@@ -75,6 +77,60 @@ impl RotationBase {
         base.reflect_x = self.reflect_x;
         base.reflect_y = self.reflect_y;
     }
+}
+
+/// The local transform of a bone: translation, angle in degrees and scale
+/// (the parts of [`BoneTransform`], by value).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoneBase {
+    pub translation: Point,
+    #[serde(default)]
+    pub rotation_degrees: f32,
+    #[serde(default = "unit_scale")]
+    pub scale: Point,
+}
+
+fn unit_scale() -> Point {
+    [1.0, 1.0]
+}
+
+impl BoneBase {
+    pub fn of(base: &BoneTransform) -> Self {
+        Self {
+            translation: base.translation,
+            rotation_degrees: base.rotation_degrees,
+            scale: base.scale,
+        }
+    }
+
+    pub fn transform(&self) -> BoneTransform {
+        BoneTransform {
+            translation: self.translation,
+            rotation_degrees: self.rotation_degrees,
+            scale: self.scale,
+        }
+    }
+
+    /// Finite, and a scale that can be inverted.
+    pub(crate) fn valid(&self) -> bool {
+        let all = [
+            self.translation[0],
+            self.translation[1],
+            self.rotation_degrees,
+            self.scale[0],
+            self.scale[1],
+        ];
+        all.iter().all(|v| v.is_finite()) && self.scale.iter().all(|v| v.abs() > 1e-6)
+    }
+}
+
+/// One bone's share of a vertex, the bone by name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoneWeight {
+    pub bone: String,
+    pub weight: f32,
 }
 
 /// What a motion curve drives, by name.
@@ -478,6 +534,40 @@ pub enum Command {
         #[serde(default)]
         parameter: Option<String>,
     },
+    /// Adds a bone, optionally under a parent bone. Its transform is local to
+    /// the parent (to the mesh's parent deformer for a root).
+    AddBone {
+        name: String,
+        #[serde(default)]
+        parent: Option<String>,
+        base: BoneBase,
+    },
+    /// Removes a bone by name; fails while a bone or a mesh refers to it.
+    RemoveBone { name: String },
+    /// Renames a bone.
+    RenameBone { name: String, new_name: String },
+    /// Moves a bone under another bone, or to the top (`None`).
+    SetBoneParent {
+        name: String,
+        #[serde(default)]
+        parent: Option<String>,
+    },
+    /// Sets the base transform of a bone. Fails if it has keyforms.
+    SetBoneBase { name: String, base: BoneBase },
+    /// Replaces one keyform of a bone (the key is one index per axis of its binding).
+    SetBoneKeyform {
+        name: String,
+        key: Vec<usize>,
+        base: BoneBase,
+    },
+    /// Replaces the bone weights of every vertex of a mesh: for each vertex up
+    /// to four bones and their weights (weights over 1 in total are scaled
+    /// down when the mesh is evaluated, and what they leave under 1 stays
+    /// with the vertex). An empty list takes the skin off the mesh.
+    SetMeshInfluences {
+        name: String,
+        influences: Vec<Vec<BoneWeight>>,
+    },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
     Batch { commands: Vec<Command> },
@@ -503,7 +593,8 @@ pub enum CommandError {
     },
     /// The command does not apply to this element or value; `reason` is a
     /// short fixed key (`already-bound`, `not-bound`, `bad-key`, `no-such-key`,
-    /// `last-key`, `shared-with-other-kinds`, `not-an-identifier`, `bad-range`).
+    /// `last-key`, `not-an-identifier`, `bad-range`, `bad-count`, `too-many-bones`,
+    /// `duplicate-bone`).
     Refused {
         name: String,
         reason: &'static str,
@@ -938,6 +1029,12 @@ impl Model {
             | Command::RemovePhysicsChain { .. }
             | Command::RenamePhysicsChain { .. }
             | Command::SetPhysicsChain { .. } => self.run_physics(command, changes)?,
+            Command::AddBone { .. }
+            | Command::RemoveBone { .. }
+            | Command::RenameBone { .. }
+            | Command::SetBoneParent { .. }
+            | Command::SetBoneBase { .. }
+            | Command::SetMeshInfluences { .. } => self.run_bone(command, changes)?,
             Command::SetModelInfo { .. }
             | Command::AddHitArea { .. }
             | Command::RemoveHitArea { .. }
@@ -964,6 +1061,7 @@ impl Model {
             | Command::SetMeshKeyformColors { .. }
             | Command::SetWarpKeyform { .. }
             | Command::SetGlueKeyform { .. }
+            | Command::SetBoneKeyform { .. }
             | Command::SetRotationKeyform { .. } => self.run_keyform(command, changes)?,
         }
         Ok(())
@@ -1552,6 +1650,79 @@ mod tests {
             },
             Command::RemovePhysicsChain {
                 name: "Cord".into(),
+            },
+            Command::AddBone {
+                name: "Root".into(),
+                parent: None,
+                base: BoneBase {
+                    translation: [0.0, 0.0],
+                    rotation_degrees: 0.0,
+                    scale: [1.0, 1.0],
+                },
+            },
+            Command::AddBone {
+                name: "Arm".into(),
+                parent: Some("Root".into()),
+                base: BoneBase {
+                    translation: [1.0, 0.0],
+                    rotation_degrees: 0.0,
+                    scale: [1.0, 1.0],
+                },
+            },
+            Command::SetBoneBase {
+                name: "Arm".into(),
+                base: BoneBase {
+                    translation: [1.0, 1.0],
+                    rotation_degrees: 10.0,
+                    scale: [1.0, 1.0],
+                },
+            },
+            Command::SetMeshInfluences {
+                name: "Scalp".into(),
+                influences: vec![
+                    vec![BoneWeight {
+                        bone: "Arm".into(),
+                        weight: 1.0,
+                    }];
+                    4
+                ],
+            },
+            Command::BindParameter {
+                parameter: "AngleX".into(),
+                elements: vec![ElementRef::Bone { name: "Arm".into() }],
+            },
+            Command::SetBoneKeyform {
+                name: "Arm".into(),
+                key: vec![0],
+                base: BoneBase {
+                    translation: [2.0, 0.0],
+                    rotation_degrees: 0.0,
+                    scale: [1.0, 1.0],
+                },
+            },
+            Command::SetBoneParent {
+                name: "Arm".into(),
+                parent: None,
+            },
+            Command::RenameBone {
+                name: "Arm".into(),
+                new_name: "Hand".into(),
+            },
+            Command::SetMeshInfluences {
+                name: "Scalp".into(),
+                influences: vec![],
+            },
+            Command::UnbindParameter {
+                parameter: "AngleX".into(),
+                elements: vec![ElementRef::Bone {
+                    name: "Hand".into(),
+                }],
+            },
+            Command::RemoveBone {
+                name: "Hand".into(),
+            },
+            Command::RemoveBone {
+                name: "Root".into(),
             },
             Command::SetModelInfo {
                 title: "Demo".into(),

@@ -18,8 +18,8 @@ use crate::keyform::{Axis, Binding, BindingId, KeyformGrid};
 use crate::keyform_edit::{self, Blend, resample, sample};
 use crate::model::Model;
 use crate::rig::{
-    ArtMesh, DeformerRef, Glue, MeshKeyform, RotationDeformer, RotationKeyform, WarpDeformer,
-    WarpKeyform,
+    ArtMesh, Bone, BoneTransform, DeformerRef, Glue, MeshKeyform, RotationDeformer,
+    RotationKeyform, WarpDeformer, WarpKeyform,
 };
 
 use super::{Command, CommandError, ElementRef};
@@ -112,8 +112,25 @@ impl Bound for RotationDeformer {
     }
 }
 
+impl Bound for Bone {
+    type Kf = BoneTransform;
+    fn grid(&self) -> Option<&KeyformGrid<BoneTransform>> {
+        self.keyforms.as_ref()
+    }
+    fn set_grid(&mut self, grid: Option<KeyformGrid<BoneTransform>>) {
+        self.keyforms = grid;
+    }
+    fn form(&self) -> BoneTransform {
+        self.base
+    }
+    fn set_form(&mut self, kf: &BoneTransform) {
+        self.base = *kf;
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Elem {
+    Bone(Id<Bone>),
     Mesh(Id<ArtMesh>),
     Warp(Id<WarpDeformer>),
     Rotation(Id<RotationDeformer>),
@@ -136,6 +153,9 @@ impl Model {
             ElementRef::Glue { name } => {
                 Ok((Elem::Glue(self.resolve::<Glue>(name)?), name.clone()))
             }
+            ElementRef::Bone { name } => {
+                Ok((Elem::Bone(self.resolve::<Bone>(name)?), name.clone()))
+            }
             ElementRef::Deformer { name } => Ok((
                 match self.resolve_deformer(name)? {
                     DeformerRef::Warp(id) => Elem::Warp(id),
@@ -152,10 +172,11 @@ impl Model {
             Elem::Warp(id) => self.warps.get(id)?.keyforms.as_ref().map(|g| g.binding),
             Elem::Rotation(id) => self.rotations.get(id)?.keyforms.as_ref().map(|g| g.binding),
             Elem::Glue(id) => self.glues.get(id)?.keyforms.as_ref().map(|g| g.binding),
+            Elem::Bone(id) => self.bones.get(id)?.keyforms.as_ref().map(|g| g.binding),
         }
     }
 
-    /// Every mesh, warp and rotation on `binding`.
+    /// Every mesh, warp, rotation, glue and bone on `binding`.
     fn sharers(&self, binding: BindingId) -> Vec<Elem> {
         let mut out = Vec::new();
         for (id, _, m) in self.meshes.iter() {
@@ -178,14 +199,12 @@ impl Model {
                 out.push(Elem::Glue(id));
             }
         }
+        for (id, _, b) in self.bones.iter() {
+            if b.keyforms.as_ref().is_some_and(|g| g.binding == binding) {
+                out.push(Elem::Bone(id));
+            }
+        }
         out
-    }
-
-    /// True if a bone (whose keyforms these commands do not edit) is on `binding`.
-    fn used_by_others(&self, binding: BindingId) -> bool {
-        self.bones
-            .iter()
-            .any(|(_, _, b)| b.keyforms.as_ref().is_some_and(|k| k.binding == binding))
     }
 
     /// The id of a binding equal to `binding`, adding one if there is none.
@@ -210,7 +229,7 @@ impl Model {
                 continue;
             }
             done.push(id);
-            if !self.sharers(id).is_empty() || self.used_by_others(id) {
+            if !self.sharers(id).is_empty() {
                 continue;
             }
             if let Some(binding) = self.bindings.remove(id) {
@@ -285,6 +304,7 @@ impl Model {
             Elem::Warp(id) => self.rebuild(changes, id, new, fallback),
             Elem::Rotation(id) => self.rebuild(changes, id, new, fallback),
             Elem::Glue(id) => self.rebuild(changes, id, new, fallback),
+            Elem::Bone(id) => self.rebuild(changes, id, new, fallback),
         }
     }
 
@@ -375,9 +395,6 @@ impl Model {
                     if b.axes().iter().any(|a| a.parameter == t) {
                         return Err(refused(to, "already-bound"));
                     }
-                    if self.used_by_others(bid) {
-                        return Err(refused(from, "shared-with-other-kinds"));
-                    }
                     let mut axes = b.axes().to_vec();
                     axes[at] = Axis {
                         parameter: t,
@@ -398,6 +415,7 @@ impl Model {
                             Elem::Warp(id) => self.retarget(changes, id, nid),
                             Elem::Rotation(id) => self.retarget(changes, id, nid),
                             Elem::Glue(id) => self.retarget(changes, id, nid),
+                            Elem::Bone(id) => self.retarget(changes, id, nid),
                         }
                     }
                     old.push(bid);
@@ -488,9 +506,6 @@ impl Model {
                     .iter()
                     .find(|a| a.parameter == pid)
                     .ok_or_else(|| refused(&name, "not-bound"))?;
-                if self.used_by_others(bid) {
-                    return Err(refused(&name, "shared-with-other-kinds"));
-                }
                 let next = if adding {
                     keyform_edit::with_key(&binding, pid, *value)
                         .ok_or_else(|| refused(&name, "bad-key"))?
@@ -515,9 +530,6 @@ impl Model {
                     .binding_of(e)
                     .ok_or_else(|| refused(&name, "not-bound"))?;
                 let binding = self.bindings.get(bid).cloned().expect("on a binding");
-                if self.used_by_others(bid) {
-                    return Err(refused(&name, "shared-with-other-kinds"));
-                }
                 let mut axes = Vec::new();
                 for p in parameters {
                     let pid = self.resolve::<Parameter>(p)?;
@@ -620,6 +632,18 @@ impl Model {
                 self.modify(changes, id, |g| {
                     if let Some(grid) = g.keyforms.as_mut() {
                         grid.keyforms[at] = *intensity;
+                    }
+                });
+            }
+            Command::SetBoneKeyform { name, key, base } => {
+                let id = self.resolve::<Bone>(name)?;
+                if !base.valid() {
+                    return Err(refused(name, "bad-range"));
+                }
+                let at = self.key_index(self.bones.get(id).and_then(|b| b.grid()), key, name)?;
+                self.modify(changes, id, |b| {
+                    if let Some(grid) = b.keyforms.as_mut() {
+                        grid.keyforms[at] = base.transform();
                     }
                 });
             }

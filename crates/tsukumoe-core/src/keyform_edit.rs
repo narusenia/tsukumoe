@@ -12,7 +12,7 @@
 
 use crate::elements::{ParameterId, Point};
 use crate::keyform::{Axis, Binding, BindingError};
-use crate::rig::{MeshKeyform, RotationKeyform, WarpKeyform};
+use crate::rig::{BoneTransform, MeshKeyform, RotationKeyform, WarpKeyform};
 
 /// A keyform that can be mixed from weighted others (the weights sum to 1).
 pub trait Blend: Clone {
@@ -44,6 +44,19 @@ fn mix_array<const N: usize>(parts: &[([f32; N], f32)]) -> [f32; N] {
 impl Blend for f32 {
     fn blend(parts: &[(&Self, f32)]) -> Self {
         parts.iter().map(|(v, w)| *v * w).sum()
+    }
+}
+
+impl Blend for BoneTransform {
+    fn blend(parts: &[(&Self, f32)]) -> Self {
+        let mix = |f: &dyn Fn(&Self) -> [f32; 2]| {
+            mix_array(&parts.iter().map(|(k, w)| (f(k), *w)).collect::<Vec<_>>())
+        };
+        Self {
+            translation: mix(&|k| k.translation),
+            rotation_degrees: mix(&|k| [k.rotation_degrees, 0.0])[0],
+            scale: mix(&|k| k.scale),
+        }
     }
 }
 

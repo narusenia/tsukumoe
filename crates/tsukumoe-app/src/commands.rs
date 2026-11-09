@@ -216,6 +216,13 @@ mod tests {
             Command::RemovePhysicsChain { .. } => "remove_physics_chain",
             Command::RenamePhysicsChain { .. } => "rename_physics_chain",
             Command::SetPhysicsChain { .. } => "set_physics_chain",
+            Command::AddBone { .. } => "add_bone",
+            Command::RemoveBone { .. } => "remove_bone",
+            Command::RenameBone { .. } => "rename_bone",
+            Command::SetBoneParent { .. } => "set_bone_parent",
+            Command::SetBoneBase { .. } => "set_bone_base",
+            Command::SetBoneKeyform { .. } => "set_bone_keyform",
+            Command::SetMeshInfluences { .. } => "set_mesh_influences",
             Command::SetModelInfo { .. } => "set_model_info",
             Command::AddHitArea { .. } => "add_hit_area",
             Command::RemoveHitArea { .. } => "remove_hit_area",
@@ -621,6 +628,47 @@ mod tests {
                 wind: [0.0, 0.0],
                 inputs: vec![],
                 outputs: vec![],
+            },
+            Command::AddBone {
+                name: String::new(),
+                parent: None,
+                base: tsukumoe_core::command::BoneBase {
+                    translation: [0.0, 0.0],
+                    rotation_degrees: 0.0,
+                    scale: [1.0, 1.0],
+                },
+            },
+            Command::RemoveBone {
+                name: String::new(),
+            },
+            Command::RenameBone {
+                name: String::new(),
+                new_name: String::new(),
+            },
+            Command::SetBoneParent {
+                name: String::new(),
+                parent: None,
+            },
+            Command::SetBoneBase {
+                name: String::new(),
+                base: tsukumoe_core::command::BoneBase {
+                    translation: [0.0, 0.0],
+                    rotation_degrees: 0.0,
+                    scale: [1.0, 1.0],
+                },
+            },
+            Command::SetBoneKeyform {
+                name: String::new(),
+                key: vec![],
+                base: tsukumoe_core::command::BoneBase {
+                    translation: [0.0, 0.0],
+                    rotation_degrees: 0.0,
+                    scale: [1.0, 1.0],
+                },
+            },
+            Command::SetMeshInfluences {
+                name: String::new(),
+                influences: vec![],
             },
             Command::SetModelInfo {
                 title: String::new(),

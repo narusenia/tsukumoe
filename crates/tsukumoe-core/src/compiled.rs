@@ -44,10 +44,6 @@ pub enum CompileError {
     DegenerateBone {
         bone: String,
     },
-    /// Meshes with different parent deformers share the bone's tree (ADR-0021).
-    BoneSpaceMismatch {
-        bone: String,
-    },
     /// A driver also writes a parameter that physics writes (ADR-0022).
     PhysicsOutputConflict {
         group: String,
@@ -1145,7 +1141,6 @@ impl Model {
 
         compile_settings(self, &param_index, &mesh_index, &mut c);
 
-        check_bone_spaces(&c)?;
         c.check().map_err(|e| CompileError::Layout(e.to_string()))?;
 
         Ok(c)
@@ -1341,35 +1336,6 @@ fn compile_bones(
         });
     }
     Ok(index)
-}
-
-/// Every mesh using a bone tree must hang from the same parent (ADR-0021).
-fn check_bone_spaces(c: &CompiledModel) -> Result<(), CompileError> {
-    let root_of = |mut b: usize| {
-        while let Some(p) = c.bones[b].parent() {
-            b = p;
-        }
-        b
-    };
-    let mut space: HashMap<usize, ParentRef> = HashMap::new();
-    for def in c.meshes.iter() {
-        let Some(start) = def.influence_start() else {
-            continue;
-        };
-        let used = c.influences[start..start + def.vertex_count as usize]
-            .iter()
-            .flat_map(|inf| inf.bones)
-            .filter(|&b| b != NO_BONE);
-        for b in used {
-            let b = b as usize;
-            if *space.entry(root_of(b)).or_insert(def.parent()) != def.parent() {
-                return Err(CompileError::BoneSpaceMismatch {
-                    bone: c.bone_name(b).to_owned(),
-                });
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Compiles every driver's expression and orders the drivers so each runs

@@ -1238,6 +1238,109 @@ Names the parameter that plays a standard role; `None` clears the role.
 {"type":"set_standard_parameter","role":"angle_x","parameter":"ParamAngleX"}
 ```
 
+### `add_bone`
+
+Adds a bone, optionally under a parent bone. Its transform is local to
+the parent (to the mesh's parent deformer for a root).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `base` | Command | yes |  |
+| `name` | string | yes |  |
+| `parent` | string or null | no | `null` |
+| `type` | `"add_bone"` | yes |  |
+
+```json
+{"type":"add_bone","name":"Root","parent":null,"base":{"translation":[0.0,0.0],"rotation_degrees":0.0,"scale":[1.0,1.0]}}
+```
+
+### `remove_bone`
+
+Removes a bone by name; fails while a bone or a mesh refers to it.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_bone"` | yes |  |
+
+```json
+{"type":"remove_bone","name":"Root"}
+```
+
+### `rename_bone`
+
+Renames a bone.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_bone"` | yes |  |
+
+```json
+{"type":"rename_bone","name":"Root","new_name":"Hip"}
+```
+
+### `set_bone_parent`
+
+Moves a bone under another bone, or to the top (`None`).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `parent` | string or null | no | `null` |
+| `type` | `"set_bone_parent"` | yes |  |
+
+```json
+{"type":"set_bone_parent","name":"Arm","parent":"Root"}
+```
+
+### `set_bone_base`
+
+Sets the base transform of a bone. Fails if it has keyforms.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `base` | Command | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_bone_base"` | yes |  |
+
+```json
+{"type":"set_bone_base","name":"Arm","base":{"translation":[1.0,0.0],"rotation_degrees":15.0,"scale":[1.0,1.0]}}
+```
+
+### `set_bone_keyform`
+
+Replaces one keyform of a bone (the key is one index per axis of its binding).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `base` | Command | yes |  |
+| `key` | integer[] | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_bone_keyform"` | yes |  |
+
+```json
+{"type":"set_bone_keyform","name":"Arm","key":[0],"base":{"translation":[1.0,0.0],"rotation_degrees":30.0,"scale":[1.0,1.0]}}
+```
+
+### `set_mesh_influences`
+
+Replaces the bone weights of every vertex of a mesh: for each vertex up
+to four bones and their weights (weights over 1 in total are scaled
+down when the mesh is evaluated, and what they leave under 1 stays
+with the vertex). An empty list takes the skin off the mesh.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `influences` | Command[][] | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_mesh_influences"` | yes |  |
+
+```json
+{"type":"set_mesh_influences","name":"Skin","influences":[[{"bone":"Arm","weight":1.0}]]}
+```
+
 ### `batch`
 
 Applies the commands in order as one undo step; if one fails, none

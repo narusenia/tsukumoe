@@ -9,7 +9,9 @@ use std::fmt::Write;
 
 use schemars::schema_for;
 use serde_json::{Value, json};
-use tsukumoe_core::command::{Command, ElementRef, MotionTarget, RotationBase};
+use tsukumoe_core::command::{
+    BoneBase, BoneWeight, Command, ElementRef, MotionTarget, RotationBase,
+};
 use tsukumoe_core::command::{PhysicsInputDef, PhysicsOutputDef};
 use tsukumoe_core::physics::{ChainJoint, Channel, Particle, Range};
 use tsukumoe_core::playback::ExpressionBlend;
@@ -536,6 +538,50 @@ pub fn examples() -> Vec<Command> {
             inputs: vec![],
             outputs: vec![],
         },
+        Command::AddBone {
+            name: "Root".into(),
+            parent: None,
+            base: BoneBase {
+                translation: [0.0, 0.0],
+                rotation_degrees: 0.0,
+                scale: [1.0, 1.0],
+            },
+        },
+        Command::RemoveBone {
+            name: "Root".into(),
+        },
+        Command::RenameBone {
+            name: "Root".into(),
+            new_name: "Hip".into(),
+        },
+        Command::SetBoneParent {
+            name: "Arm".into(),
+            parent: Some("Root".into()),
+        },
+        Command::SetBoneBase {
+            name: "Arm".into(),
+            base: BoneBase {
+                translation: [1.0, 0.0],
+                rotation_degrees: 15.0,
+                scale: [1.0, 1.0],
+            },
+        },
+        Command::SetBoneKeyform {
+            name: "Arm".into(),
+            key: vec![0],
+            base: BoneBase {
+                translation: [1.0, 0.0],
+                rotation_degrees: 30.0,
+                scale: [1.0, 1.0],
+            },
+        },
+        Command::SetMeshInfluences {
+            name: "Skin".into(),
+            influences: vec![vec![BoneWeight {
+                bone: "Arm".into(),
+                weight: 1.0,
+            }]],
+        },
         Command::SetModelInfo {
             title: "Demo".into(),
             author: "Someone".into(),
@@ -648,6 +694,13 @@ pub fn tag(command: &Command) -> &'static str {
         Command::RemovePhysicsChain { .. } => "remove_physics_chain",
         Command::RenamePhysicsChain { .. } => "rename_physics_chain",
         Command::SetPhysicsChain { .. } => "set_physics_chain",
+        Command::AddBone { .. } => "add_bone",
+        Command::RemoveBone { .. } => "remove_bone",
+        Command::RenameBone { .. } => "rename_bone",
+        Command::SetBoneParent { .. } => "set_bone_parent",
+        Command::SetBoneBase { .. } => "set_bone_base",
+        Command::SetBoneKeyform { .. } => "set_bone_keyform",
+        Command::SetMeshInfluences { .. } => "set_mesh_influences",
         Command::SetModelInfo { .. } => "set_model_info",
         Command::AddHitArea { .. } => "add_hit_area",
         Command::RemoveHitArea { .. } => "remove_hit_area",

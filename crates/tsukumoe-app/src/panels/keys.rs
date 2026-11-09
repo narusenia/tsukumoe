@@ -372,7 +372,8 @@ fn mirror_row(
             if let Some((source, key)) = &view.mirror_source {
                 let (ElementRef::Mesh { name }
                 | ElementRef::Deformer { name }
-                | ElementRef::Glue { name }) = source;
+                | ElementRef::Glue { name }
+                | ElementRef::Bone { name }) = source;
                 let key: Vec<String> = key.iter().map(|k| (k + 1).to_string()).collect();
                 hint(
                     ui,
