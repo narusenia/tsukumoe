@@ -179,6 +179,25 @@ pub fn menu_sub_icon<R>(
     ui.menu_image_text_button(image, text, add_contents)
 }
 
+/// A sub-menu that stays open when its own contents are clicked (a filter field, a
+/// scroll bar); the entries close it themselves with `ui.close()`.
+pub fn menu_sub_stay_open<R>(
+    ui: &mut Ui,
+    icon: impl Into<Option<crate::icons::Icon>>,
+    text: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    use egui::containers::menu::{MenuConfig, SubMenuButton};
+    let image = menu_icon(ui, icon.into(), true);
+    let button =
+        egui::Button::image_and_text(image, text).right_text(SubMenuButton::arrow_atom(None));
+    let config = MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let (_, inner) = SubMenuButton::from_button(button)
+        .config(config)
+        .ui(ui, add_contents);
+    inner.map(|i| i.inner)
+}
+
 fn menu_icon(ui: &Ui, icon: Option<crate::icons::Icon>, enabled: bool) -> egui::Image<'static> {
     let t = Theme::get(ui.ctx());
     let color = match icon {

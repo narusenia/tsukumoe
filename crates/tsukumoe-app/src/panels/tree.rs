@@ -12,7 +12,7 @@ use tsukumoe_core::command::{Command, ElementRef};
 use tsukumoe_core::model::Model;
 use tsukumoe_ui::{
     Icon, Theme, Variant, hint, icon_button, menu_item_checked, menu_item_icon, menu_sub_icon,
-    text_input, tr,
+    menu_sub_stay_open, text_input, tr,
 };
 
 use crate::deformer_ops::Target;
@@ -846,7 +846,7 @@ pub fn row_menu(
                 all
             }
         };
-        menu_sub_icon(ui, Icon::Link, &tr(&ctx, "tree-set-parent"), |ui| {
+        menu_sub_stay_open(ui, Icon::Link, &tr(&ctx, "tree-set-parent"), |ui| {
             let names = lists.deformers.iter().filter(|d| **d != row.name);
             if let Some(parent) = pick_list(ui, "pick-parent", names) {
                 outs.push(Out::Reparent(movers.clone(), Some(parent)));
@@ -870,7 +870,7 @@ pub fn row_menu(
     } else {
         "tree-set-part"
     };
-    menu_sub_icon(ui, Icon::Folder, &tr(&ctx, part_key), |ui| {
+    menu_sub_stay_open(ui, Icon::Folder, &tr(&ctx, part_key), |ui| {
         if row.kind == Kind::Part && ui.button(tr(&ctx, "tree-no-part")).clicked() {
             outs.push(Out::SetPart(me.clone(), None));
             ui.close();

@@ -14,6 +14,6 @@ pub use display::{Tone, badge, form_row, group_rule, hint, label, progress, sect
 pub use field::{color_picker, number, number_edit, number_or, select, slider, text_input};
 pub use overlay::{
     DIALOG_WIDTH, Toasts, dialog, dialog_sized, menu_item, menu_item_checked, menu_item_icon,
-    menu_sub_icon,
+    menu_sub_icon, menu_sub_stay_open,
 };
 pub use toggle::{checkbox, radio, switch};

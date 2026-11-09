@@ -19,9 +19,9 @@ mod theme;
 pub use components::{
     DIALOG_WIDTH, Toasts, Tone, Variant, badge, button, button_wide, checkbox, collapsible,
     color_picker, dialog, dialog_sized, form_row, group_rule, hint, icon_button, icon_text_button,
-    label, list, menu_item, menu_item_checked, menu_item_icon, menu_sub_icon, number, number_edit,
-    number_or, panel, progress, radio, section_header, select, selectable_row, slider, switch,
-    tabs, text_input, tip,
+    label, list, menu_item, menu_item_checked, menu_item_icon, menu_sub_icon, menu_sub_stay_open,
+    number, number_edit, number_or, panel, progress, radio, section_header, select, selectable_row,
+    slider, switch, tabs, text_input, tip,
 };
 pub use font::{has_cjk_font, install_cjk_font};
 pub use icons::{Icon, icon};
