@@ -14,6 +14,7 @@ pub mod mesh_overlay;
 pub mod overlay;
 pub mod palette;
 pub mod parameters;
+pub mod physics;
 pub mod proportional_overlay;
 pub mod selection_overlay;
 pub mod splash;

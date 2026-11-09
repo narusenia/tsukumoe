@@ -33,6 +33,7 @@
           "tabs": [
             "timeline",
             "expressions",
+            "physics",
             "parameters"
           ],
           "active": 0

@@ -30,7 +30,8 @@
           "parameters",
           "history",
           "timeline",
-          "expressions"
+          "expressions",
+          "physics"
         ],
         "active": 0
       }

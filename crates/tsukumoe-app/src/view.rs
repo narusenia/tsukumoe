@@ -137,6 +137,8 @@ pub struct ViewState {
     pub timeline: crate::panels::timeline::State,
     /// The expressions panel's pick, weight and preview. Not saved.
     pub expression: crate::panels::expressions::State,
+    /// The physics panel's pick. Not saved.
+    pub physics: crate::panels::physics::State,
     /// Proportional edit options; not saved with the project or the layout.
     pub proportional: crate::proportional::Proportional,
 }

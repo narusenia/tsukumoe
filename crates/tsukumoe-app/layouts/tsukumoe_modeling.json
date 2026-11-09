@@ -43,7 +43,8 @@
           "tabs": [
             "history",
             "timeline",
-            "expressions"
+            "expressions",
+            "physics"
           ],
           "active": 0
         }
