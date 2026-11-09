@@ -14,13 +14,14 @@ use crate::arena::Id;
 use crate::elements::{Parameter, Part, Point};
 use crate::history::{Change, Edit, Editable, Record};
 use crate::model::Model;
-use crate::playback::Segment;
+use crate::playback::{ExpressionBlend, Segment};
 use crate::rig::{
     ArtMesh, BlendMode, DeformerRef, Glue, GlueNode, RotationDeformer, RotationKeyform,
     WarpDeformer,
 };
 use crate::table::InsertError;
 
+mod expression;
 mod keyform;
 mod motion;
 use crate::validate::ModelError;
@@ -384,6 +385,37 @@ pub enum Command {
         curve: usize,
         start: Point,
         segments: Vec<Segment>,
+    },
+    /// Adds an expression with no items and the given fades (seconds).
+    AddExpression {
+        name: String,
+        #[serde(default)]
+        fade_in: f32,
+        #[serde(default)]
+        fade_out: f32,
+    },
+    /// Removes an expression by name.
+    RemoveExpression { name: String },
+    /// Renames an expression.
+    RenameExpression { name: String, new_name: String },
+    /// Sets the fades (seconds) of an expression.
+    SetExpressionFade {
+        name: String,
+        fade_in: f32,
+        fade_out: f32,
+    },
+    /// Sets what an expression does to a parameter: adds the item, or
+    /// replaces the one for that parameter.
+    SetExpressionParameter {
+        expression: String,
+        parameter: String,
+        blend: ExpressionBlend,
+        value: f32,
+    },
+    /// Removes the item of an expression for a parameter.
+    RemoveExpressionParameter {
+        expression: String,
+        parameter: String,
     },
     /// Applies the commands in order as one undo step; if one fails, none
     /// of them is applied.
@@ -837,6 +869,12 @@ impl Model {
             | Command::RemoveMotionCurve { .. }
             | Command::SetMotionCurveFade { .. }
             | Command::SetMotionCurve { .. } => self.run_motion(command, changes)?,
+            Command::AddExpression { .. }
+            | Command::RemoveExpression { .. }
+            | Command::RenameExpression { .. }
+            | Command::SetExpressionFade { .. }
+            | Command::SetExpressionParameter { .. }
+            | Command::RemoveExpressionParameter { .. } => self.run_expression(command, changes)?,
             Command::RenameParameter { .. }
             | Command::SetParameterRepeat { .. }
             | Command::SetParameterGroup { .. }
@@ -1331,6 +1369,39 @@ mod tests {
             },
             Command::RemoveMotion {
                 name: "Breathe".into(),
+            },
+            Command::AddExpression {
+                name: "Smile".into(),
+                fade_in: 0.5,
+                fade_out: 0.5,
+            },
+            Command::SetExpressionParameter {
+                expression: "Smile".into(),
+                parameter: "ParamAngleZ".into(),
+                blend: ExpressionBlend::Add,
+                value: 0.5,
+            },
+            Command::SetExpressionParameter {
+                expression: "Smile".into(),
+                parameter: "ParamAngleZ".into(),
+                blend: ExpressionBlend::Overwrite,
+                value: 1.0,
+            },
+            Command::SetExpressionFade {
+                name: "Smile".into(),
+                fade_in: 1.0,
+                fade_out: 1.0,
+            },
+            Command::RenameExpression {
+                name: "Smile".into(),
+                new_name: "Grin".into(),
+            },
+            Command::RemoveExpressionParameter {
+                expression: "Grin".into(),
+                parameter: "ParamAngleZ".into(),
+            },
+            Command::RemoveExpression {
+                name: "Grin".into(),
             },
         ]
     }

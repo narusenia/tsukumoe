@@ -948,6 +948,94 @@ previous key and its end.
 {"type":"set_motion_curve","motion":"Idle","curve":0,"start":[0.0,0.0],"segments":[{"linear":[1.0,10.0]},{"bezier":[[1.2,10.0],[1.8,0.0],[2.0,0.0]]}]}
 ```
 
+### `add_expression`
+
+Adds an expression with no items and the given fades (seconds).
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `fade_in` | number | no | `0.0` |
+| `fade_out` | number | no | `0.0` |
+| `name` | string | yes |  |
+| `type` | `"add_expression"` | yes |  |
+
+```json
+{"type":"add_expression","name":"Smile","fade_in":0.5,"fade_out":0.5}
+```
+
+### `remove_expression`
+
+Removes an expression by name.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `type` | `"remove_expression"` | yes |  |
+
+```json
+{"type":"remove_expression","name":"Smile"}
+```
+
+### `rename_expression`
+
+Renames an expression.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `name` | string | yes |  |
+| `new_name` | string | yes |  |
+| `type` | `"rename_expression"` | yes |  |
+
+```json
+{"type":"rename_expression","name":"Smile","new_name":"Grin"}
+```
+
+### `set_expression_fade`
+
+Sets the fades (seconds) of an expression.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `fade_in` | number | yes |  |
+| `fade_out` | number | yes |  |
+| `name` | string | yes |  |
+| `type` | `"set_expression_fade"` | yes |  |
+
+```json
+{"type":"set_expression_fade","name":"Smile","fade_in":1.0,"fade_out":1.0}
+```
+
+### `set_expression_parameter`
+
+Sets what an expression does to a parameter: adds the item, or
+replaces the one for that parameter.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `blend` | Command | yes |  |
+| `expression` | string | yes |  |
+| `parameter` | string | yes |  |
+| `type` | `"set_expression_parameter"` | yes |  |
+| `value` | number | yes |  |
+
+```json
+{"type":"set_expression_parameter","expression":"Smile","parameter":"ParamMouthForm","blend":"add","value":0.5}
+```
+
+### `remove_expression_parameter`
+
+Removes the item of an expression for a parameter.
+
+| Field | Type | Required | Default |
+|---|---|---|---|
+| `expression` | string | yes |  |
+| `parameter` | string | yes |  |
+| `type` | `"remove_expression_parameter"` | yes |  |
+
+```json
+{"type":"remove_expression_parameter","expression":"Smile","parameter":"ParamMouthForm"}
+```
+
 ### `batch`
 
 Applies the commands in order as one undo step; if one fails, none

@@ -202,6 +202,12 @@ mod tests {
             Command::RemoveMotionCurve { .. } => "remove_motion_curve",
             Command::SetMotionCurveFade { .. } => "set_motion_curve_fade",
             Command::SetMotionCurve { .. } => "set_motion_curve",
+            Command::AddExpression { .. } => "add_expression",
+            Command::RemoveExpression { .. } => "remove_expression",
+            Command::RenameExpression { .. } => "rename_expression",
+            Command::SetExpressionFade { .. } => "set_expression_fade",
+            Command::SetExpressionParameter { .. } => "set_expression_parameter",
+            Command::RemoveExpressionParameter { .. } => "remove_expression_parameter",
         }
     }
 
@@ -530,6 +536,33 @@ mod tests {
                 curve: 0,
                 start: [0.0, 0.0],
                 segments: vec![],
+            },
+            Command::AddExpression {
+                name: String::new(),
+                fade_in: 0.0,
+                fade_out: 0.0,
+            },
+            Command::RemoveExpression {
+                name: String::new(),
+            },
+            Command::RenameExpression {
+                name: String::new(),
+                new_name: String::new(),
+            },
+            Command::SetExpressionFade {
+                name: String::new(),
+                fade_in: 0.0,
+                fade_out: 0.0,
+            },
+            Command::SetExpressionParameter {
+                expression: String::new(),
+                parameter: String::new(),
+                blend: tsukumoe_core::playback::ExpressionBlend::Add,
+                value: 0.0,
+            },
+            Command::RemoveExpressionParameter {
+                expression: String::new(),
+                parameter: String::new(),
             },
             Command::Batch { commands: vec![] },
         ];

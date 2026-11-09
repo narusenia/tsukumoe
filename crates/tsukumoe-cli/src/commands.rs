@@ -10,6 +10,7 @@ use std::fmt::Write;
 use schemars::schema_for;
 use serde_json::{Value, json};
 use tsukumoe_core::command::{Command, ElementRef, MotionTarget, RotationBase};
+use tsukumoe_core::playback::ExpressionBlend;
 use tsukumoe_core::playback::Segment;
 use tsukumoe_core::rig::{BlendMode, GlueNode};
 
@@ -430,6 +431,33 @@ pub fn examples() -> Vec<Command> {
                 Segment::Bezier([[1.2, 10.0], [1.8, 0.0], [2.0, 0.0]]),
             ],
         },
+        Command::AddExpression {
+            name: "Smile".into(),
+            fade_in: 0.5,
+            fade_out: 0.5,
+        },
+        Command::RemoveExpression {
+            name: "Smile".into(),
+        },
+        Command::RenameExpression {
+            name: "Smile".into(),
+            new_name: "Grin".into(),
+        },
+        Command::SetExpressionFade {
+            name: "Smile".into(),
+            fade_in: 1.0,
+            fade_out: 1.0,
+        },
+        Command::SetExpressionParameter {
+            expression: "Smile".into(),
+            parameter: "ParamMouthForm".into(),
+            blend: ExpressionBlend::Add,
+            value: 0.5,
+        },
+        Command::RemoveExpressionParameter {
+            expression: "Smile".into(),
+            parameter: "ParamMouthForm".into(),
+        },
         Command::Batch {
             commands: vec![add_parameter, add_part],
         },
@@ -503,6 +531,12 @@ pub fn tag(command: &Command) -> &'static str {
         Command::RemoveMotionCurve { .. } => "remove_motion_curve",
         Command::SetMotionCurveFade { .. } => "set_motion_curve_fade",
         Command::SetMotionCurve { .. } => "set_motion_curve",
+        Command::AddExpression { .. } => "add_expression",
+        Command::RemoveExpression { .. } => "remove_expression",
+        Command::RenameExpression { .. } => "rename_expression",
+        Command::SetExpressionFade { .. } => "set_expression_fade",
+        Command::SetExpressionParameter { .. } => "set_expression_parameter",
+        Command::RemoveExpressionParameter { .. } => "remove_expression_parameter",
     }
 }
 
