@@ -7,6 +7,15 @@ UI は M1-02 の編集コマンドの上に被せる。
 | ID | 単位 | REQ | 規模 | 依存 | 状態 |
 |---|---|---|---|---|---|
 | M5-01 | [MCP サーバとエージェント向け API リファレンス自動生成](mcp-server.md) | AI-001 | M | M1-02 | 完了 |
+| M5-01a | [MCP の読み取りツール（階層・パラメータ・要素・検索・評価）](mcp-read.md) | AI-001 | M | M5-01 | 計画中 |
+| M5-01b | [MCP の描画ツール（部位の絞り込み・並べ描き・スイープ・点から要素・差分）](mcp-render.md) | AI-002 | M | M5-01, M1-10 | 計画中 |
+| M5-01c | [MCP の重ね描き（ワイヤーフレーム・格子・ボーン・ウェイト）](mcp-overlay.md) | AI-002 | S | M5-01b, M5-01e | 計画中 |
+| M5-01d | [MCP の検査ツール（lint・物理の試走）](mcp-inspect.md) | AI-002 | M | M5-01a, M5-01b | 計画中 |
+| M5-01e | [編集処理を UI 非依存のクレートへ移す（`tsukumoe-edit`）](edit-ops-crate.md) | AI-001 | L | M5-01 | 計画中 |
+| M5-01f | [MCP の高水準編集ツール](mcp-high-level-edit.md) | AI-001 | L | M5-01e, M5-01a | 計画中 |
+| M5-01g | [MCP の取り込み・書き出しツール](mcp-import-export.md) | AI-001, AI-008, EDIT-001, EDIT-007 | M | M5-01e, M5-03, M5-09a | 計画中 |
+| M5-01h | [MCP のセッション機能（差分つきの結果・dry run・退避点・prompts・resources）](mcp-session.md) | なし | M | M5-01a | 計画中 |
+| M5-01i | [MCP と起動中のエディタの接続](mcp-editor-link.md) | AI-001 | L | M5-01a, M5-01h, M5-02 | 計画中 |
 | M5-02 | [エディタの骨格（ドック・ビューポート・テーマ）](editor-shell.md) | UI-004, PERF-008 | L | M1-14 | 完了 |
 | M5-02a | [macOS のネイティブメニュー](macos-menu.md) | なし | S | M5-02 | 完了 |
 | M5-02b | [ファイルダイアログと新規プロジェクト](file-dialogs.md) | なし | M | M5-02, M5-03 | 実装済み（OS ダイアログは実機未確認） |
