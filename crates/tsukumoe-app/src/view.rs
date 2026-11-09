@@ -13,6 +13,16 @@ use tsukumoe_core::elements::Parameter;
 use crate::actions::Tool;
 use crate::tree_model::TreeView;
 
+/// The reference image as an egui texture.
+#[derive(Clone)]
+pub struct ReferenceTexture(pub egui::TextureHandle);
+
+impl std::fmt::Debug for ReferenceTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ReferenceTexture")
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
     Part(String),
@@ -142,6 +152,18 @@ pub struct ViewState {
     pub physics: crate::panels::physics::State,
     /// The bones panel's text being typed. Not saved.
     pub bones: crate::panels::bones::State,
+    /// The grid, rulers, guides, snapping, reference image and info box. Kept
+    /// with the project (`Document::view_aids`).
+    pub aids: crate::view_aids::ViewAids,
+    /// The reference image as a texture, and whether the project's copy was
+    /// tried (a copy that does not decode is not tried again). Not saved here:
+    /// the image lives in the project.
+    pub reference: Option<ReferenceTexture>,
+    pub reference_tried: bool,
+    /// The view aids box is open. Not saved.
+    pub aids_open: bool,
+    /// A guide being made from a ruler. Not saved.
+    pub guide_from: Option<crate::view_aids::Axis>,
     /// The model settings panel's text being typed. Not saved.
     pub model_settings: crate::panels::model_settings::State,
     /// Proportional edit options; not saved with the project or the layout.

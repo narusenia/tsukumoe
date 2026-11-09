@@ -201,6 +201,49 @@ impl Document {
         }
     }
 
+    /// The view aids kept with the project (grid, guides, ...); the defaults
+    /// when there are none.
+    pub fn view_aids(&self) -> crate::view_aids::ViewAids {
+        self.project
+            .files
+            .get(crate::view_aids::VIEW_PATH)
+            .map(|b| crate::view_aids::ViewAids::from_json(b))
+            .unwrap_or_default()
+    }
+
+    /// Stores the view aids; the defaults remove the file.
+    pub fn set_view_aids(&mut self, aids: &crate::view_aids::ViewAids) {
+        if aids.is_default() {
+            self.project.files.remove(crate::view_aids::VIEW_PATH);
+        } else {
+            self.project
+                .files
+                .insert(crate::view_aids::VIEW_PATH.to_owned(), aids.to_json());
+        }
+    }
+
+    /// The reference image's bytes, if the project has one.
+    pub fn reference_image(&self) -> Option<&[u8]> {
+        self.project
+            .files
+            .get(crate::view_aids::REFERENCE_PATH)
+            .map(Vec::as_slice)
+    }
+
+    /// Keeps `bytes` as the reference image; none removes it.
+    pub fn set_reference_image(&mut self, bytes: Option<Vec<u8>>) {
+        match bytes {
+            Some(bytes) => {
+                self.project
+                    .files
+                    .insert(crate::view_aids::REFERENCE_PATH.to_owned(), bytes);
+            }
+            None => {
+                self.project.files.remove(crate::view_aids::REFERENCE_PATH);
+            }
+        }
+    }
+
     /// Adds or replaces a file of the project (a texture, the PSD map). It is
     /// written on the next save.
     pub fn put_file(&mut self, path: &str, bytes: Vec<u8>) {
@@ -411,6 +454,25 @@ mod tests {
     #[test]
     fn parameter_links_are_kept_with_the_project_and_removed_when_empty() {
         let mut doc = Document::open(&fixture()).unwrap();
+        assert!(doc.view_aids().is_default());
+        let aids = crate::view_aids::ViewAids {
+            grid: true,
+            guides_x: vec![2.5],
+            ..Default::default()
+        };
+        doc.set_view_aids(&aids);
+        assert_eq!(doc.view_aids(), aids);
+        doc.set_view_aids(&Default::default());
+        assert!(
+            !doc.project()
+                .files
+                .contains_key(crate::view_aids::VIEW_PATH)
+        );
+        assert!(doc.reference_image().is_none());
+        doc.set_reference_image(Some(vec![1, 2, 3]));
+        assert_eq!(doc.reference_image(), Some(&[1u8, 2, 3][..]));
+        doc.set_reference_image(None);
+        assert!(doc.reference_image().is_none());
         assert!(doc.param_links().is_empty());
         let links = vec![("A".to_owned(), "B".to_owned())];
         doc.set_param_links(&links);

@@ -26,4 +26,5 @@ pub mod timeline;
 pub mod titlebar;
 pub mod toolbar;
 pub mod tree;
+pub mod view_overlay;
 pub mod viewport;

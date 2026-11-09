@@ -1307,3 +1307,64 @@ fn bone_weights_overlay_in_the_dark_theme() {
 fn bone_weights_overlay_in_the_light_theme() {
     bones_snapshot(Mode::Light, "bones_light", true);
 }
+
+/// The view aids over a plain ground: grid, guides and rulers, and the box.
+fn view_aids_snapshot(mode: Mode, name: &str) {
+    use tsukumoe_app::mesh_tool::Mapper;
+    use tsukumoe_app::panels::{overlay, view_overlay};
+    use tsukumoe_app::view_aids::ViewAids;
+    use tsukumoe_ui::Theme;
+
+    let size = egui::vec2(480.0, 320.0);
+    let mapper = Mapper {
+        origin: [0.0, 0.0],
+        size: [size.x, size.y],
+        view: [-50.0, -30.0, 430.0, 290.0],
+    };
+    let aids = ViewAids {
+        grid: true,
+        rulers: true,
+        snap: true,
+        guides_x: vec![120.0],
+        guides_y: vec![80.0],
+        ..ViewAids::default()
+    };
+    let mut harness = Harness::builder().with_size(size).wgpu().build_ui_state(
+        move |ui, state: &mut (ViewAids, bool)| {
+            let ctx = ui.ctx().clone();
+            tsukumoe_ui::install_cjk_font(&ctx);
+            set_language(&ctx, Language::En);
+            set_mode(&ctx, mode);
+            let theme = Theme::get(&ctx);
+            let rect = ui.max_rect();
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 0.0, theme.colors.surface_raised);
+            let (aids, open) = state;
+            view_overlay::paint_grid(&painter, &theme, rect, &mapper, aids);
+            view_overlay::paint_guides(&painter, &theme, rect, &mapper, aids);
+            view_overlay::paint_rulers(
+                &painter,
+                &theme,
+                rect,
+                &mapper,
+                Some(egui::pos2(200.0, 150.0)),
+            );
+            overlay::top_right(&ctx, rect, |ui| {
+                view_overlay::options(ui, aids, open, false);
+            });
+        },
+        (aids, true),
+    );
+    harness.run();
+    harness.snapshot_options(name, &SnapshotOptions::new().threshold(3.0));
+}
+
+#[test]
+fn view_aids_in_the_dark_theme() {
+    view_aids_snapshot(Mode::Dark, "view_aids_dark");
+}
+
+#[test]
+fn view_aids_in_the_light_theme() {
+    view_aids_snapshot(Mode::Light, "view_aids_light");
+}

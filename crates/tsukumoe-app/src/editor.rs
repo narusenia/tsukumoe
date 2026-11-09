@@ -77,6 +77,8 @@ pub enum Dialog {
     ExportProblems(Vec<String>),
     /// A motion file to import (the path-input form of the timeline's import).
     ImportMotion(String),
+    /// A PNG file to keep as the reference image (the path-input form).
+    Reference(String),
     /// Where to write the frames of the timeline's motion (the path-input form).
     ExportFrames(String),
 }
@@ -142,6 +144,8 @@ pub struct Editor {
     /// The deformer tool's selection and drag; view state, not model.
     pub deformer_tool: DeformerTool,
     pub bone_tool: BoneTool,
+    /// The view aids as the project has them, to write only on a change.
+    aids_saved: crate::view_aids::ViewAids,
     pub pie_config: PieConfig,
     /// Whether the system draws the menus (macOS), leaving only the tabs here.
     pub native_menu: bool,
@@ -223,6 +227,7 @@ impl Editor {
             mesh_tool: MeshTool::default(),
             deformer_tool: DeformerTool::default(),
             bone_tool: BoneTool::default(),
+            aids_saved: Default::default(),
             pie_config,
             native_menu: false,
             pie: None,
@@ -331,10 +336,13 @@ impl Editor {
         match Document::open(path) {
             Ok(doc) => {
                 let links = doc.param_links();
+                let aids = doc.view_aids();
                 self.doc = Some(doc);
                 self.store_tree_views();
                 self.view = ViewState::default();
                 self.view.param_links = links;
+                self.view.aids = aids.clone();
+                self.aids_saved = aids;
                 self.load_tree_views();
                 self.mesh_tool = MeshTool::default();
                 self.deformer_tool = DeformerTool::default();
@@ -661,6 +669,67 @@ impl Editor {
     }
 
     /// Reads a motion file and adds it to the open model as a new motion.
+    /// Keeps the PNG at `path` in the project as the reference image and shows it.
+    pub fn load_reference(&mut self, ctx: &Context, path: &Path) {
+        let read = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()));
+        let result = read.and_then(|bytes| {
+            let texture =
+                reference_texture(ctx, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok((bytes, texture))
+        });
+        match result {
+            Ok((bytes, texture)) => {
+                if let Some(doc) = self.doc.as_mut() {
+                    doc.set_reference_image(Some(bytes));
+                    self.view.reference = Some(crate::view::ReferenceTexture(texture));
+                    self.view.reference_tried = true;
+                    self.view.aids.reference = Some(crate::view_aids::Reference::default());
+                    self.view.aids_open = true;
+                    self.sync_aids();
+                }
+            }
+            Err(e) => self.toasts.push(ctx, Tone::Error, e),
+        }
+    }
+
+    /// Drops the reference image from the view and the project.
+    pub fn remove_reference(&mut self) {
+        if let Some(doc) = self.doc.as_mut() {
+            doc.set_reference_image(None);
+        }
+        self.view.reference = None;
+        self.view.reference_tried = true;
+        self.view.aids.reference = None;
+        self.sync_aids();
+    }
+
+    /// Reads the project's reference image once, when the view first needs it.
+    pub fn show_reference(&mut self, ctx: &Context) {
+        if self.view.reference_tried {
+            return;
+        }
+        self.view.reference_tried = true;
+        let texture = self
+            .doc
+            .as_ref()
+            .and_then(|d| d.reference_image())
+            .and_then(|bytes| reference_texture(ctx, bytes).ok());
+        self.view.reference = texture.map(crate::view::ReferenceTexture);
+        if self.view.reference.is_none() {
+            self.view.aids.reference = None;
+        }
+    }
+
+    /// Writes the view aids into the project when they changed.
+    pub fn sync_aids(&mut self) {
+        if self.view.aids != self.aids_saved {
+            if let Some(doc) = self.doc.as_mut() {
+                doc.set_view_aids(&self.view.aids);
+            }
+            self.aids_saved = self.view.aids.clone();
+        }
+    }
+
     pub fn import_motion(&mut self, ctx: &Context, path: &Path) {
         let Some(doc) = self.doc.as_ref() else { return };
         let read = std::fs::read_to_string(path)
@@ -1090,6 +1159,15 @@ impl Editor {
                     self.dialog = Some(Dialog::SaveAsFolder(String::new()));
                 }
             }
+            "view.reference-load" => {
+                if self.doc.is_none() {
+                } else if self.picker.is_native() {
+                    self.pending.push(action.to_owned());
+                } else {
+                    self.dialog = Some(Dialog::Reference(String::new()));
+                }
+            }
+            "view.reference-remove" => self.remove_reference(),
             "file.save" => {
                 let r = self.save();
                 self.report(ctx, r, Some(tr(ctx, "app-saved")));
@@ -1298,6 +1376,12 @@ impl Editor {
                     self.pick(ctx, PickKind::SaveFolder, "pick-frames-title", parent)
                 {
                     self.export_frames(ctx, &path);
+                }
+            }
+            "view.reference-load" => {
+                if let Some(path) = self.pick(ctx, PickKind::Image, "pick-reference-title", parent)
+                {
+                    self.load_reference(ctx, &path);
                 }
             }
             "timeline.import-motion" => {
@@ -1705,6 +1789,7 @@ impl Editor {
                 (t("dialog-export-problems-title"), "dialog-export-problems")
             }
             Dialog::ImportMotion(_) => (t("dialog-import-motion-title"), "dialog-import-motion"),
+            Dialog::Reference(_) => (t("dialog-reference-title"), "dialog-reference"),
             Dialog::ExportFrames(_) => (t("dialog-export-frames-title"), "dialog-export-frames"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
@@ -1717,7 +1802,8 @@ impl Editor {
                 Dialog::Open(text)
                 | Dialog::SaveAs(text)
                 | Dialog::Export(text)
-                | Dialog::ImportMotion(text) => {
+                | Dialog::ImportMotion(text)
+                | Dialog::Reference(text) => {
                     let name = t("dialog-path");
                     text_input(ui, text, &name, &name).request_focus();
                 }
@@ -1799,6 +1885,9 @@ impl Editor {
                 }
                 Dialog::ImportMotion(text) if !text.trim().is_empty() => {
                     self.import_motion(ctx, Path::new(text.trim()));
+                }
+                Dialog::Reference(text) if !text.trim().is_empty() => {
+                    self.load_reference(ctx, Path::new(text.trim()));
                 }
                 Dialog::ExportFrames(text) if !text.trim().is_empty() => {
                     self.export_frames(ctx, Path::new(text.trim()));
@@ -2087,6 +2176,10 @@ impl PanelHost for Panels<'_> {
     fn ui(&mut self, ui: &mut Ui, id: &str) {
         let ctx = ui.ctx().clone();
         let editor = &mut *self.editor;
+        if id == "viewport" {
+            editor.show_reference(&ctx);
+            editor.sync_aids();
+        }
         let Some(doc) = editor.doc.as_mut() else {
             match id {
                 "viewport" => {
@@ -2279,6 +2372,14 @@ fn selection_name(s: &Selection) -> &str {
         | Selection::Bone(n)
         | Selection::Parameter(n) => n,
     }
+}
+
+/// The reference image's PNG as an egui texture.
+fn reference_texture(ctx: &Context, bytes: &[u8]) -> Result<egui::TextureHandle, String> {
+    let t = tsukumoe_gpu::Texture::from_png(bytes).map_err(|e| e.to_string())?;
+    let image =
+        egui::ColorImage::from_rgba_unmultiplied([t.width as usize, t.height as usize], &t.rgba);
+    Ok(ctx.load_texture("reference", image, egui::TextureOptions::LINEAR))
 }
 
 #[cfg(test)]
@@ -2518,6 +2619,49 @@ mod tests {
             )
             .unwrap();
         editor
+    }
+
+    #[test]
+    fn a_reference_image_is_kept_in_the_project_and_the_aids_are_written_on_a_change() {
+        let dir = scratch("reference");
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = tsukumoe_psd::Image {
+            width: 4,
+            height: 2,
+            rgba: vec![200; 4 * 2 * 4],
+        }
+        .to_png()
+        .unwrap();
+        let file = dir.join("ref.png");
+        std::fs::write(&file, &png).unwrap();
+        let bad = dir.join("bad.png");
+        std::fs::write(&bad, b"not a png").unwrap();
+
+        let ctx = Context::default();
+        let mut editor = open_minimal();
+        editor.load_reference(&ctx, &bad);
+        assert!(editor.view.reference.is_none() && !editor.toasts.is_empty());
+        assert!(editor.doc.as_ref().unwrap().reference_image().is_none());
+
+        editor.load_reference(&ctx, &file);
+        assert!(editor.view.reference.is_some());
+        let doc = editor.doc.as_ref().unwrap();
+        assert_eq!(doc.reference_image(), Some(&png[..]));
+        assert!(
+            doc.view_aids().reference.is_some(),
+            "written with the project"
+        );
+
+        editor.view.aids.grid = true;
+        editor.view.aids.guides_x.push(3.0);
+        editor.sync_aids();
+        let aids = editor.doc.as_ref().unwrap().view_aids();
+        assert!(aids.grid && aids.guides_x == [3.0]);
+
+        editor.remove_reference();
+        let doc = editor.doc.as_ref().unwrap();
+        assert!(doc.reference_image().is_none() && doc.view_aids().reference.is_none());
+        assert!(editor.view.reference.is_none());
     }
 
     #[test]

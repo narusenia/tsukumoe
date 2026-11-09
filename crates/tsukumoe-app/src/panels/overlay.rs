@@ -167,6 +167,44 @@ pub fn help(ctx: &egui::Context, rect: Rect, text: &str, place: Option<&Place>) 
     });
 }
 
+/// A box at the top right that grows down; the caller draws the contents.
+pub fn top_right(ctx: &egui::Context, rect: Rect, add: impl FnOnce(&mut Ui)) {
+    area(
+        "tsukumoe-viewport-aids",
+        rect.right_top() + vec2(-MARGIN, MARGIN),
+        Align2::RIGHT_TOP,
+    )
+    .show(ctx, |ui| {
+        ui.set_max_width(TOP_RIGHT_WIDTH);
+        ui.with_layout(Layout::top_down(Align::LEFT), add);
+    });
+}
+
+/// The widest the top right box grows.
+const TOP_RIGHT_WIDTH: f32 = 230.0;
+
+/// A box at the bottom right that lets clicks through, for read-only lines.
+pub fn info(ctx: &egui::Context, rect: Rect, lines: &[String]) {
+    let theme = Theme::get(ctx);
+    area(
+        "tsukumoe-viewport-info",
+        rect.right_bottom() + vec2(-MARGIN, -MARGIN),
+        Align2::RIGHT_BOTTOM,
+    )
+    .interactable(false)
+    .show(ctx, |ui| {
+        Frame::new()
+            .fill(theme.colors.surface_raised.gamma_multiply(0.9))
+            .corner_radius(theme.metrics.radius)
+            .inner_margin(Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                for line in lines {
+                    ui.label(egui::RichText::new(line).color(theme.colors.text_muted));
+                }
+            });
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

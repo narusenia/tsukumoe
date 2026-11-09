@@ -39,4 +39,5 @@ pub mod settings;
 pub mod tree_model;
 pub mod tree_ops;
 pub mod view;
+pub mod view_aids;
 pub mod workspace;

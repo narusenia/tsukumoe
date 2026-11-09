@@ -22,7 +22,7 @@ use crate::drag::DragAssignment;
 use crate::mesh_tool::{self, Hit, MENU_ACTIONS, Mapper, MeshTool, Op, ToolError};
 use crate::panels::{
     bone_overlay, deformer_overlay, mesh_overlay, overlay, proportional_overlay, selection_overlay,
-    toolbar, tree,
+    toolbar, tree, view_overlay,
 };
 use crate::project::Document;
 use crate::scene::{Preview, Scene, fit_view};
@@ -314,6 +314,23 @@ impl Viewport {
             rect,
             crate::options::tuning().background,
         );
+        if let Some(scene) = &self.scene
+            && let Some(texture) = &view.reference
+            && let Some(reference) = &view.aids.reference
+        {
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            view_overlay::paint_reference(
+                &ui.painter_at(rect),
+                &mapper,
+                scene.bounds(),
+                &texture.0,
+                reference,
+            );
+        }
         if let Some(target) = &self.target {
             ui.painter().image(
                 target.id,
@@ -321,6 +338,31 @@ impl Viewport {
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
+        }
+        if let Some(scene) = &self.scene {
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            let painter = ui.painter_at(rect);
+            let theme = Theme::get(ui.ctx());
+            let aids = view.aids.clone();
+            if aids.grid {
+                view_overlay::paint_grid(&painter, &theme, rect, &mapper, &aids);
+            }
+            view_overlay::paint_guides(&painter, &theme, rect, &mapper, &aids);
+            if aids.rulers {
+                let pointer = ui.input(|i| i.pointer.hover_pos());
+                view_overlay::paint_rulers(&painter, &theme, rect, &mapper, pointer);
+                view_overlay::interact_guides(
+                    ui,
+                    rect,
+                    &mapper,
+                    &mut view.aids,
+                    &mut view.guide_from,
+                );
+            }
         }
         if self.solo.is_some() {
             paint_solo_badge(ui, rect, view);
@@ -344,6 +386,53 @@ impl Viewport {
         {
             actions.push(action);
         }
+        if let Some(scene) = &self.scene {
+            let mapper = Mapper {
+                origin: [rect.min.x, rect.min.y],
+                size: [rect.width(), rect.height()],
+                view: view.camera.view(fit_view(scene.bounds(), size.0, size.1)),
+            };
+            if view.aids.stats {
+                let m = &scene.model;
+                let mut lines = vec![
+                    format!(
+                        "{} {} / {} {} / {} {}",
+                        tr(ui.ctx(), "view-stats-meshes"),
+                        m.meshes.len(),
+                        tr(ui.ctx(), "view-stats-vertices"),
+                        m.vertex_count(),
+                        tr(ui.ctx(), "view-stats-triangles"),
+                        m.mesh_indices.len() / 3,
+                    ),
+                    format!(
+                        "{} {:.0}%",
+                        tr(ui.ctx(), "view-stats-zoom"),
+                        view.camera.zoom * 100.0
+                    ),
+                ];
+                if let Some(p) = ui
+                    .input(|i| i.pointer.hover_pos())
+                    .filter(|p| rect.contains(*p))
+                {
+                    let at = mapper.to_model([p.x, p.y]);
+                    lines.push(format!("{:.2}, {:.2}", at[0], at[1]));
+                }
+                overlay::info(ui.ctx(), rect, &lines);
+            }
+        }
+        let has_reference = view.reference.is_some();
+        let mut open = view.aids_open;
+        let mut aids = view.aids.clone();
+        overlay::top_right(ui.ctx(), rect, |ui| {
+            actions.extend(view_overlay::options(
+                ui,
+                &mut aids,
+                &mut open,
+                has_reference,
+            ));
+        });
+        view.aids = aids;
+        view.aids_open = open;
         // What the pointer rests on, in the viewport or in a tree row.
         if selection_overlay::shown_with(view.tool)
             && let Some(scene) = &self.scene
@@ -711,6 +800,11 @@ impl Viewport {
             if response.dragged_by(primary)
                 && let Some(at) = now
             {
+                // A move goes by grid steps with snapping on; a box does not.
+                let at = match pressed.filter(|_| tool.is_moving_points()) {
+                    Some(from) => view.aids.snap_drag(&mapper, from, at),
+                    None => at,
+                };
                 tool.drag(at);
             }
             if response.drag_stopped_by(primary)
@@ -861,6 +955,10 @@ impl Viewport {
                 if response.dragged_by(primary)
                     && let Some(at) = now
                 {
+                    let at = match pressed {
+                        Some(from) => view.aids.snap_drag(&mapper, from, at),
+                        None => at,
+                    };
                     tool.drag_to(at);
                 }
                 if response.drag_stopped_by(primary)
@@ -875,7 +973,7 @@ impl Viewport {
                             model,
                             &space,
                             &mapper,
-                            p,
+                            mapper.to_screen(view.aids.snap_point(&mapper, mapper.to_model(p))),
                             tool.bone.as_deref(),
                             &at,
                         ) {
@@ -1079,6 +1177,11 @@ impl Viewport {
                 if response.dragged_by(primary)
                     && let Some(at) = now
                 {
+                    // A move goes by grid steps with snapping on; a box does not.
+                    let at = match pressed.filter(|_| tool.is_moving()) {
+                        Some(from) => view.aids.snap_drag(&mapper, from, at),
+                        None => at,
+                    };
                     tool.drag(at);
                 }
                 if response.drag_stopped_by(primary)

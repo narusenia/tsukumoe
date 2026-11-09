@@ -25,6 +25,8 @@ pub enum PickKind {
     Motion,
     /// A new or empty folder for a new project.
     NewFolder,
+    /// A `.png` file: the reference image.
+    Image,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +92,7 @@ impl FilePicker for RfdPicker {
                 .save_file(),
             PickKind::Psd => dialog.add_filter("PSD", &["psd"]).pick_file(),
             PickKind::Motion => dialog.add_filter("Motion", &["json"]).pick_file(),
+            PickKind::Image => dialog.add_filter("PNG", &["png"]).pick_file(),
             PickKind::OpenFolder | PickKind::SaveFolder | PickKind::NewFolder => {
                 dialog.pick_folder()
             }
