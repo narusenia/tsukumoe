@@ -325,7 +325,7 @@ fn toolbar(ui: &mut Ui, model: &Model, view: &mut ViewState, outs: &mut Vec<Out>
             })
             .response
             .accessible_name(t("timeline-pick"));
-        if icon_button(ui, Icon::Plus, &t("timeline-new"), Variant::Ghost).clicked() {
+        if icon_button(ui, Icon::Plus, &t("timeline-new"), Variant::Secondary).clicked() {
             let name = unique_motion_name(model);
             outs.push(Out::Command(
                 Command::AddMotion {

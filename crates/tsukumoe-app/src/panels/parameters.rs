@@ -98,11 +98,11 @@ pub fn show(ui: &mut Ui, model: &Model, view: &mut ViewState) -> Vec<Out> {
     let selection = view.selected();
     let name = tr(&ctx, "filter-name");
     ui.horizontal(|ui| {
+        if icon_button(ui, Icon::Plus, &tr(&ctx, "param-new"), Variant::Secondary).clicked() {
+            outs.push(Out::Op(param_ops::create_parameter(model)));
+        }
         if button(ui, &tr(&ctx, "parameters-reset"), Variant::Secondary).clicked() {
             view.reset_params();
-        }
-        if icon_button(ui, Icon::Plus, &tr(&ctx, "param-new"), Variant::Ghost).clicked() {
-            outs.push(Out::Op(param_ops::create_parameter(model)));
         }
     });
     text_input(ui, &mut view.param_filter, &name, &name);

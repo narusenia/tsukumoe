@@ -28,7 +28,9 @@ pub fn button(ui: &mut Ui, text: &str, variant: Variant) -> Response {
 /// An icon-only button. `name` is what a screen reader announces and what the
 /// tooltip shows.
 pub fn icon_button(ui: &mut Ui, icon: Icon, name: &str, variant: Variant) -> Response {
-    action(ui, Some(icon), None, name, variant).on_hover_text(name)
+    action(ui, Some(icon), None, name, variant)
+        .on_hover_text(name)
+        .on_disabled_hover_text(name)
 }
 
 pub fn icon_text_button(ui: &mut Ui, icon: Icon, text: &str, variant: Variant) -> Response {

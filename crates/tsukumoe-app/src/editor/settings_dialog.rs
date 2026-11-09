@@ -405,22 +405,20 @@ impl Editor {
                         rows(ui, items, options, &id, false, t);
                         ui.horizontal(|ui| {
                             if ui
-                                .add_enabled(
-                                    items.len() < MAX_SLOTS,
-                                    egui::Button::new(t("pie-slot-add")),
-                                )
-                                .clicked()
+                                .add_enabled_ui(items.len() < MAX_SLOTS, |ui| {
+                                    button(ui, &t("pie-slot-add"), Variant::Secondary).clicked()
+                                })
+                                .inner
                             {
                                 items.push(Entry::Action {
                                     action: "view.palette".to_owned(),
                                 });
                             }
                             if ui
-                                .add_enabled(
-                                    items.len() > 1,
-                                    egui::Button::new(t("pie-slot-remove")),
-                                )
-                                .clicked()
+                                .add_enabled_ui(items.len() > 1, |ui| {
+                                    button(ui, &t("pie-slot-remove"), Variant::Secondary).clicked()
+                                })
+                                .inner
                             {
                                 items.pop();
                             }
@@ -465,19 +463,20 @@ impl Editor {
                 rows(ui, items, options, "pie", true, t);
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(
-                            items.len() < MAX_SLOTS,
-                            egui::Button::new(t("pie-slot-add")),
-                        )
-                        .clicked()
+                        .add_enabled_ui(items.len() < MAX_SLOTS, |ui| {
+                            button(ui, &t("pie-slot-add"), Variant::Secondary).clicked()
+                        })
+                        .inner
                     {
                         items.push(Entry::Action {
                             action: "view.palette".to_owned(),
                         });
                     }
                     if ui
-                        .add_enabled(items.len() > 1, egui::Button::new(t("pie-slot-remove")))
-                        .clicked()
+                        .add_enabled_ui(items.len() > 1, |ui| {
+                            button(ui, &t("pie-slot-remove"), Variant::Secondary).clicked()
+                        })
+                        .inner
                     {
                         items.pop();
                     }

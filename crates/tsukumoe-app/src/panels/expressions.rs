@@ -213,7 +213,7 @@ fn toolbar(ui: &mut Ui, model: &Model, view: &mut ViewState, st: &mut State, out
             })
             .response
             .accessible_name(t("expressions-pick"));
-        if icon_button(ui, Icon::Plus, &t("expressions-new"), Variant::Ghost).clicked() {
+        if icon_button(ui, Icon::Plus, &t("expressions-new"), Variant::Secondary).clicked() {
             let name = unique_name(model);
             outs.push(Out::Command(
                 Command::AddExpression {
