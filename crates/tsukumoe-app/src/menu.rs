@@ -48,6 +48,7 @@ pub const MENU: &[Def] = &[
             item("file.save-as-folder", "menu-save-as-folder"),
             item("file.import-psd", "menu-import-psd"),
             item("file.export", "menu-export"),
+            item("file.export-frames", "menu-export-frames"),
             Def::Sub {
                 label: "menu-recent",
                 items: &[Def::Recent],
@@ -113,7 +114,8 @@ impl State {
             | "file.save-as"
             | "file.save-as-folder"
             | "file.import-psd"
-            | "file.export" => self.has_doc,
+            | "file.export"
+            | "file.export-frames" => self.has_doc,
             "edit.undo" => self.can_undo,
             "edit.redo" => self.can_redo,
             _ => true,
@@ -293,6 +295,7 @@ mod tests {
             "file.save-as-folder",
             "file.import-psd",
             "file.export",
+            "file.export-frames",
             "edit.undo",
             "edit.redo",
         ] {

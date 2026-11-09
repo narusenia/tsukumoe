@@ -35,5 +35,5 @@ UI は M1-02 の編集コマンドの上に被せる。
 | M5-07 | [物理の設定](physics-edit.md) | EDIT-005 | M | M5-02 | 実装済み（実機の GUI 操作は未確認） |
 | M5-08 | [モーションと表情の編集（①データ編集とタイムライン ②カーブエディタ ③表情）](motion-expression.md) | EDIT-006 | L | M5-02 | 実装済み（①②③。実機の GUI 操作は未確認） |
 | M5-09 | [書き出し](export.md) | EDIT-007 | S | M3-01 | 実装済み（実機未確認。Inochi2D 形式は M6） |
-| M5-09a | [動画・連番画像の書き出し](live2d-parity.md) | EDIT-007 | S | M5-09 | 未着手 |
+| M5-09a | [動画・連番画像の書き出し](export-frames.md) | EDIT-007 | S | M5-09 | 実装済み（実機の GUI 操作は未確認） |
 | M5-10 | [モデル設定](live2d-parity.md) | EDIT-004 | M | M5-06a | 未着手 |

@@ -15,6 +15,7 @@ pub mod dispatcher;
 pub mod drag;
 pub mod draw_style;
 pub mod editor;
+pub mod frames_export;
 pub mod glue;
 pub mod keyed;
 pub mod menu;

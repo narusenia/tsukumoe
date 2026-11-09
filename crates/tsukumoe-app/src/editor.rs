@@ -76,6 +76,8 @@ pub enum Dialog {
     ExportProblems(Vec<String>),
     /// A motion file to import (the path-input form of the timeline's import).
     ImportMotion(String),
+    /// Where to write the frames of the timeline's motion (the path-input form).
+    ExportFrames(String),
 }
 
 /// What a confirmed deletion does.
@@ -614,6 +616,46 @@ impl Editor {
         }
     }
 
+    /// Writes the timeline's motion into `dir` as a PNG sequence, and as a video
+    /// when `ffmpeg` is there.
+    pub fn export_frames(&mut self, ctx: &Context, dir: &Path) {
+        let Some(doc) = self.doc.as_ref() else { return };
+        let model = doc.dispatcher.model();
+        let Some((name, motion)) = self.view.timeline.current(model) else {
+            return self
+                .toasts
+                .push(ctx, Tone::Error, tr(ctx, "frames-no-motion"));
+        };
+        let (name, motion) = (name.to_owned(), motion.clone());
+        let write = || -> Result<(usize, bool), String> {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            let count = crate::frames_export::render(model, doc.project(), &motion, |k, png| {
+                let path = dir.join(crate::frames_export::frame_name(&name, k));
+                std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))
+            })?;
+            let video = crate::frames_export::ffmpeg_available();
+            if video {
+                crate::frames_export::encode(dir, &name, motion.fps)?;
+            }
+            Ok((count, video))
+        };
+        match write() {
+            Ok((count, video)) => {
+                let key = if video {
+                    "frames-exported-video"
+                } else {
+                    "frames-exported"
+                };
+                self.toasts.push(
+                    ctx,
+                    Tone::Success,
+                    tr_args(ctx, key, &[("count", Arg::from(count))]),
+                );
+            }
+            Err(e) => self.toasts.push(ctx, Tone::Error, e),
+        }
+    }
+
     /// Reads a motion file and adds it to the open model as a new motion.
     pub fn import_motion(&mut self, ctx: &Context, path: &Path) {
         let Some(doc) = self.doc.as_ref() else { return };
@@ -1014,6 +1056,14 @@ impl Editor {
                     Some(_) => self.dialog = Some(Dialog::Export(String::new())),
                 }
             }
+            "file.export-frames" => {
+                if self.doc.is_none() {
+                } else if self.picker.is_native() {
+                    self.pending.push(action.to_owned());
+                } else {
+                    self.dialog = Some(Dialog::ExportFrames(String::new()));
+                }
+            }
             "file.save-as" | "file.save-as-folder" | "file.import-psd"
                 if self.picker.is_native() =>
             {
@@ -1237,6 +1287,13 @@ impl Editor {
                     }
                     let r = self.export_runtime(&path);
                     self.report(ctx, r, Some(tr(ctx, "app-exported")));
+                }
+            }
+            "file.export-frames" => {
+                if let Some(path) =
+                    self.pick(ctx, PickKind::SaveFolder, "pick-frames-title", parent)
+                {
+                    self.export_frames(ctx, &path);
                 }
             }
             "timeline.import-motion" => {
@@ -1644,6 +1701,7 @@ impl Editor {
                 (t("dialog-export-problems-title"), "dialog-export-problems")
             }
             Dialog::ImportMotion(_) => (t("dialog-import-motion-title"), "dialog-import-motion"),
+            Dialog::ExportFrames(_) => (t("dialog-export-frames-title"), "dialog-export-frames"),
             Dialog::SaveLayout(_) => (t("layout-save-title"), "dialog-save-layout"),
             Dialog::ConfirmPreset(_) => (t("layout-confirm-title"), "dialog-confirm-preset"),
             Dialog::Confirm(_) | Dialog::Settings(_) | Dialog::PsdImport(_) => {
@@ -1659,7 +1717,9 @@ impl Editor {
                     let name = t("dialog-path");
                     text_input(ui, text, &name, &name).request_focus();
                 }
-                Dialog::NewProject(text) | Dialog::SaveAsFolder(text) => {
+                Dialog::NewProject(text)
+                | Dialog::SaveAsFolder(text)
+                | Dialog::ExportFrames(text) => {
                     let name = t("dialog-folder-path");
                     text_input(ui, text, &name, &name).request_focus();
                 }
@@ -1735,6 +1795,9 @@ impl Editor {
                 }
                 Dialog::ImportMotion(text) if !text.trim().is_empty() => {
                     self.import_motion(ctx, Path::new(text.trim()));
+                }
+                Dialog::ExportFrames(text) if !text.trim().is_empty() => {
+                    self.export_frames(ctx, Path::new(text.trim()));
                 }
                 Dialog::SaveLayout(text) => {
                     if self.layouts.save_named(self.workspace, text) {
@@ -3645,5 +3708,15 @@ mod tests {
         editor.psd_dialog_closed(&state);
         assert!(!dir.join("q").exists());
         assert_eq!(editor.doc.as_ref().unwrap().name(), "minimal");
+    }
+
+    #[test]
+    fn export_frames_without_a_picked_motion_writes_nothing() {
+        let dir = scratch("frames");
+        let (mut editor, fake, ctx) = with_fake(None);
+        editor.open(&fixture()).unwrap();
+        fake.answer(dir.join("none"));
+        run(&mut editor, &ctx, "file.export-frames");
+        assert!(!dir.join("none").exists());
     }
 }
