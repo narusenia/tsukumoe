@@ -847,11 +847,10 @@ pub fn row_menu(
             }
         };
         menu_sub_icon(ui, Icon::Link, &tr(&ctx, "tree-set-parent"), |ui| {
-            for parent in lists.deformers.iter().filter(|d| **d != row.name) {
-                if ui.button(parent).clicked() {
-                    outs.push(Out::Reparent(movers.clone(), Some(parent.clone())));
-                    ui.close();
-                }
+            let names = lists.deformers.iter().filter(|d| **d != row.name);
+            if let Some(parent) = pick_list(ui, "pick-parent", names) {
+                outs.push(Out::Reparent(movers.clone(), Some(parent)));
+                ui.close();
             }
         });
         let unparent = menu_item_icon(
@@ -876,11 +875,10 @@ pub fn row_menu(
             outs.push(Out::SetPart(me.clone(), None));
             ui.close();
         }
-        for part in lists.parts.iter().filter(|p| **p != row.name) {
-            if ui.button(part).clicked() {
-                outs.push(Out::SetPart(me.clone(), Some(part.clone())));
-                ui.close();
-            }
+        let names = lists.parts.iter().filter(|p| **p != row.name);
+        if let Some(part) = pick_list(ui, "pick-part", names) {
+            outs.push(Out::SetPart(me.clone(), Some(part)));
+            ui.close();
         }
     });
     if row.kind == Kind::Part || row.expandable {
@@ -908,6 +906,42 @@ pub fn row_menu(
             }
         });
     }
+}
+
+/// A filter field over a scrolling list of names, for menus that may hold hundreds of
+/// entries. Enter takes the first match; returns the name picked.
+fn pick_list<'a>(ui: &mut Ui, id: &str, names: impl Iterator<Item = &'a String>) -> Option<String> {
+    let ctx = ui.ctx().clone();
+    let key = ui.make_persistent_id(id);
+    let mut query: String = ui.data(|d| d.get_temp(key)).unwrap_or_default();
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut query)
+            .hint_text(tr(&ctx, "filter-name"))
+            .desired_width(220.0),
+    );
+    ui.data_mut(|d| d.insert_temp(key, query.clone()));
+    let needle = query.to_lowercase();
+    let found: Vec<&String> = names
+        .filter(|n| needle.is_empty() || n.to_lowercase().contains(&needle))
+        .collect();
+    let mut picked = None;
+    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        picked = found.first().map(|n| (*n).clone());
+    }
+    egui::ScrollArea::vertical()
+        .max_height(320.0)
+        .auto_shrink([true, true])
+        .show(ui, |ui| {
+            for name in found {
+                if ui.button(name).clicked() {
+                    picked = Some(name.clone());
+                }
+            }
+        });
+    if picked.is_some() {
+        ui.data_mut(|d| d.remove_temp::<String>(key));
+    }
+    picked
 }
 
 /// The filter field, the kind toggles, the sort order and the folder buttons.
