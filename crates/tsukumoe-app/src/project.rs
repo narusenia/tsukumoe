@@ -289,12 +289,18 @@ impl Document {
 
     /// Writes the runtime format (`.tmod`) to `path`. The project's own file,
     /// its path and its unsaved state are left alone.
-    pub fn export_runtime(&mut self, path: &Path) -> Result<(), String> {
+    pub fn export_runtime(
+        &mut self,
+        path: &Path,
+        atlas: Option<&tsukumoe_format::AtlasOptions>,
+    ) -> Result<tsukumoe_format::AtlasReport, String> {
         let err = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
         self.sync_names();
         write_model(self.dispatcher.model(), &mut self.project).map_err(|e| err(&e))?;
-        let bytes = tsukumoe_format::runtime_bytes(&self.project).map_err(|e| err(&e))?;
-        fs::write(path, bytes).map_err(|e| err(&e))
+        let (bytes, report) =
+            tsukumoe_format::runtime_bytes_with(&self.project, atlas).map_err(|e| err(&e))?;
+        fs::write(path, bytes).map_err(|e| err(&e))?;
+        Ok(report)
     }
 
     /// Saves as a folder project whatever the name looks like.

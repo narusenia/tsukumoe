@@ -798,6 +798,39 @@ impl Editor {
                 (o.autosave, o.autosave_minutes) = (d.autosave, d.autosave_minutes);
             }
         });
+        self.edit_options(ctx, |o| {
+            ui.add_space(8.0);
+            checkbox(ui, &mut o.atlas, &t("settings-atlas"));
+            let mut size = o.atlas_size as f32;
+            let mut padding = o.atlas_padding as f32;
+            form_row(ui, &t("settings-atlas-size"), |ui| {
+                tsukumoe_ui::number_or(
+                    ui,
+                    &mut size,
+                    options::ATLAS_SIZE.0 as f32..=options::ATLAS_SIZE.1 as f32,
+                    64.0,
+                    &t("settings-atlas-size"),
+                    Some(Options::default().atlas_size as f32),
+                );
+            });
+            form_row(ui, &t("settings-atlas-padding"), |ui| {
+                tsukumoe_ui::number_or(
+                    ui,
+                    &mut padding,
+                    options::ATLAS_PADDING.0 as f32..=options::ATLAS_PADDING.1 as f32,
+                    1.0,
+                    &t("settings-atlas-padding"),
+                    Some(Options::default().atlas_padding as f32),
+                );
+            });
+            o.atlas_size = size.round() as u32;
+            o.atlas_padding = padding.round() as u32;
+            ui.add_space(8.0);
+            if button(ui, &t("settings-reset"), Variant::Secondary).clicked() {
+                let d = Options::default();
+                (o.atlas, o.atlas_size, o.atlas_padding) = (d.atlas, d.atlas_size, d.atlas_padding);
+            }
+        });
         if let Some(dir) = self.config_dir.clone() {
             ui.add_space(8.0);
             if button(ui, &t("settings-open-folder"), Variant::Secondary).clicked()

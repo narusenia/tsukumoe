@@ -8,6 +8,7 @@
 
 pub mod affine;
 pub mod arena;
+pub mod atlas;
 pub mod command;
 pub mod compiled;
 pub mod contour;

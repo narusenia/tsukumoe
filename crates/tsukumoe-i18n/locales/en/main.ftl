@@ -649,3 +649,7 @@ view-stats-triangles = Triangles
 view-stats-zoom = Zoom
 dialog-reference-title = Load a reference image (.png)
 pick-reference-title = Reference image (.png)
+app-exported-atlas = Exported ({ $before } textures packed into { $after })
+settings-atlas = Pack textures into atlas pages on export
+settings-atlas-size = Atlas page size (px)
+settings-atlas-padding = Padding (px)

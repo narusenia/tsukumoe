@@ -3952,6 +3952,7 @@ name = "tsukumoe-format"
 version = "0.1.0"
 dependencies = [
  "jsonschema",
+ "png 0.18.1",
  "schemars",
  "serde",
  "serde_json",

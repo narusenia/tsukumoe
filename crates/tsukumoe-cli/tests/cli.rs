@@ -450,3 +450,102 @@ fn parity_exits_non_zero_beyond_the_tolerance() {
     assert!(report.contains("drawables[0].positions[0]"), "{report}");
     assert!(report.contains("\"over\": 1"), "{report}");
 }
+
+/// A project with `n` meshes, each with a small texture of its own.
+fn project_with_textures(name: &str, n: usize) -> PathBuf {
+    use tsukumoe_core::command::Command as Edit;
+    let dir = scratch(name).join("project");
+    let mut model = tsukumoe_core::model::Model::new();
+    model
+        .apply(Edit::AddPart {
+            name: "P".into(),
+            parent: None,
+        })
+        .unwrap();
+    let mut project = Project::new(Manifest::new(None));
+    for i in 0..n {
+        let image = Image {
+            width: 12,
+            height: 12,
+            rgba: vec![50 + i as u8 * 20; 12 * 12 * 4],
+        };
+        project
+            .files
+            .insert(format!("textures/t{i:03}.png"), image.to_png());
+        model
+            .apply(Edit::AddMesh {
+                name: format!("M{i}"),
+                part: "P".into(),
+                positions: quad(i as f32),
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2, 0, 2, 3],
+            })
+            .unwrap();
+        model
+            .apply(Edit::SetMeshTexture {
+                name: format!("M{i}"),
+                texture: i as u32,
+            })
+            .unwrap();
+    }
+    write_model(&model, &mut project).unwrap();
+    project.write_dir(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn convert_packs_textures_into_atlas_pages_unless_told_not_to() {
+    let dir = project_with_textures("atlas", 6);
+    let packed = dir.with_file_name("packed.tmod");
+    let out = run(&["convert", path(&dir), path(&packed)]);
+    assert_eq!(code(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["textures_before"], 6);
+    assert_eq!(report["textures_after"], 1);
+    let inspected = run(&["inspect", path(&packed)]);
+    let v: serde_json::Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert_eq!(v["textures"], 1);
+
+    let plain = dir.with_file_name("plain.tmod");
+    let out = run(&["convert", path(&dir), path(&plain), "--atlas-size", "0"]);
+    assert_eq!(code(&out), 0);
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(report["textures_after"], 6);
+
+    // A small page holds fewer images; a bad value is a usage error.
+    let small = dir.with_file_name("small.tmod");
+    let out = run(&[
+        "convert",
+        path(&dir),
+        path(&small),
+        "--atlas-size",
+        "32",
+        "--atlas-padding",
+        "0",
+    ]);
+    assert_eq!(code(&out), 0);
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(report["textures_after"].as_u64().unwrap() > 1);
+    for bad in ["8", "99999", "x"] {
+        assert_eq!(
+            code(&run(&[
+                "convert",
+                path(&dir),
+                path(&small),
+                "--atlas-size",
+                bad
+            ])),
+            2
+        );
+    }
+    assert_eq!(
+        code(&run(&[
+            "convert",
+            path(&dir),
+            path(&small),
+            "--atlas-padding",
+            "100"
+        ])),
+        2
+    );
+}

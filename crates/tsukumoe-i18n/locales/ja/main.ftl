@@ -645,3 +645,7 @@ view-stats-triangles = 三角形
 view-stats-zoom = 拡大
 dialog-reference-title = 参照画像（.png）を読み込む
 pick-reference-title = 参照画像（.png）
+app-exported-atlas = 書き出しました（テクスチャ { $before } 枚を { $after } 枚にまとめました）
+settings-atlas = 書き出しでテクスチャをアトラスにまとめる
+settings-atlas-size = アトラスの大きさ（px）
+settings-atlas-padding = 余白（px）

@@ -183,6 +183,8 @@ The distribution format. Designed for zero-copy loading: after validation, the e
 
 IDs from `0x2A` up to `0x7F` other than those listed are reserved for later minor versions; `0x80` and up are optional content. The texture sections are written together or not at all; texture `i` of a mesh (`texture` field) is entry `i` of the table, in the order of `textures/*.png` in the project.
 
+A writer may pack the project's images into fewer pages before it embeds them (the editor and `tsukumoe convert` do, with a page size and a padding it is given): the meshes' `texture` numbers and UVs then point into the pages, and nothing else in the file tells that it was done. A reader treats the embedded PNGs as the textures, whatever their number.
+
 The playback sections `0x90` to `0x99` are optional, not marked required (a reader that predates them skips them, REQ-FMT-005), and written together or not at all. A writer omits all ten for a model with no motion, expression or pose, so such a file is the same as one written before they existed. A reader that knows them reads either form. All ten are written in ascending ID order after the texture sections. Names are in `playback_strings`, not in `strings`, so the evaluation data does not change.
 
 The settings sections `0x9C` to `0x9F` follow the same rules: optional, written together or not at all, omitted for a model whose settings are empty (so such a file is the same as one written before they existed), and written in ascending ID order after `warp_bezier`. The text is in `settings_strings`, not in `strings`. A writer that has settings always writes `model_info` (one element), even if every text is empty.

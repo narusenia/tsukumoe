@@ -1368,7 +1368,7 @@ impl Editor {
                         path.set_extension("tmod");
                     }
                     let r = self.export_runtime(&path);
-                    self.report(ctx, r, Some(tr(ctx, "app-exported")));
+                    self.report_export(ctx, r);
                 }
             }
             "file.export-frames" => {
@@ -1445,10 +1445,35 @@ impl Editor {
     }
 
     /// Writes the open document as a `.tmod` runtime file.
-    pub fn export_runtime(&mut self, path: &Path) -> Result<(), String> {
-        self.doc
-            .as_mut()
-            .map_or(Ok(()), |doc| doc.export_runtime(path))
+    pub fn export_runtime(&mut self, path: &Path) -> Result<tsukumoe_format::AtlasReport, String> {
+        let atlas = self.options.atlas_options();
+        match self.doc.as_mut() {
+            Some(doc) => doc.export_runtime(path, atlas.as_ref()),
+            None => Ok(Default::default()),
+        }
+    }
+
+    /// Tells the result of an export: the textures packed into pages, when they were.
+    fn report_export(
+        &mut self,
+        ctx: &Context,
+        result: Result<tsukumoe_format::AtlasReport, String>,
+    ) {
+        let message = result.as_ref().ok().map(|r| {
+            if r.before == r.after {
+                tr(ctx, "app-exported")
+            } else {
+                tr_args(
+                    ctx,
+                    "app-exported-atlas",
+                    &[
+                        ("before", Arg::from(r.before)),
+                        ("after", Arg::from(r.after)),
+                    ],
+                )
+            }
+        });
+        self.report(ctx, result.map(|_| ()), message);
     }
 
     /// Saves the open document as a folder project.
@@ -1881,7 +1906,7 @@ impl Editor {
                 }
                 Dialog::Export(text) if !text.trim().is_empty() => {
                     let r = self.export_runtime(Path::new(text.trim()));
-                    self.report(ctx, r, Some(t("app-exported")));
+                    self.report_export(ctx, r);
                 }
                 Dialog::ImportMotion(text) if !text.trim().is_empty() => {
                     self.import_motion(ctx, Path::new(text.trim()));
@@ -3832,6 +3857,55 @@ mod tests {
         run(&mut none, &ctx, "file.import-psd");
         run(&mut none, &ctx, "file.export");
         assert!(fake.0.borrow().requests.is_empty());
+    }
+
+    #[test]
+    fn an_export_packs_the_textures_and_says_so() {
+        use tsukumoe_core::command::Command;
+        let dir = scratch("atlas-export");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ctx = Context::default();
+        let mut editor = open_minimal();
+        // Four meshes with a texture each, added to the project's files.
+        let mut commands = vec![Command::AddPart {
+            name: "Q".into(),
+            parent: None,
+        }];
+        for i in 0..4u32 {
+            commands.push(Command::AddMesh {
+                name: format!("T{i}"),
+                part: "Q".into(),
+                positions: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                indices: vec![0, 1, 2, 0, 2, 3],
+            });
+            commands.push(Command::SetMeshTexture {
+                name: format!("T{i}"),
+                texture: i,
+            });
+        }
+        for c in commands {
+            assert!(editor.submit(&ctx, c));
+        }
+        for i in 0..4 {
+            let png = tsukumoe_psd::Image {
+                width: 8,
+                height: 8,
+                rgba: vec![40 * (i as u8 + 1); 8 * 8 * 4],
+            }
+            .to_png()
+            .unwrap();
+            editor
+                .doc
+                .as_mut()
+                .unwrap()
+                .put_file(&format!("textures/t{i}.png"), png);
+        }
+        let report = editor.export_runtime(&dir.join("packed.tmod")).unwrap();
+        assert!(report.after < report.before, "{report:?}");
+        editor.options.atlas = false;
+        let plain = editor.export_runtime(&dir.join("plain.tmod")).unwrap();
+        assert_eq!(plain.before, plain.after);
     }
 
     fn psd_file(dir: &Path) -> PathBuf {

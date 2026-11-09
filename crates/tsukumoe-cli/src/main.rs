@@ -19,7 +19,10 @@ use tsukumoe_format::{Project, read_model};
 use tsukumoe_gpu::{Headless, Image, Texture};
 
 const USAGE: &str = "usage:
-  tsukumoe convert <in> <out>      (out: a directory, .zip / .tsukumoe, or .tmod)
+  tsukumoe convert <in> <out> [--atlas-size N] [--atlas-padding N]
+      (out: a directory, .zip / .tsukumoe, or .tmod; a .tmod packs the textures into
+      atlas pages of at most N pixels, 4096 by default, 0 for none, with a padding
+      of N pixels, 2 by default)
   tsukumoe generate <parts.json> <out>
   tsukumoe validate <project>
   tsukumoe inspect <file.tmod>
@@ -141,9 +144,34 @@ fn write(path: &str, bytes: &[u8]) -> Result<(), Fail> {
 }
 
 fn convert(args: &[String]) -> Result<u8, Fail> {
-    let args = Args::parse(args, &[])?;
+    let args = Args::parse(args, &["--atlas-size", "--atlas-padding"])?;
     let [input, output] = args.positional()?;
-    save(&load(input)?, output)?;
+    let mut atlas = tsukumoe_format::AtlasOptions::default();
+    if let Some(v) = args.last("--atlas-size") {
+        atlas.max_size = number(v, "--atlas-size")?;
+    }
+    if let Some(v) = args.last("--atlas-padding") {
+        atlas.padding = number(v, "--atlas-padding")?;
+    }
+    if atlas.max_size != 0 && !(16..=16384).contains(&atlas.max_size) || atlas.padding > 64 {
+        return usage("--atlas-size is 0 or 16 to 16384, --atlas-padding 0 to 64");
+    }
+    let atlas = (atlas.max_size != 0).then_some(atlas);
+    let project = load(input)?;
+    if output.ends_with(".tmod") {
+        let (bytes, report) = tsukumoe_format::runtime_bytes_with(&project, atlas.as_ref())?;
+        write(output, &bytes)?;
+        println!(
+            "{}",
+            json!({
+                "textures_before": report.before,
+                "textures_after": report.after,
+                "atlas_pages": report.pages.iter().map(|(w, h)| format!("{w}x{h}")).collect::<Vec<_>>(),
+            })
+        );
+    } else {
+        save(&project, output)?;
+    }
     Ok(0)
 }
 

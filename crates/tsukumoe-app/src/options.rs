@@ -28,6 +28,8 @@ pub const HISTORY_LIMIT: (u32, u32) = (10, 1000);
 pub const WELD_RATIO: (f32, f32) = (0.001, 0.1);
 pub const MIRROR_TOLERANCE: (f32, f32) = (0.001, 0.1);
 pub const RADIUS: (f32, f32) = (4.0, 16.0);
+pub const ATLAS_SIZE: (u32, u32) = (256, 8192);
+pub const ATLAS_PADDING: (u32, u32) = (0, 16);
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
@@ -45,6 +47,12 @@ pub struct Options {
     /// Screen points within which a vertex, or an edge, is grabbed.
     pub vertex_radius: f32,
     pub edge_radius: f32,
+    /// A runtime export packs the textures into pages (`tsukumoe_format::atlas`).
+    pub atlas: bool,
+    /// The most a page is wide or tall, in pixels.
+    pub atlas_size: u32,
+    /// Pixels kept around each image in a page.
+    pub atlas_padding: u32,
 }
 
 impl Default for Options {
@@ -58,6 +66,9 @@ impl Default for Options {
             background: Background::Theme,
             vertex_radius: 8.0,
             edge_radius: 5.0,
+            atlas: true,
+            atlas_size: 4096,
+            atlas_padding: 2,
         }
     }
 }
@@ -86,7 +97,17 @@ impl Options {
             clamp_f(self.mirror_tolerance, MIRROR_TOLERANCE, d.mirror_tolerance);
         self.vertex_radius = clamp_f(self.vertex_radius, RADIUS, d.vertex_radius);
         self.edge_radius = clamp_f(self.edge_radius, RADIUS, d.edge_radius);
+        self.atlas_size = self.atlas_size.clamp(ATLAS_SIZE.0, ATLAS_SIZE.1);
+        self.atlas_padding = self.atlas_padding.clamp(ATLAS_PADDING.0, ATLAS_PADDING.1);
         self
+    }
+
+    /// The atlas settings a runtime export takes, `None` when it is off.
+    pub fn atlas_options(&self) -> Option<tsukumoe_format::AtlasOptions> {
+        self.atlas.then_some(tsukumoe_format::AtlasOptions {
+            max_size: self.atlas_size,
+            padding: self.atlas_padding,
+        })
     }
 
     pub fn to_json(&self) -> String {
@@ -170,6 +191,21 @@ mod tests {
             Options::from_json(r#"{"history_limit":0}"#).history_limit,
             0
         );
+    }
+
+    #[test]
+    fn the_atlas_options_are_clamped_and_off_gives_none() {
+        let wild = Options::from_json(r#"{"atlas_size":99999,"atlas_padding":500}"#);
+        assert_eq!((wild.atlas_size, wild.atlas_padding), (8192, 16));
+        let small = Options::from_json(r#"{"atlas_size":1}"#);
+        assert_eq!(small.atlas_size, 256);
+        let on = Options::default().atlas_options().unwrap();
+        assert_eq!((on.max_size, on.padding), (4096, 2));
+        let off = Options {
+            atlas: false,
+            ..Options::default()
+        };
+        assert!(off.atlas_options().is_none());
     }
 
     #[test]

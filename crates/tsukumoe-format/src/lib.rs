@@ -5,6 +5,7 @@
 //! `manifest.json` and the files of a project. The rules are in
 //! `docs/specifications/file-formats.md`.
 
+mod atlas;
 mod container;
 pub mod dto;
 mod error;
@@ -12,8 +13,9 @@ mod manifest;
 mod model_io;
 mod runtime_io;
 
+pub use atlas::{AtlasOptions, AtlasReport};
 pub use container::{Limits, MANIFEST_PATH, Project, to_json};
 pub use error::Error;
 pub use manifest::{FORMAT_NAME, Feature, KNOWN_FEATURES, MAJOR, MINOR, Manifest, Version};
 pub use model_io::{read_model, write_model};
-pub use runtime_io::runtime_bytes;
+pub use runtime_io::{runtime_bytes, runtime_bytes_with};
