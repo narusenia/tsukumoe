@@ -428,9 +428,7 @@ fn actions_row(
                     format!("motion_curve_add: {f}"),
                 ));
             }
-            if button(ui, &t("timeline-key-here"), Variant::Secondary)
-                .on_hover_text(t("timeline-key-here-hint"))
-                .clicked()
+            if button(ui, &t("timeline-key-here"), Variant::Secondary).clicked()
                 && let Some((f, p)) = param
             {
                 let value = view.param(f, p);
@@ -441,9 +439,6 @@ fn actions_row(
                 }
             }
         });
-        if param.is_none() {
-            hint(ui, t("timeline-focus-hint"));
-        }
         let selected = view.timeline.curve.zip(view.timeline.key);
         ui.add_enabled_ui(selected.is_some(), |ui| {
             if button(ui, &t("timeline-key-delete"), Variant::Secondary).clicked()

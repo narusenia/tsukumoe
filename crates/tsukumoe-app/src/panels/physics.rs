@@ -370,28 +370,27 @@ fn pendulum(
         .iter()
         .filter(|(n, _, _)| model.parameters().find(n).is_some())
         .collect();
-    ui.horizontal_wrapped(|ui| {
-        ui.label(t("physics-head-inputs"));
-        for &&(name, channel, weight) in &present {
-            let mut on = inputs.iter().any(|i| i.parameter == name);
-            if checkbox(ui, &mut on, name).changed() {
-                if on {
-                    inputs.push(PhysicsInputDef {
-                        parameter: name.to_owned(),
-                        channel,
-                        weight,
-                        reflect: false,
-                    });
-                } else {
-                    inputs.retain(|i| i.parameter != name);
+    if !present.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(t("physics-head-inputs"));
+            for &&(name, channel, weight) in &present {
+                let mut on = inputs.iter().any(|i| i.parameter == name);
+                if checkbox(ui, &mut on, name).changed() {
+                    if on {
+                        inputs.push(PhysicsInputDef {
+                            parameter: name.to_owned(),
+                            channel,
+                            weight,
+                            reflect: false,
+                        });
+                    } else {
+                        inputs.retain(|i| i.parameter != name);
+                    }
+                    changed = true;
                 }
-                changed = true;
             }
-        }
-        if present.is_empty() {
-            hint(ui, t("physics-no-head-inputs"));
-        }
-    });
+        });
+    }
     changed |= io_tables(ui, model, &mut inputs, &mut outputs, particles.len(), focus);
     egui::CollapsingHeader::new(t("physics-details"))
         .id_salt("physics-details")
@@ -587,10 +586,7 @@ fn test_row(ui: &mut Ui, model: &Model, view: &mut ViewState, kind: Kind, name: 
             }
         } else {
             ui.add_enabled_ui(!names.is_empty(), |ui| {
-                if button(ui, &t("physics-test"), Variant::Secondary)
-                    .on_hover_text(t("physics-test-hint"))
-                    .clicked()
-                {
+                if button(ui, &t("physics-test"), Variant::Secondary).clicked() {
                     let base = names
                         .iter()
                         .filter_map(|n| {
@@ -605,9 +601,6 @@ fn test_row(ui: &mut Ui, model: &Model, view: &mut ViewState, kind: Kind, name: 
                     });
                 }
             });
-            if names.is_empty() {
-                hint(ui, t("physics-test-no-input"));
-            }
         }
     });
     if let Some(test) = view.physics.testing.as_mut() {

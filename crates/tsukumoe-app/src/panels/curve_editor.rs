@@ -9,7 +9,7 @@
 use egui::{Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use tsukumoe_core::model::Model;
 use tsukumoe_core::playback::{Curve, CurveTarget, Segment, SegmentKind};
-use tsukumoe_ui::{Theme, Variant, button, hint, radio, tr};
+use tsukumoe_ui::{Theme, Variant, button, radio, tr};
 
 use super::timeline::{LABEL_WIDTH, Out, set_curve, target_name};
 use crate::view::ViewState;
@@ -173,9 +173,6 @@ pub fn show(
                 view.timeline.work = Some((ci, next));
             }
         });
-        if seg.is_none() {
-            hint(ui, t("curve-no-segment"));
-        }
     });
 
     let size = vec2(ui.available_width(), ui.available_height().max(60.0));

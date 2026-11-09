@@ -271,9 +271,6 @@ fn items(ui: &mut Ui, model: &Model, name: &str, expression: &Expression, outs: 
     let ctx = ui.ctx().clone();
     let t = |k: &str| tr(&ctx, k);
     section_header(ui, &t("expressions-items"));
-    if expression.parameters.is_empty() {
-        hint(ui, t("expressions-no-items"));
-    }
     for (i, item) in expression.parameters.iter().enumerate() {
         let Some(param) = model.parameters().name(item.parameter) else {
             continue;
@@ -372,10 +369,7 @@ fn actions(
                 ));
             }
         });
-        if button(ui, &t("expressions-capture"), Variant::Secondary)
-            .on_hover_text(t("expressions-capture-hint"))
-            .clicked()
-        {
+        if button(ui, &t("expressions-capture"), Variant::Secondary).clicked() {
             let commands = capture(model, view, name);
             if !commands.is_empty() {
                 outs.push(Out::Command(
