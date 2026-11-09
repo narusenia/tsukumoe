@@ -544,8 +544,7 @@ mod tests {
         }
         let mut h = harness(p);
         h.run();
-        h.get_by_label("Swap the two axes (changes the grid order)")
-            .click();
+        h.get_by_label("Swap the two axes").click();
         h.run();
         let Some(Out::Op((Command::SetAxisOrder { parameters, .. }, _))) = h.state().outs.last()
         else {

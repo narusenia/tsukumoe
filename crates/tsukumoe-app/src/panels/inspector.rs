@@ -1023,7 +1023,7 @@ mod tests {
         // The warp shows its size, read only.
         h.state_mut().1 = Selection::Warp("W".into());
         h.run();
-        h.get_by_label("Grid (rows x columns): 1 x 1");
+        h.get_by_label("Grid rows x columns: 1 x 1");
     }
 
     #[test]

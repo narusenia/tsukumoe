@@ -1166,17 +1166,17 @@ mod tests {
         h.get_by_label("a1").hover();
         h.run();
         // The pointer moves onto the button: it must stay there to be clicked.
-        h.get_by_label("Solo (press again to end)").click();
+        h.get_by_label("Solo").click();
         h.run();
         assert_eq!(h.state().1.solo, Some(Selection::Mesh("a1".into())));
         // The soloed row keeps its button without the pointer on the row.
-        h.get_by_label("Solo (press again to end)").click();
+        h.get_by_label("Solo").click();
         h.run();
         assert_eq!(h.state().1.solo, None);
         // A folder can be soloed too.
         h.get_by_label("Arm").hover();
         h.run();
-        h.get_by_label("Solo (press again to end)").click();
+        h.get_by_label("Solo").click();
         h.run();
         assert_eq!(h.state().1.solo, Some(Selection::Part("Arm".into())));
     }
